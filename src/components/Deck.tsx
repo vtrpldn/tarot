@@ -9,7 +9,7 @@ export async function Deck({
   type: TarotDecks;
   cards: string[];
 }) {
-  const shuffledCards = await getShuffledCards({ cards, pseudoRandom: true });
+  const shuffledCards = await getShuffledCards({ cards });
 
   return (
     <div className="space-y-4">
