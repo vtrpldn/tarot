@@ -18,19 +18,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <nav>
-          <ul>
-            <li>
-              <Link href="/">All cards</Link>
-            </li>
-            <li>
-              <Link href="/major">Major</Link>
-            </li>
-            <li>
-              <Link href="/minor">Minor</Link>
-            </li>
-          </ul>
-        </nav>
         <div>{children}</div>
       </body>
     </html>

@@ -20,7 +20,7 @@ export function Deck({ type, cards }: { type: TarotDecks; cards: string[] }) {
   return (
     <DndContext onDragEnd={handleDragEnd}>
       <div className="relative">
-        {cards.map((card, index) => {
+        {cards.map((card) => {
           const cardId = `checkbox-${type}-${card}`;
 
           return (
