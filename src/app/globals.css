@@ -10,7 +10,6 @@
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(135deg, #000000, #120438, #000036, #000000);
   background-size: 200% 200%;
   animation: GradientAnimation 3s ease infinite;
 }
@@ -25,11 +24,4 @@ body {
   100% {
     background-position: 0% 50%;
   }
-}
-
-.card [type="checkbox"] + label .back {
-  opacity: 1;
-}
-.card [type="checkbox"]:checked + label .back {
-  opacity: 0;
 }

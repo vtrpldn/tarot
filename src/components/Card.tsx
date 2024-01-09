@@ -1,22 +1,67 @@
-import { TarotDecks } from "@/types";
-import Image from "next/image";
+"use client";
 
-export function Card({ type, card }: { type: TarotDecks; card: string }) {
-  const checkboxId = `checkbox-${type}-${card}`;
+import { TarotDecks } from "@/types";
+import { useDraggable } from "@dnd-kit/core";
+import Image from "next/image";
+import { useEffect, useState } from "react";
+
+export function Card({
+  card,
+  activeCardId,
+  cardId,
+  delta: deltaProp,
+}: {
+  card: string;
+  activeCardId: string;
+  cardId: string;
+  delta: Record<string, number>;
+}) {
+  const [visible, setVisible] = useState<boolean>(false);
+  const [coordinates, setCoordinates] = useState(deltaProp);
+  const { attributes, listeners, setNodeRef, transform } = useDraggable({
+    id: cardId,
+  });
+  const style = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+      }
+    : undefined;
+
+  // update card position
+  useEffect(() => {
+    if (activeCardId === cardId) {
+      setCoordinates(({ x, y }) => {
+        return {
+          x: x + deltaProp.x,
+          y: y + deltaProp.y,
+        };
+      });
+    }
+  }, [setCoordinates, cardId, deltaProp, activeCardId]);
+
+  function handleDoubleClick() {
+    setVisible((visible) => !visible);
+  }
 
   return (
     <div
-      key={card}
-      className="card flex flex-col items-center justify-center relative"
+      ref={setNodeRef}
+      style={{
+        ...style,
+        top: coordinates.y,
+        left: coordinates.x,
+        width: 400,
+        height: 700,
+      }}
+      {...listeners}
+      {...attributes}
+      className="absolute card shadow inline-flex flex-col items-center justify-center overflow-hidden rounded-2xl"
+      onDoubleClick={handleDoubleClick}
     >
-      <input type="checkbox" id={checkboxId} className="hidden" />
-      <label
-        htmlFor={checkboxId}
-        className="relative cursor-pointer overflow-hidden rounded-2xl"
-      >
-        <div className="back absolute top-0 left-0 w-full h-full bg-black" />
-        <Image src={`/img/${card}`} alt={card} width={400} height={688} />
-      </label>
+      {visible || (
+        <div className="absolute left-0 top-0 w-full h-full bg-black" />
+      )}
+      <Image src={`/img/${card}`} alt={card} width={400} height={700} />
     </div>
   );
 }
