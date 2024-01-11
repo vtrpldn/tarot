@@ -134,10 +134,10 @@ export function Card({
             }}
           >
             <Image
-              src={`/img/back.jpg`}
+              src={`/img/back.png`}
               alt={card}
-              width={400}
-              height={700}
+              width={520}
+              height={900}
               className="rounded-lg"
             />
           </motion.div>
@@ -153,13 +153,7 @@ export function Card({
               position: "absolute",
             }}
           >
-            <Image
-              src={`/img/${card}`}
-              alt={card}
-              width={400}
-              height={700}
-              className="rounded-lg"
-            />
+            <Image src={`/img/${card}`} alt={card} width={520} height={900} />
           </motion.div>
         </div>
       </motion.div>
