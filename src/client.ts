@@ -18,6 +18,7 @@ export function getShuffledCards({ cards }: { cards: string[] }) {
       },
       id: 1,
     }),
+    cache: "no-store",
   })
     .then((response) => {
       return response.json();
