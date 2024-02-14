@@ -4,11 +4,11 @@ import { useDraggable } from "@dnd-kit/core";
 import { motion, useSpring } from "framer-motion";
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
+import { spring, useCardEffects } from "./useCardEffects";
 
-const spring = {
-  type: "spring",
-  stiffness: 100,
-  damping: 40,
+const CARD_SIZE = {
+  width: 260,
+  height: 450,
 };
 
 export function Card({
@@ -22,11 +22,6 @@ export function Card({
   cardId: string;
   delta: Record<string, number>;
 }) {
-  const [isFlipped, setIsFlipped] = useState<boolean>(false);
-  const [rotateXaxis, setRotateXaxis] = useState(0);
-  const [rotateYaxis, setRotateYaxis] = useState(0);
-  const ref = useRef<HTMLDivElement | undefined>();
-
   const [coordinates, setCoordinates] = useState(deltaProp);
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: cardId,
@@ -51,37 +46,15 @@ export function Card({
     [setCoordinates, cardId, deltaProp, activeCardId]
   );
 
-  function handleDoubleClick() {
-    setIsFlipped((visible) => !visible);
-  }
-
-  const handleMouseMove = (event: any) => {
-    const element = ref?.current;
-    const elementRect = element!.getBoundingClientRect();
-    const elementWidth = elementRect.width;
-    const elementHeight = elementRect.height;
-    const elementCenterX = elementWidth / 2;
-    const elementCenterY = elementHeight / 2;
-    const mouseX = event.clientY - elementRect.y - elementCenterY;
-    const mouseY = event.clientX - elementRect.x - elementCenterX;
-    const degreeX = (mouseX / elementWidth) * 20; //The number is the rotation factor
-    const degreeY = (mouseY / elementHeight) * 20; //The number is the rotation factor
-    setRotateXaxis(degreeX);
-    setRotateYaxis(degreeY);
-  };
-
-  const handleMouseEnd = () => {
-    setRotateXaxis(0);
-    setRotateYaxis(0);
-  };
-
-  const dx = useSpring(0, spring);
-  const dy = useSpring(0, spring);
-
-  useEffect(() => {
-    dx.set(-rotateXaxis);
-    dy.set(rotateYaxis);
-  }, [dx, dy, rotateXaxis, rotateYaxis]);
+  const {
+    ref,
+    isFlipped,
+    hoverDeltaX,
+    hoverDeltaY,
+    handleDoubleClick,
+    handleMouseMove,
+    handleMouseEnd,
+  } = useCardEffects();
 
   return (
     <motion.div
@@ -90,8 +63,8 @@ export function Card({
         ...style,
         top: coordinates.y,
         left: coordinates.x,
-        width: 400,
-        height: 700,
+        width: CARD_SIZE.width,
+        height: CARD_SIZE.height,
         perspective: "1600px",
         transformStyle: "preserve-3d",
       }}
@@ -103,15 +76,15 @@ export function Card({
       <motion.div
         // fix me
         ref={ref as any}
-        whileHover={{ scale: 1.1 }} //Change the scale of zooming in when hovering
+        whileHover={{ scale: 1.05 }} //Change the scale of zooming in when hovering
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseEnd}
         transition={spring}
         style={{
           width: "100%",
           height: "100%",
-          rotateX: dx,
-          rotateY: dy,
+          rotateX: hoverDeltaX,
+          rotateY: hoverDeltaY,
         }}
       >
         <div
@@ -136,8 +109,8 @@ export function Card({
             <Image
               src={`/img/back.png`}
               alt={card}
-              width={520}
-              height={900}
+              width={CARD_SIZE.width}
+              height={CARD_SIZE.height}
               className="rounded-lg"
             />
           </motion.div>
@@ -153,7 +126,12 @@ export function Card({
               position: "absolute",
             }}
           >
-            <Image src={`/img/${card}`} alt={card} width={520} height={900} />
+            <Image
+              src={`/img/${card}`}
+              alt={card}
+              width={CARD_SIZE.width}
+              height={CARD_SIZE.height}
+            />
           </motion.div>
         </div>
       </motion.div>
