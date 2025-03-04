@@ -84,9 +84,8 @@ export function Card({
       onDoubleClick={handleDoubleClick}
     >
       <motion.div
-        // fix me
         ref={ref as any}
-        whileHover={{ scale: 1.05 }} //Change the scale of zooming in when hovering
+        whileHover={{ scale: 1.05 }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseEnd}
         transition={spring}
@@ -115,15 +114,18 @@ export function Card({
               backfaceVisibility: "hidden",
               position: "absolute",
             }}
+            className="bg-[#f5f5f5] rounded-lg p-2 flex items-center justify-center"
           >
-            <Image
-              src={`/img/back.png`}
-              alt="Card Back"
-              width={CARD_SIZE.width}
-              height={CARD_SIZE.height}
-              className="rounded-lg"
-              priority={isTopCard} // Load immediately if it's the top card
-            />
+            <div className="relative w-full h-full">
+              <Image
+                src={`/img/back.png`}
+                alt="Card Back"
+                fill
+                style={{ objectFit: "contain" }}
+                className="rounded-lg"
+                priority={true}
+              />
+            </div>
           </motion.div>
           <motion.div
             initial={{ rotateY: 180 }}
@@ -136,16 +138,19 @@ export function Card({
               backfaceVisibility: "hidden",
               position: "absolute",
             }}
+            className="bg-[#f5f5f5] rounded-lg p-2 flex items-center justify-center shadow-md"
           >
             {shouldLoadImage && (
-              <Image
-                src={`/img/${card}`}
-                alt={card}
-                width={CARD_SIZE.width}
-                height={CARD_SIZE.height}
-                loading={isTopCard ? "eager" : "lazy"}
-                className="rounded-lg"
-              />
+              <div className="relative w-full h-full">
+                <Image
+                  src={`/img/${card}`}
+                  alt={card}
+                  fill
+                  style={{ objectFit: "contain" }}
+                  loading={isTopCard ? "eager" : "lazy"}
+                  className="rounded-lg"
+                />
+              </div>
             )}
           </motion.div>
         </div>
