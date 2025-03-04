@@ -10,11 +10,43 @@ export function PannableArea({
   className?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const [isPanning, setIsPanning] = useState(false);
+
   const [startPoint, setStartPoint] = useState({ x: 0, y: 0 });
   const [scrollPosition, setScrollPosition] = useState({ x: 0, y: 0 });
   const [prevPosition, setPrevPosition] = useState({ x: 0, y: 0 });
+  const [bounds, setBounds] = useState({ minX: 0, maxX: 0, minY: 0, maxY: 0 });
+
+  // Calculate bounds based on container and wrapper dimensions
+  const calculateBounds = useCallback(() => {
+    if (!containerRef.current || !wrapperRef.current) return;
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const wrapperRect = wrapperRef.current.getBoundingClientRect();
+
+    // Calculate maximum bounds
+    // minX/minY: Rightmost/bottommost position (negative value)
+    // maxX/maxY: Leftmost/topmost position (should be 0 or positive)
+    const minX = wrapperRect.width - containerRect.width;
+    const minY = wrapperRect.height - containerRect.height;
+
+    setBounds({
+      minX: minX < 0 ? minX : 0,
+      maxX: 0,
+      minY: minY < 0 ? minY : 0,
+      maxY: 0,
+    });
+  }, []);
+
+  // Calculate bounds on initial render and on window resize
+  useEffect(() => {
+    calculateBounds();
+
+    window.addEventListener("resize", calculateBounds);
+    return () => window.removeEventListener("resize", calculateBounds);
+  }, [calculateBounds]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -41,35 +73,32 @@ export function PannableArea({
   }, [scrollPosition]);
 
   const handleMouseMove = useCallback(
-    (e: MouseEvent) => {
+    (e: React.MouseEvent) => {
       if (!isPanning) return;
 
-      const newX = e.pageX - startPoint.x;
-      const newY = e.pageY - startPoint.y;
+      // Calculate the new position
+      let newX = e.pageX - startPoint.x;
+      let newY = e.pageY - startPoint.y;
+
+      // Apply bounds constraints
+      newX = Math.max(bounds.minX, Math.min(bounds.maxX, newX));
+      newY = Math.max(bounds.minY, Math.min(bounds.maxY, newY));
 
       setScrollPosition({ x: newX, y: newY });
     },
-    [isPanning, startPoint]
+    [isPanning, startPoint, bounds]
   );
-
-  useEffect(() => {
-    if (isPanning) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    }
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isPanning, handleMouseMove, handleMouseUp]);
 
   return (
     <div
+      ref={wrapperRef}
       className="overflow-hidden w-full h-full relative cursor-grab active:cursor-grabbing"
       style={{
         touchAction: "none",
       }}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
     >
       <div
         ref={containerRef}
