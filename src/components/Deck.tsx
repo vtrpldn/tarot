@@ -20,7 +20,7 @@ export function Deck({ type, cards }: { type: TarotDecks; cards: string[] }) {
   return (
     <DndContext onDragEnd={handleDragEnd}>
       <div className="relative">
-        {cards.map((card) => {
+        {cards.map((card, index) => {
           const cardId = `checkbox-${type}-${card}`;
 
           return (
@@ -30,6 +30,7 @@ export function Deck({ type, cards }: { type: TarotDecks; cards: string[] }) {
               cardId={cardId}
               activeCardId={activeCardId}
               delta={delta}
+              isTopCard={index === cards.length - 1}
             />
           );
         })}

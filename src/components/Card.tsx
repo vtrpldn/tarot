@@ -16,13 +16,16 @@ export function Card({
   activeCardId,
   cardId,
   delta: deltaProp,
+  isTopCard = false,
 }: {
   card: string;
   activeCardId: string;
   cardId: string;
   delta: Record<string, number>;
+  isTopCard?: boolean;
 }) {
   const [coordinates, setCoordinates] = useState(deltaProp);
+  const [shouldLoadImage, setShouldLoadImage] = useState(isTopCard);
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: cardId,
   });
@@ -55,6 +58,13 @@ export function Card({
     handleMouseMove,
     handleMouseEnd,
   } = useCardEffects();
+
+  // Load image when card is flipped
+  useEffect(() => {
+    if (isFlipped) {
+      setShouldLoadImage(true);
+    }
+  }, [isFlipped]);
 
   return (
     <motion.div
@@ -108,10 +118,11 @@ export function Card({
           >
             <Image
               src={`/img/back.png`}
-              alt={card}
+              alt="Card Back"
               width={CARD_SIZE.width}
               height={CARD_SIZE.height}
               className="rounded-lg"
+              priority={isTopCard} // Load immediately if it's the top card
             />
           </motion.div>
           <motion.div
@@ -126,12 +137,16 @@ export function Card({
               position: "absolute",
             }}
           >
-            <Image
-              src={`/img/${card}`}
-              alt={card}
-              width={CARD_SIZE.width}
-              height={CARD_SIZE.height}
-            />
+            {shouldLoadImage && (
+              <Image
+                src={`/img/${card}`}
+                alt={card}
+                width={CARD_SIZE.width}
+                height={CARD_SIZE.height}
+                loading={isTopCard ? "eager" : "lazy"}
+                className="rounded-lg"
+              />
+            )}
           </motion.div>
         </div>
       </motion.div>
