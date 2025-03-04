@@ -7,14 +7,14 @@ import { useState } from "react";
 
 export function Deck({ type, cards }: { type: TarotDecks; cards: string[] }) {
   const [activeCardId, setActiveCardId] = useState<string>("");
-  const [delta, setDelta] = useState<Record<string, number>>({
+  const [dragDelta, setDragDelta] = useState<Record<string, number>>({
     x: 0,
     y: 0,
   });
 
   function handleDragEnd({ delta, active }: DragEndEvent) {
     setActiveCardId(active.id as string);
-    setDelta(delta);
+    setDragDelta(delta);
   }
 
   return (
@@ -29,7 +29,7 @@ export function Deck({ type, cards }: { type: TarotDecks; cards: string[] }) {
               card={card}
               cardId={cardId}
               activeCardId={activeCardId}
-              delta={delta}
+              dragDelta={dragDelta}
               isTopCard={index === cards.length - 1}
             />
           );

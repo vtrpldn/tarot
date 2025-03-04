@@ -15,16 +15,16 @@ export function Card({
   card,
   activeCardId,
   cardId,
-  delta: deltaProp,
+  dragDelta,
   isTopCard = false,
 }: {
   card: string;
   activeCardId: string;
   cardId: string;
-  delta: Record<string, number>;
+  dragDelta: Record<string, number>;
   isTopCard?: boolean;
 }) {
-  const [coordinates, setCoordinates] = useState(deltaProp);
+  const [coordinates, setCoordinates] = useState(dragDelta);
   const [shouldLoadImage, setShouldLoadImage] = useState(isTopCard);
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: cardId,
@@ -40,13 +40,13 @@ export function Card({
       if (activeCardId === cardId) {
         setCoordinates(({ x, y }) => {
           return {
-            x: x + deltaProp.x,
-            y: y + deltaProp.y,
+            x: x + dragDelta.x,
+            y: y + dragDelta.y,
           };
         });
       }
     },
-    [setCoordinates, cardId, deltaProp, activeCardId]
+    [setCoordinates, cardId, dragDelta, activeCardId]
   );
 
   const {
