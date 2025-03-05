@@ -14,13 +14,12 @@ interface CardProps {
 
 export function Card({ card, isTopCard = false }: CardProps) {
   const [shouldLoadImage, setShouldLoadImage] = useState(isTopCard);
-
   const {
     ref,
     isFlipped,
+    handleDoubleClick,
     hoverDeltaX,
     hoverDeltaY,
-    handleDoubleClick,
     handleMouseMove,
     handleMouseEnd,
   } = useCardEffects();

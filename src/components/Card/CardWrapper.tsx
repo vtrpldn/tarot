@@ -8,7 +8,7 @@ interface CardWrapperProps {
   children: React.ReactNode;
   hoverDeltaX: MotionValue<number>;
   hoverDeltaY: MotionValue<number>;
-  onMouseMove: (event: React.MouseEvent) => void;
+  onMouseMove: (e: React.MouseEvent) => void;
   onMouseLeave: () => void;
 }
 

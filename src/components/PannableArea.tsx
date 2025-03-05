@@ -51,10 +51,10 @@ export function PannableArea({
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
-      const isCardElement = target.closest('[role="button"]') !== null;
+      const isDraggingCard = target.closest('[data-dragging="true"]') !== null;
 
-      // Don't initiate panning if clicking on a card
-      if (isCardElement) {
+      // Don't initiate panning if clicking on a dragging card
+      if (isDraggingCard) {
         return;
       }
 
