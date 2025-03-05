@@ -11,7 +11,7 @@ export const spring = {
  * Handles hover effect and card flip.
  */
 export const useCardEffects = () => {
-  const ref = useRef<HTMLDivElement | undefined>();
+  const ref = useRef<HTMLDivElement>(null);
 
   const [isFlipped, setIsFlipped] = useState<boolean>(false);
   const [rotateXaxis, setRotateXaxis] = useState(0);
@@ -23,7 +23,9 @@ export const useCardEffects = () => {
 
   const handleMouseMove = (event: any) => {
     const element = ref?.current;
-    const elementRect = element!.getBoundingClientRect();
+    if (!element) return;
+
+    const elementRect = element.getBoundingClientRect();
     const elementWidth = elementRect.width;
     const elementHeight = elementRect.height;
     const elementCenterX = elementWidth / 2;
