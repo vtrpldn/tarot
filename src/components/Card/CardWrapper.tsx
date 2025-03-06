@@ -3,6 +3,7 @@
 import { motion, MotionValue } from "framer-motion";
 import { forwardRef } from "react";
 import { spring } from "./useCardEffects";
+import { cardInnerStyle } from "./style";
 
 interface CardWrapperProps {
   children: React.ReactNode;
@@ -39,7 +40,7 @@ export const CardWrapper = forwardRef<HTMLDivElement, CardWrapperProps>(
           rotateY: hoverDeltaY,
         }}
       >
-        {children}
+        <div style={cardInnerStyle}>{children}</div>
       </motion.div>
     );
   }

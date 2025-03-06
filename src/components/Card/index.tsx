@@ -5,7 +5,6 @@ import { useCardEffects } from "./useCardEffects";
 import { CardContainer } from "./CardContainer";
 import { CardFace } from "./CardFace";
 import { CardWrapper } from "./CardWrapper";
-import { cardInnerStyle } from "./style";
 
 interface CardProps {
   card: string;
@@ -14,6 +13,7 @@ interface CardProps {
 
 export function Card({ card, isTopCard = false }: CardProps) {
   const [shouldLoadImage, setShouldLoadImage] = useState(isTopCard);
+
   const {
     ref,
     isFlipped,
@@ -40,23 +40,21 @@ export function Card({ card, isTopCard = false }: CardProps) {
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseEnd}
       >
-        <div style={cardInnerStyle}>
-          {/* Back face of card */}
-          <CardFace
-            isBackFace={true}
-            isFlipped={isFlipped}
-            imageSrc="back.png"
-            shouldLoadImage={true}
-          />
+        {/* Back face of card */}
+        <CardFace
+          isBackFace={true}
+          isFlipped={isFlipped}
+          imageSrc="back.png"
+          shouldLoadImage={true}
+        />
 
-          {/* Front face of card */}
-          <CardFace
-            isBackFace={false}
-            isFlipped={isFlipped}
-            imageSrc={card}
-            shouldLoadImage={shouldLoadImage}
-          />
-        </div>
+        {/* Front face of card */}
+        <CardFace
+          isBackFace={false}
+          isFlipped={isFlipped}
+          imageSrc={card}
+          shouldLoadImage={shouldLoadImage}
+        />
       </CardWrapper>
     </CardContainer>
   );

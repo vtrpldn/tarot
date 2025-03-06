@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import Image from "next/image";
 import { spring } from "./useCardEffects";
 import { cardFaceStyle } from "./style";
+import { memo } from "react";
 
 interface CardFaceProps {
   isBackFace: boolean;
@@ -12,7 +13,7 @@ interface CardFaceProps {
   shouldLoadImage: boolean;
 }
 
-export function CardFace({
+export const CardFace = memo(function CardFace({
   isBackFace,
   isFlipped,
   imageSrc,
@@ -50,4 +51,4 @@ export function CardFace({
       )}
     </motion.div>
   );
-}
+});
