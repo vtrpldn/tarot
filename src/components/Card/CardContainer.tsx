@@ -21,13 +21,7 @@ interface CardContainerProps {
  * - Subtle random rotation for visual interest
  */
 export function CardContainer({ children, onDoubleClick }: CardContainerProps) {
-  const {
-    style: dragStyle,
-    handleDragStart,
-    handleDragMove,
-    handleDragEnd,
-  } = useCardDrag();
-
+  const { style: dragStyle, handleDragStart } = useCardDrag();
   const randomRotation = useMemo(() => (Math.random() - 0.5) * 4, []); // Random between -2 and 2 degrees
 
   return (
@@ -40,9 +34,6 @@ export function CardContainer({ children, onDoubleClick }: CardContainerProps) {
       className="absolute card inline-flex flex-col items-center justify-center rounded-2xl"
       onDoubleClick={onDoubleClick}
       onMouseDown={handleDragStart}
-      onMouseMove={handleDragMove}
-      onMouseUp={handleDragEnd}
-      onMouseLeave={handleDragEnd}
       transition={{
         transform: spring,
       }}

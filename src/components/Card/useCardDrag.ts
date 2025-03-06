@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 interface Position {
   x: number;
@@ -36,7 +36,7 @@ export function useCardDrag() {
   }, []);
 
   const handleDragMove = useCallback(
-    (e: React.MouseEvent) => {
+    (e: MouseEvent) => {
       if (!dragState.isDragging) return;
       e.stopPropagation();
 
@@ -52,14 +52,30 @@ export function useCardDrag() {
     [dragState.isDragging]
   );
 
-  const handleDragEnd = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDragEnd = useCallback(() => {
     setDragState((prev) => ({
       ...prev,
       isDragging: false,
       finalPosition: prev.currentOffset,
     }));
   }, []);
+
+  /**
+   * We need these events to be on the document to ensure card
+   * events are tracked even when the mouse is not over the card,
+   * like when the card is dragged really fast!
+   */
+  useEffect(() => {
+    if (dragState.isDragging) {
+      document.addEventListener("mousemove", handleDragMove);
+      document.addEventListener("mouseup", handleDragEnd);
+    }
+
+    return () => {
+      document.removeEventListener("mousemove", handleDragMove);
+      document.removeEventListener("mouseup", handleDragEnd);
+    };
+  }, [dragState.isDragging, handleDragMove, handleDragEnd]);
 
   const style = {
     position: "absolute" as const,
@@ -74,7 +90,5 @@ export function useCardDrag() {
     style,
     isDragging: dragState.isDragging,
     handleDragStart,
-    handleDragMove,
-    handleDragEnd,
   };
 }
