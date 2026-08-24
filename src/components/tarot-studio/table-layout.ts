@@ -7,7 +7,6 @@ export type SceneTableLayout = {
   cardWidth: number;
   cardHeight: number;
   deckPosition: [number, number];
-  drawPoint: TablePoint;
   toPoint: (x: number, y: number) => TablePoint;
   toWorld: (point: TablePoint) => [number, number];
 };
@@ -55,7 +54,6 @@ export function createSceneTableLayout({
     cardWidth,
     cardHeight,
     deckPosition: [deckX, deckY],
-    drawPoint: isMobile ? [0.16, 0.02] : [-0.22, 0.02],
     toWorld: ([x, y]) => [centerX + x * halfWidth, centerY + y * halfHeight],
     toPoint: (x, y) => [
       clamp((x - centerX) / halfWidth, -1, 1),

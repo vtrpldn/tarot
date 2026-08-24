@@ -342,8 +342,8 @@ export function CardMesh({
     );
 
     if (!cancelled) {
-      if (card.zone === "deck") {
-        onDraw(card.id, drag.moved ? nextPoint : layout.drawPoint);
+      if (card.zone === "deck" && drag.moved) {
+        onDraw(card.id, nextPoint);
       } else if (drag.moved) {
         onMove(card.id, nextPoint);
       }
