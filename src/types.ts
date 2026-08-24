@@ -36,6 +36,8 @@ export type TableZone = "deck" | "table";
 
 export type TablePoint = [number, number];
 
+export type CardLayerDirection = "forward" | "backward";
+
 export type TableCard = {
   id: string;
   cardId: string;

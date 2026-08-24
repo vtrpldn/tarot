@@ -19,7 +19,12 @@ import {
   Texture,
   Vector3,
 } from "three";
-import type { CardDefinition, CardSetDefinition, TableCard, TablePoint } from "@/types";
+import type {
+  CardDefinition,
+  CardSetDefinition,
+  TableCard,
+  TablePoint,
+} from "@/types";
 import type { SceneTableLayout } from "./table-layout";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
@@ -60,6 +65,7 @@ type CardMeshProps = {
   onMove: (cardId: string, position: TablePoint) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
+  onHover: (cardId: string | null) => void;
 };
 
 function useTextureForCard(url: string): Texture {
@@ -194,6 +200,7 @@ export function CardMesh({
   onMove,
   onFlip,
   onRotate,
+  onHover,
 }: CardMeshProps) {
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
@@ -590,7 +597,9 @@ export function CardMesh({
         onPointerCancel={(event) => finishDrag(event, true)}
         onPointerOver={(event) => {
           if (event.nativeEvent.pointerType !== "touch") {
+            event.stopPropagation();
             setHovered(true);
+            onHover(card.zone === "table" ? card.id : null);
             const ready =
               card.zone === "table" && selected && isNearCardEdge(event);
             setRotationReady(ready);
@@ -600,6 +609,7 @@ export function CardMesh({
         }}
         onPointerOut={() => {
           setHovered(false);
+          onHover(null);
           if (!dragRef.current) {
             setRotationReady(false);
             canvas.style.cursor = "default";

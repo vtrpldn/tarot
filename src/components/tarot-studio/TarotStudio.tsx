@@ -4,10 +4,12 @@ import dynamic from "next/dynamic";
 import {
   type KeyboardEvent,
   type ReactNode,
+  type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   useState,
 } from "react";
 import { cardSets, getCardSet } from "@/data/card-sets";
@@ -20,7 +22,10 @@ import {
   tarotSessionReducer,
 } from "@/lib/tarot-session";
 import { popularTarotSpreads } from "@/lib/tarot-spreads";
-import type { TableLayout } from "@/types";
+import type { CardLayerDirection, TableLayout } from "@/types";
+
+const WHEEL_LAYER_COOLDOWN = 110;
+const WHEEL_LAYER_THRESHOLD = 36;
 
 const TarotScene = dynamic(
   () => import("./TarotScene").then((module) => module.TarotScene),
@@ -51,6 +56,12 @@ function Shortcut({ children }: { children: ReactNode }) {
 }
 
 export function TarotStudio() {
+  const hoveredCardIdRef = useRef<string | null>(null);
+  const layerWheelRef = useRef({
+    accumulatedDelta: 0,
+    direction: 0,
+    lastChangeAt: 0,
+  });
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
   const [viewZoom, setViewZoom] = useState(1);
   const activeCardSet = useMemo(
@@ -71,6 +82,12 @@ export function TarotStudio() {
   const selectedDefinition = selectedCard
     ? activeCardSet.cards.find((card) => card.id === selectedCard.cardId)
     : undefined;
+  const selectedTableIndex = selectedCard
+    ? tableCards.findIndex((card) => card.id === selectedCard.id)
+    : -1;
+  const canSendBackward = selectedTableIndex > 0;
+  const canBringForward =
+    selectedTableIndex >= 0 && selectedTableIndex < tableCards.length - 1;
   const deckCount = getRemainingDeckCount(session);
 
   const drawCard = useCallback(() => {
@@ -107,11 +124,62 @@ export function TarotStudio() {
     }
   }, [selectedCard]);
 
+  const reorderSelected = useCallback(
+    (direction: CardLayerDirection) => {
+      if (selectedCard?.zone === "table") {
+        dispatch({ type: "reorder", cardId: selectedCard.id, direction });
+      }
+    },
+    [selectedCard]
+  );
+
   const adjustViewZoom = useCallback((delta: number) => {
     setViewZoom((current) =>
       Math.min(1.35, Math.max(0.65, Number((current + delta).toFixed(2))))
     );
   }, []);
+
+  const handleTableWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      const hoveredCardId = hoveredCardIdRef.current;
+
+      if (!hoveredCardId || event.ctrlKey || event.metaKey) {
+        return;
+      }
+
+      event.stopPropagation();
+      const wheel = layerWheelRef.current;
+      const deltaMultiplier =
+        event.deltaMode === 0 ? 1 : event.deltaMode === 1 ? 16 : 120;
+      const normalizedDelta = event.deltaY * deltaMultiplier;
+      const direction = Math.sign(normalizedDelta);
+
+      if (direction !== 0 && direction !== wheel.direction) {
+        wheel.accumulatedDelta = 0;
+        wheel.direction = direction;
+      }
+
+      wheel.accumulatedDelta += normalizedDelta;
+
+      if (
+        Math.abs(wheel.accumulatedDelta) < WHEEL_LAYER_THRESHOLD ||
+        event.timeStamp - wheel.lastChangeAt < WHEEL_LAYER_COOLDOWN
+      ) {
+        return;
+      }
+
+      const layerDirection: CardLayerDirection =
+        wheel.accumulatedDelta < 0 ? "forward" : "backward";
+      wheel.accumulatedDelta = 0;
+      wheel.lastChangeAt = event.timeStamp;
+      dispatch({
+        type: "reorder",
+        cardId: hoveredCardId,
+        direction: layerDirection,
+      });
+    },
+    []
+  );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -164,6 +232,18 @@ export function TarotStudio() {
       return;
     }
 
+    if (key === "pageup" && selectedCard?.zone === "table") {
+      event.preventDefault();
+      reorderSelected("forward");
+      return;
+    }
+
+    if (key === "pagedown" && selectedCard?.zone === "table") {
+      event.preventDefault();
+      reorderSelected("backward");
+      return;
+    }
+
     if ((key === "enter" || key === " ") && !selectedCard) {
       event.preventDefault();
       drawCard();
@@ -201,9 +281,9 @@ export function TarotStudio() {
       ? "Face-down card"
       : "Nothing selected";
   const selectedHint = selectedCard?.faceUp
-    ? `${Math.abs(normalizedRotation - 180) < 0.8 ? "Reversed · " : normalizedRotation > 0.8 ? `Rotation ${Math.round(normalizedRotation)}° · ` : ""}${selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"}`
+    ? `${Math.abs(normalizedRotation - 180) < 0.8 ? "Reversed · " : normalizedRotation > 0.8 ? `Rotation ${Math.round(normalizedRotation)}° · ` : ""}${selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"} · Layer ${selectedTableIndex + 1} of ${tableCards.length}`
     : selectedCard
-      ? "Select Flip when you are ready to reveal it."
+      ? `Face down · Layer ${selectedTableIndex + 1} of ${tableCards.length}. Scroll over it to restack.`
       : "Draw a card or tap one on the table.";
 
   return (
@@ -213,8 +293,9 @@ export function TarotStudio() {
         className="tarot-canvas-shell"
         tabIndex={0}
         role="region"
-        aria-label="Interactive tarot table. Drag the top card to draw it, drag table cards to arrange them, and drag near a selected card edge to rotate it."
+        aria-label="Interactive tarot table. Drag the top card to draw it, drag table cards to arrange them, scroll over a card to change its layer, and drag near a selected card edge to rotate it."
         onKeyDown={handleKeyDown}
+        onWheel={handleTableWheel}
       >
         <TarotScene
           cardSet={activeCardSet}
@@ -232,6 +313,9 @@ export function TarotStudio() {
           onRotate={(cardId, degrees) =>
             dispatch({ type: "rotate", cardId, degrees })
           }
+          onHover={(cardId) => {
+            hoveredCardIdRef.current = cardId;
+          }}
         />
       </div>
 
@@ -319,6 +403,20 @@ export function TarotStudio() {
             </button>
             <button type="button" onClick={() => turnSelected(180)}>
               Reverse <Shortcut>R</Shortcut>
+            </button>
+            <button
+              type="button"
+              onClick={() => reorderSelected("backward")}
+              disabled={!canSendBackward}
+            >
+              Send back <Shortcut>Pg↓</Shortcut>
+            </button>
+            <button
+              type="button"
+              onClick={() => reorderSelected("forward")}
+              disabled={!canBringForward}
+            >
+              Bring forward <Shortcut>Pg↑</Shortcut>
             </button>
           </div>
         </aside>

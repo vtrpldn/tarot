@@ -1,4 +1,5 @@
 import type {
+  CardLayerDirection,
   CardSetDefinition,
   TableCard,
   TableLayout,
@@ -192,6 +193,11 @@ export type TarotSessionAction =
   | { type: "move"; cardId: string; position: TablePoint }
   | { type: "flip"; cardId: string }
   | { type: "rotate"; cardId: string; degrees?: number }
+  | {
+      type: "reorder";
+      cardId: string;
+      direction: CardLayerDirection;
+    }
   | { type: "nudge"; cardId: string; delta: TablePoint }
   | { type: "deal-spread"; spread: TarotSpread }
   | {
@@ -311,6 +317,38 @@ export function tarotSessionReducer(
 
   if (card.zone !== "table") {
     return session;
+  }
+
+  if (action.type === "reorder") {
+    const tableCards = getTableCards(session);
+    const currentIndex = tableCards.findIndex(
+      (candidate) => candidate.id === action.cardId
+    );
+    const indexDelta = action.direction === "forward" ? 1 : -1;
+    const nextIndex = Math.min(
+      tableCards.length - 1,
+      Math.max(0, currentIndex + indexDelta)
+    );
+
+    if (currentIndex < 0 || nextIndex === currentIndex) {
+      return session.selectedCardId === action.cardId
+        ? session
+        : { ...session, selectedCardId: action.cardId };
+    }
+
+    const reorderedCards = [...tableCards];
+    const [movedCard] = reorderedCards.splice(currentIndex, 1);
+    reorderedCards.splice(nextIndex, 0, movedCard);
+    const layerByCardId = new Map(
+      reorderedCards.map((candidate, index) => [candidate.id, index + 1])
+    );
+    const cards = session.cards.map((candidate) => {
+      const zIndex = layerByCardId.get(candidate.id);
+
+      return zIndex === undefined ? candidate : { ...candidate, zIndex };
+    });
+
+    return commit(session, cards, action.cardId);
   }
 
   if (action.type === "move") {

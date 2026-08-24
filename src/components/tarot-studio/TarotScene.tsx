@@ -31,6 +31,7 @@ type TarotSceneProps = {
   onMove: (cardId: string, position: TablePoint) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
+  onHover: (cardId: string | null) => void;
 };
 
 function AnimatedCameraZoom({
@@ -218,6 +219,7 @@ function TarotTable({
   onMove,
   onFlip,
   onRotate,
+  onHover,
 }: TarotSceneProps) {
   const size = useThree((state) => state.size);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
@@ -325,6 +327,7 @@ function TarotTable({
             onMove={onMove}
             onFlip={onFlip}
             onRotate={onRotate}
+            onHover={onHover}
           />
         );
       })}
