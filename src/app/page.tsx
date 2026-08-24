@@ -1,16 +1,7 @@
-import { getShuffledCards } from "@/client";
-import { Deck } from "@/components/Deck";
-import { PannableArea } from "@/components/PannableArea";
-import { allCards } from "@/consts";
+import { TarotStudio } from "@/components/tarot-studio/TarotStudio";
 
-export default async function Home() {
-  const shuffledCards = await getShuffledCards({ cards: allCards });
-
+export default function Home() {
   return (
-    <main className="h-screen w-screen overflow-hidden">
-      <PannableArea className="border rounded-md p-2 bg-slate-300">
-        <Deck type="all" cards={shuffledCards} />
-      </PannableArea>
-    </main>
+    <TarotStudio />
   );
 }

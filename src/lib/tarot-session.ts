@@ -1,0 +1,310 @@
+import type {
+  CardSetDefinition,
+  TableCard,
+  TableLayout,
+  TablePoint,
+  TableSnapshot,
+  TarotSession,
+} from "@/types";
+
+const HISTORY_LIMIT = 24;
+
+function shuffle<T>(items: T[]): T[] {
+  const shuffled = [...items];
+
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [
+      shuffled[randomIndex],
+      shuffled[index],
+    ];
+  }
+
+  return shuffled;
+}
+
+function cloneCards(cards: TableCard[]): TableCard[] {
+  return cards.map((card) => ({
+    ...card,
+    position: [...card.position] as TablePoint,
+  }));
+}
+
+function snapshot(session: TarotSession): TableSnapshot {
+  return {
+    cards: cloneCards(session.cards),
+    selectedCardId: session.selectedCardId,
+  };
+}
+
+function commit(
+  session: TarotSession,
+  cards: TableCard[],
+  selectedCardId = session.selectedCardId
+): TarotSession {
+  return {
+    ...session,
+    cards,
+    selectedCardId,
+    history: [...session.history, snapshot(session)].slice(-HISTORY_LIMIT),
+  };
+}
+
+function nextZIndex(cards: TableCard[]): number {
+  return Math.max(0, ...cards.map((card) => card.zIndex)) + 1;
+}
+
+export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
+  const cards = shuffle(cardSet.cards).map((card, index) => ({
+    id: `${cardSet.id}:${card.id}`,
+    cardId: card.id,
+    cardSetId: cardSet.id,
+    zone: "deck" as const,
+    position: [0, 0] as TablePoint,
+    rotation: 0,
+    zIndex: index,
+    faceUp: false,
+  }));
+
+  return {
+    cardSetId: cardSet.id,
+    cards,
+    selectedCardId: null,
+    history: [],
+  };
+}
+
+export function getTopDeckCard(session: TarotSession): TableCard | undefined {
+  const deckCards = session.cards
+    .filter((card) => card.zone === "deck")
+    .sort((first, second) => first.zIndex - second.zIndex);
+
+  return deckCards[deckCards.length - 1];
+}
+
+export function getTableCards(session: TarotSession): TableCard[] {
+  return session.cards
+    .filter((card) => card.zone === "table")
+    .sort((first, second) => first.zIndex - second.zIndex);
+}
+
+export function getRemainingDeckCount(session: TarotSession): number {
+  return session.cards.filter((card) => card.zone === "deck").length;
+}
+
+export function createLayout(
+  cards: TableCard[],
+  cardSet: CardSetDefinition,
+  layout: TableLayout
+): Map<string, Pick<TableCard, "position" | "rotation" | "zIndex">> {
+  const placements = new Map<
+    string,
+    Pick<TableCard, "position" | "rotation" | "zIndex">
+  >();
+  const orderedCards =
+    layout === "sort"
+      ? [...cards].sort((first, second) => {
+          const firstOrder = cardSet.cards.find(
+            (card) => card.id === first.cardId
+          )?.order;
+          const secondOrder = cardSet.cards.find(
+            (card) => card.id === second.cardId
+          )?.order;
+
+          return (firstOrder ?? 0) - (secondOrder ?? 0);
+        })
+      : cards;
+
+  if (layout === "stack") {
+    orderedCards.forEach((card, index) => {
+      placements.set(card.id, {
+        position: [index * 0.008, index * 0.01],
+        rotation: 0,
+        zIndex: index + 1,
+      });
+    });
+
+    return placements;
+  }
+
+  if (layout === "fan") {
+    const midpoint = (orderedCards.length - 1) / 2;
+    const spread = Math.min(0.24, 1.45 / Math.max(orderedCards.length, 1));
+
+    orderedCards.forEach((card, index) => {
+      const offset = index - midpoint;
+      placements.set(card.id, {
+        position: [offset * spread, -Math.abs(offset) * 0.025],
+        rotation: offset * 8,
+        zIndex: index + 1,
+      });
+    });
+
+    return placements;
+  }
+
+  const columns = Math.min(
+    5,
+    Math.max(2, Math.ceil(Math.sqrt(orderedCards.length)))
+  );
+  const rows = Math.max(1, Math.ceil(orderedCards.length / columns));
+  const horizontalGap = Math.min(0.44, 1.65 / Math.max(columns - 1, 1));
+  const verticalGap = Math.min(0.54, 1.45 / Math.max(rows - 1, 1));
+
+  orderedCards.forEach((card, index) => {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    placements.set(card.id, {
+      position: [
+        (column - (columns - 1) / 2) * horizontalGap,
+        ((rows - 1) / 2 - row) * verticalGap,
+      ],
+      rotation: 0,
+      zIndex: index + 1,
+    });
+  });
+
+  return placements;
+}
+
+export type TarotSessionAction =
+  | { type: "select"; cardId: string | null }
+  | { type: "draw"; cardId: string; position: TablePoint }
+  | { type: "move"; cardId: string; position: TablePoint }
+  | { type: "flip"; cardId: string }
+  | { type: "rotate"; cardId: string; degrees?: number }
+  | { type: "nudge"; cardId: string; delta: TablePoint }
+  | {
+      type: "layout";
+      placements: Map<
+        string,
+        Pick<TableCard, "position" | "rotation" | "zIndex">
+      >;
+    }
+  | { type: "undo" }
+  | { type: "new-shuffle"; cardSet: CardSetDefinition };
+
+export function tarotSessionReducer(
+  session: TarotSession,
+  action: TarotSessionAction
+): TarotSession {
+  if (action.type === "select") {
+    return { ...session, selectedCardId: action.cardId };
+  }
+
+  if (action.type === "undo") {
+    const previous = session.history[session.history.length - 1];
+
+    if (!previous) {
+      return session;
+    }
+
+    return {
+      ...session,
+      cards: cloneCards(previous.cards),
+      selectedCardId: previous.selectedCardId,
+      history: session.history.slice(0, -1),
+    };
+  }
+
+  if (action.type === "new-shuffle") {
+    return createTarotSession(action.cardSet);
+  }
+
+  if (action.type === "layout") {
+    const cards = session.cards.map((card) => {
+      const placement = action.placements.get(card.id);
+
+      return placement ? { ...card, ...placement } : card;
+    });
+
+    return commit(session, cards);
+  }
+
+  const card = session.cards.find((candidate) => candidate.id === action.cardId);
+
+  if (!card) {
+    return session;
+  }
+
+  if (action.type === "draw") {
+    if (card.zone !== "deck" || card.id !== getTopDeckCard(session)?.id) {
+      return session;
+    }
+
+    const cards = session.cards.map((candidate) =>
+      candidate.id === action.cardId
+        ? {
+            ...candidate,
+            zone: "table" as const,
+            position: action.position,
+            zIndex: nextZIndex(session.cards),
+          }
+        : candidate
+    );
+
+    return commit(session, cards, action.cardId);
+  }
+
+  if (card.zone !== "table") {
+    return session;
+  }
+
+  if (action.type === "move") {
+    const cards = session.cards.map((candidate) =>
+      candidate.id === action.cardId
+        ? {
+            ...candidate,
+            position: action.position,
+            zIndex: nextZIndex(session.cards),
+          }
+        : candidate
+    );
+
+    return commit(session, cards, action.cardId);
+  }
+
+  if (action.type === "flip") {
+    const cards = session.cards.map((candidate) =>
+      candidate.id === action.cardId
+        ? {
+            ...candidate,
+            faceUp: !candidate.faceUp,
+            zIndex: nextZIndex(session.cards),
+          }
+        : candidate
+    );
+
+    return commit(session, cards, action.cardId);
+  }
+
+  if (action.type === "rotate") {
+    const degrees = action.degrees ?? 180;
+    const cards = session.cards.map((candidate) =>
+      candidate.id === action.cardId
+        ? {
+            ...candidate,
+            rotation: (candidate.rotation + degrees) % 360,
+            zIndex: nextZIndex(session.cards),
+          }
+        : candidate
+    );
+
+    return commit(session, cards, action.cardId);
+  }
+
+  const cards = session.cards.map((candidate) =>
+    candidate.id === action.cardId
+      ? {
+          ...candidate,
+          position: [
+            candidate.position[0] + action.delta[0],
+            candidate.position[1] + action.delta[1],
+          ] as TablePoint,
+          zIndex: nextZIndex(session.cards),
+        }
+      : candidate
+  );
+
+  return commit(session, cards, action.cardId);
+}
