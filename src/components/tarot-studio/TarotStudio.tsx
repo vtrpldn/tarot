@@ -423,15 +423,6 @@ export function TarotStudio() {
       )}
 
       <nav className="tarot-toolbar" aria-label="Table actions">
-        <button
-          type="button"
-          className="tarot-primary-action"
-          onClick={drawCard}
-          disabled={!topDeckCard}
-        >
-          Draw card
-          <span>{topDeckCard ? "or drag the deck" : "deck is empty"}</span>
-        </button>
         <div className="tarot-zoom-controls" aria-label="Table zoom">
           <button
             type="button"
