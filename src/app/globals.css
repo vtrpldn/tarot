@@ -108,6 +108,7 @@ button {
 
 .tarot-set-picker,
 .tarot-inspector,
+.tarot-spread-actions,
 .tarot-toolbar,
 .tarot-live-status {
   position: absolute;
@@ -288,6 +289,66 @@ button {
   font-size: 0.56rem;
 }
 
+.tarot-spread-actions {
+  bottom: clamp(6.25rem, 9vw, 7.1rem);
+  left: calc(50% + 4rem);
+  display: flex;
+  align-items: center;
+  gap: 0.34rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.36rem;
+  border: 1px solid rgba(236, 211, 139, 0.2);
+  border-radius: 999px;
+  background: rgba(5, 22, 19, 0.68);
+  box-shadow: 0 0.65rem 2rem rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(16px);
+  transform: translateX(-50%);
+}
+
+.tarot-spread-actions > span {
+  padding: 0 0.55rem;
+  color: var(--faint-ink);
+  font-family: var(--font-mono);
+  font-size: 0.54rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tarot-spread-actions button {
+  display: grid;
+  gap: 0.08rem;
+  min-height: 2.65rem;
+  padding: 0.38rem 0.78rem;
+  border: 1px solid rgba(247, 239, 217, 0.2);
+  border-radius: 999px;
+  background: rgba(15, 49, 42, 0.72);
+  color: var(--ink);
+  font-size: 0.82rem;
+  line-height: 1.05;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease,
+    transform 160ms ease;
+}
+
+.tarot-spread-actions button:hover:not(:disabled) {
+  border-color: var(--gold-bright);
+  background: rgba(40, 78, 66, 0.92);
+  transform: translateY(-1px);
+}
+
+.tarot-spread-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.tarot-spread-actions small {
+  color: var(--faint-ink);
+  font-family: var(--font-mono);
+  font-size: 0.45rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .tarot-toolbar {
   bottom: clamp(0.9rem, 2.5vw, 1.6rem);
   left: 50%;
@@ -464,6 +525,34 @@ select:focus-visible {
 
   .tarot-shortcut {
     display: none;
+  }
+
+  .tarot-spread-actions {
+    right: 0.62rem;
+    bottom: 8.1rem;
+    left: 0.62rem;
+    justify-content: flex-start;
+    max-width: none;
+    overflow-x: auto;
+    padding: 0.3rem;
+    border-radius: 0.35rem;
+    scrollbar-width: none;
+    transform: none;
+  }
+
+  .tarot-spread-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tarot-spread-actions > span {
+    display: none;
+  }
+
+  .tarot-spread-actions button {
+    flex: 0 0 auto;
+    min-height: 2.45rem;
+    padding: 0.34rem 0.66rem;
+    font-size: 0.74rem;
   }
 
   .tarot-toolbar {

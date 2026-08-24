@@ -244,6 +244,17 @@ function TarotTable({
   const tableCards = getTableCards(session);
   const topDeckCard = getTopDeckCard(session);
   const deckCount = getRemainingDeckCount(session);
+  const sceneLayout = useMemo(
+    () => ({
+      ...layout,
+      deckPosition: [
+        layout.deckPosition[0] -
+          (tableCards.length > 0 ? layout.cardWidth * 0.28 : 0),
+        layout.deckPosition[1],
+      ] as [number, number],
+    }),
+    [layout, tableCards.length]
+  );
   const deckMetrics = getDeckMetrics(Math.max(0, deckCount - 1));
   const visibleCards = topDeckCard
     ? [topDeckCard, ...tableCards]
@@ -278,9 +289,9 @@ function TarotTable({
       />
       <DeckStack
         count={Math.max(0, deckCount - 1)}
-        position={layout.deckPosition}
-        width={layout.cardWidth}
-        height={layout.cardHeight}
+        position={sceneLayout.deckPosition}
+        width={sceneLayout.cardWidth}
+        height={sceneLayout.cardHeight}
         backUrl={cardSet.back.preview}
       />
       {visibleCards.map((card) => {
@@ -305,7 +316,7 @@ function TarotTable({
             card={card}
             definition={definition}
             cardSet={cardSet}
-            layout={layout}
+            layout={sceneLayout}
             restingZ={restingZ}
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}

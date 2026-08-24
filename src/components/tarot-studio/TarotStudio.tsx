@@ -19,6 +19,7 @@ import {
   getTopDeckCard,
   tarotSessionReducer,
 } from "@/lib/tarot-session";
+import { popularTarotSpreads } from "@/lib/tarot-spreads";
 import type { TableLayout } from "@/types";
 
 const TarotScene = dynamic(
@@ -77,7 +78,7 @@ export function TarotStudio() {
       return;
     }
 
-    dispatch({ type: "draw", cardId: topDeckCard.id, position: [0, 0] });
+    dispatch({ type: "draw", cardId: topDeckCard.id, position: [0.3, 0] });
   }, [topDeckCard]);
 
   const arrangeCards = useCallback(
@@ -234,6 +235,26 @@ export function TarotStudio() {
         />
       </div>
 
+      {tableCards.length === 0 && (
+        <section className="tarot-spread-actions" aria-label="Popular tarot spreads">
+          <span>Spreads</span>
+          {popularTarotSpreads.map((spread) => (
+            <button
+              key={spread.id}
+              type="button"
+              onClick={() => {
+                setViewZoom(spread.viewZoom);
+                dispatch({ type: "deal-spread", spread });
+              }}
+              disabled={deckCount < spread.slots.length}
+            >
+              {spread.label}
+              <small>{spread.shortLabel}</small>
+            </button>
+          ))}
+        </section>
+      )}
+
       <div className="tarot-set-picker">
         <label htmlFor="card-set">Card set</label>
         <select
@@ -242,6 +263,7 @@ export function TarotStudio() {
           onChange={(event) => {
             const nextCardSet = getCardSet(event.target.value);
             setActiveCardSetId(nextCardSet.id);
+            setViewZoom(1);
             dispatch({ type: "new-shuffle", cardSet: nextCardSet });
           }}
         >
@@ -378,7 +400,10 @@ export function TarotStudio() {
         <button
           type="button"
           className="tarot-reset-action"
-          onClick={() => dispatch({ type: "new-shuffle", cardSet: activeCardSet })}
+          onClick={() => {
+            setViewZoom(1);
+            dispatch({ type: "new-shuffle", cardSet: activeCardSet });
+          }}
         >
           New shuffle
         </button>

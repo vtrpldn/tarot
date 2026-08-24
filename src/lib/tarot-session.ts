@@ -6,6 +6,7 @@ import type {
   TableSnapshot,
   TarotSession,
 } from "@/types";
+import type { TarotSpread } from "@/lib/tarot-spreads";
 
 const HISTORY_LIMIT = 24;
 
@@ -54,6 +55,10 @@ function commit(
 
 function nextZIndex(cards: TableCard[]): number {
   return Math.max(0, ...cards.map((card) => card.zIndex)) + 1;
+}
+
+function alignedRotation(card: TableCard): number {
+  return Math.round(card.rotation / 180) * 180;
 }
 
 export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
@@ -124,8 +129,8 @@ export function createLayout(
   if (layout === "stack") {
     orderedCards.forEach((card, index) => {
       placements.set(card.id, {
-        position: [index * 0.008, index * 0.01],
-        rotation: card.rotation,
+        position: [0.3 + index * 0.008, index * 0.01],
+        rotation: alignedRotation(card),
         scale: 1,
         zIndex: index + 1,
       });
@@ -137,13 +142,17 @@ export function createLayout(
   if (layout === "fan") {
     const midpoint = (orderedCards.length - 1) / 2;
     const spread = Math.min(0.24, 1.45 / Math.max(orderedCards.length, 1));
+    const cardScale = Math.min(
+      0.82,
+      2.9 / Math.max(orderedCards.length, 3)
+    );
 
     orderedCards.forEach((card, index) => {
       const offset = index - midpoint;
       placements.set(card.id, {
-        position: [offset * spread, -Math.abs(offset) * 0.025],
-        rotation: card.rotation + offset * 8,
-        scale: 1,
+        position: [0.34 + offset * spread, -Math.abs(offset) * 0.025],
+        rotation: alignedRotation(card) + offset * 8,
+        scale: cardScale,
         zIndex: index + 1,
       });
     });
@@ -158,17 +167,17 @@ export function createLayout(
   const rows = Math.max(1, Math.ceil(orderedCards.length / columns));
   const horizontalGap = Math.min(0.44, 1.65 / Math.max(columns - 1, 1));
   const verticalGap = Math.min(0.54, 1.45 / Math.max(rows - 1, 1));
-  const cardScale = Math.min(1, 2.3 / Math.max(columns, rows));
+  const cardScale = Math.min(0.78, 1.85 / Math.max(columns, rows));
 
   orderedCards.forEach((card, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
     placements.set(card.id, {
       position: [
-        (column - (columns - 1) / 2) * horizontalGap,
+        0.3 + (column - (columns - 1) / 2) * horizontalGap,
         ((rows - 1) / 2 - row) * verticalGap,
       ],
-      rotation: card.rotation,
+      rotation: alignedRotation(card),
       scale: cardScale,
       zIndex: index + 1,
     });
@@ -184,6 +193,7 @@ export type TarotSessionAction =
   | { type: "flip"; cardId: string }
   | { type: "rotate"; cardId: string; degrees?: number }
   | { type: "nudge"; cardId: string; delta: TablePoint }
+  | { type: "deal-spread"; spread: TarotSpread }
   | {
       type: "layout";
       placements: Map<
@@ -229,6 +239,48 @@ export function tarotSessionReducer(
     });
 
     return commit(session, cards);
+  }
+
+  if (action.type === "deal-spread") {
+    if (getTableCards(session).length > 0) {
+      return session;
+    }
+
+    const deckCards = session.cards
+      .filter((card) => card.zone === "deck")
+      .sort((first, second) => second.zIndex - first.zIndex)
+      .slice(0, action.spread.slots.length);
+
+    if (deckCards.length < action.spread.slots.length) {
+      return session;
+    }
+
+    const zIndexBase = nextZIndex(session.cards);
+    const placements = new Map(
+      deckCards.map((card, index) => [
+        card.id,
+        { index, slot: action.spread.slots[index] },
+      ])
+    );
+    const cards = session.cards.map((card) => {
+      const placement = placements.get(card.id);
+
+      if (!placement) {
+        return card;
+      }
+
+      return {
+        ...card,
+        zone: "table" as const,
+        position: [...placement.slot.position] as TablePoint,
+        rotation: placement.slot.rotation,
+        scale: placement.slot.scale,
+        zIndex: zIndexBase + placement.index,
+        faceUp: false,
+      };
+    });
+
+    return commit(session, cards, null);
   }
 
   const card = session.cards.find((candidate) => candidate.id === action.cardId);
