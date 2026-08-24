@@ -64,15 +64,6 @@ button {
   touch-action: none;
 }
 
-.tarot-canvas-shell:focus-visible::after {
-  content: "";
-  position: absolute;
-  inset: 0.72rem;
-  pointer-events: none;
-  border: 1px solid rgba(239, 215, 148, 0.34);
-  border-radius: 1.25rem;
-}
-
 .tarot-canvas {
   display: block;
   width: 100% !important;

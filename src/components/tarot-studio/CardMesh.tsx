@@ -207,7 +207,6 @@ export function CardMesh({
   const dragRef = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const [rotationReady, setRotationReady] = useState(false);
   const [hasRevealed, setHasRevealed] = useState(card.faceUp);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
@@ -407,11 +406,6 @@ export function CardMesh({
       if (event.nativeEvent.pointerType !== "touch") {
         const ready =
           card.zone === "table" && selected && isNearCardEdge(event);
-
-        if (ready !== rotationReady) {
-          setRotationReady(ready);
-        }
-
         canvas.style.cursor = ready ? "crosshair" : "grab";
       }
 
@@ -505,7 +499,6 @@ export function CardMesh({
 
     dragRef.current = null;
     setDragging(false);
-    setRotationReady(false);
     canvas.style.cursor = "grab";
     invalidate();
   };
@@ -524,42 +517,6 @@ export function CardMesh({
       position={[targetPosition[0], targetPosition[1], restingZ]}
       rotation={[0, 0, MathUtils.degToRad(card.rotation)]}
     >
-      {selected && card.zone === "table" && (
-        <>
-          <RoundedBox
-            args={[cardWidth + 0.14, cardHeight + 0.14, 0.018]}
-            radius={0.085}
-            smoothness={5}
-            position={[0, 0, -CARD_THICKNESS / 2 - 0.009]}
-            renderOrder={0}
-          >
-            <meshBasicMaterial
-              color={rotationReady ? "#f1d18a" : "#c7a361"}
-              transparent
-              opacity={rotationReady ? 0.86 : 0.5}
-              depthWrite={false}
-            />
-          </RoundedBox>
-          {[
-            [-cardWidth / 2, -cardHeight / 2],
-            [-cardWidth / 2, cardHeight / 2],
-            [cardWidth / 2, -cardHeight / 2],
-            [cardWidth / 2, cardHeight / 2],
-          ].map(([x, y]) => (
-            <mesh
-              key={`${x}-${y}`}
-              position={[x, y, CARD_THICKNESS / 2 + 0.015]}
-              renderOrder={8}
-            >
-              <circleGeometry args={[0.052, 20]} />
-              <meshBasicMaterial
-                color={rotationReady ? "#f1d18a" : "#c7a361"}
-                depthTest={false}
-              />
-            </mesh>
-          ))}
-        </>
-      )}
       <group ref={flipRef} rotation={[0, card.faceUp ? 0 : Math.PI, 0]}>
         <RoundedBox
           args={[cardWidth, cardHeight, CARD_THICKNESS]}
@@ -602,7 +559,6 @@ export function CardMesh({
             onHover(card.zone === "table" ? card.id : null);
             const ready =
               card.zone === "table" && selected && isNearCardEdge(event);
-            setRotationReady(ready);
             canvas.style.cursor = ready ? "crosshair" : "grab";
             invalidate();
           }
@@ -611,7 +567,6 @@ export function CardMesh({
           setHovered(false);
           onHover(null);
           if (!dragRef.current) {
-            setRotationReady(false);
             canvas.style.cursor = "default";
           }
           invalidate();

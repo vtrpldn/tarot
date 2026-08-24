@@ -196,16 +196,6 @@ function TableSurface({
           emissiveIntensity={0.18}
         />
       </mesh>
-      <mesh position={[0, 0, TABLE_SURFACE_Z + 0.002]}>
-        <ringGeometry
-          args={[
-            Math.min(width, height) * 0.31,
-            Math.min(width, height) * 0.313,
-            96,
-          ]}
-        />
-        <meshBasicMaterial color="#d9b65f" transparent opacity={0.065} />
-      </mesh>
     </>
   );
 }
