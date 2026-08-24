@@ -6,7 +6,6 @@ const clamp = (value: number, minimum: number, maximum: number) =>
 export type SceneTableLayout = {
   cardWidth: number;
   cardHeight: number;
-  deckPosition: [number, number];
   toPoint: (x: number, y: number) => TablePoint;
   toWorld: (point: TablePoint) => [number, number];
 };
@@ -36,10 +35,6 @@ export function createSceneTableLayout({
   const cardWidth = Math.min(requestedCardWidth, widthAllowedByHeight);
   const cardHeight = cardWidth / cardAspectRatio;
   const horizontalPadding = isMobile ? 0.18 : 0.42;
-  const deckX = -viewportWidth / 2 + cardWidth / 2 + horizontalPadding;
-  const deckY = isMobile
-    ? viewportHeight * 0.08
-    : -Math.min(viewportHeight * 0.16, 1.9);
   const tableLeft = -viewportWidth / 2 + horizontalPadding;
   const tableRight = viewportWidth / 2 - horizontalPadding;
   const tableTop = viewportHeight / 2 - (isMobile ? 0.7 : 0.75);
@@ -52,7 +47,6 @@ export function createSceneTableLayout({
   return {
     cardWidth,
     cardHeight,
-    deckPosition: [deckX, deckY],
     toWorld: ([x, y]) => [centerX + x * halfWidth, centerY + y * halfHeight],
     toPoint: (x, y) => [
       clamp((x - centerX) / halfWidth, -1, 1),

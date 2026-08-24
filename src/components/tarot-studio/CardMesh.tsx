@@ -39,7 +39,7 @@ type PointerCaptureTarget = Mesh & {
 };
 
 type DragState = {
-  mode: "move" | "rotate";
+  mode: "move" | "move-deck" | "rotate";
   pointerId: number;
   origin: Vector3;
   offset: Vector3;
@@ -57,11 +57,14 @@ type CardMeshProps = {
   definition: CardDefinition;
   cardSet: CardSetDefinition;
   layout: SceneTableLayout;
+  deckPosition: TablePoint;
   restingZ: number;
   selected: boolean;
   reducedMotion: boolean;
   onSelect: (cardId: string | null) => void;
   onDraw: (cardId: string, position: TablePoint) => void;
+  onMoveDeck: (position: TablePoint) => void;
+  onPreviewDeckPosition: (position: TablePoint | null) => void;
   onMove: (cardId: string, position: TablePoint) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
@@ -192,11 +195,14 @@ export function CardMesh({
   definition,
   cardSet,
   layout,
+  deckPosition,
   restingZ,
   selected,
   reducedMotion,
   onSelect,
   onDraw,
+  onMoveDeck,
+  onPreviewDeckPosition,
   onMove,
   onFlip,
   onRotate,
@@ -213,7 +219,7 @@ export function CardMesh({
   const invalidate = useThree((state) => state.invalidate);
   const canvas = useThree((state) => state.gl.domElement);
   const targetPosition =
-    card.zone === "deck" ? layout.deckPosition : layout.toWorld(card.position);
+    card.zone === "deck" ? deckPosition : layout.toWorld(card.position);
   const cardWidth = layout.cardWidth;
   const cardHeight = layout.cardHeight;
   const frontTexture = definition.image.preview;
@@ -246,13 +252,13 @@ export function CardMesh({
     }
 
     const initialPosition =
-      card.zone === "table" ? layout.deckPosition : targetPosition;
+      card.zone === "table" ? deckPosition : targetPosition;
 
     group.position.set(initialPosition[0], initialPosition[1], restingZ);
     group.scale.set(1, 1, 1);
     hasPositionedRef.current = true;
     cardIdentityRef.current = card.id;
-  }, [card.id, card.zone, layout.deckPosition, restingZ, targetPosition]);
+  }, [card.id, card.zone, deckPosition, restingZ, targetPosition]);
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -273,7 +279,15 @@ export function CardMesh({
       dragging && drag?.mode === "move" ? drag.tiltX : 0;
     const tiltYTarget =
       dragging && drag?.mode === "move" ? drag.tiltY : 0;
-    const lift = dragging ? (drag?.mode === "move" ? 0.18 : 0.035) : hovered ? 0.006 : 0;
+    const lift = dragging
+      ? drag?.mode === "move"
+        ? 0.18
+        : drag?.mode === "rotate"
+          ? 0.035
+          : 0.006
+      : hovered
+        ? 0.006
+        : 0;
     const flipLift = reducedMotion
       ? 0
       : Math.abs(Math.sin(flippingCard.rotation.y)) * 0.1;
@@ -349,6 +363,10 @@ export function CardMesh({
   });
 
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    if (event.nativeEvent.button !== 0) {
+      return;
+    }
+
     event.stopPropagation();
     const point = getPointerPoint(event);
     const group = groupRef.current;
@@ -358,11 +376,16 @@ export function CardMesh({
       return;
     }
 
-    const mode =
-      card.zone === "table" &&
-      selected &&
+    const movesDeck =
+      card.zone === "deck" &&
       event.nativeEvent.pointerType !== "touch" &&
-      isNearCardEdge(event)
+      (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey);
+    const mode: DragState["mode"] = movesDeck
+      ? "move-deck"
+      : card.zone === "table" &&
+          selected &&
+          event.nativeEvent.pointerType !== "touch" &&
+          isNearCardEdge(event)
         ? "rotate"
         : "move";
     const startAngle = Math.atan2(
@@ -371,6 +394,30 @@ export function CardMesh({
     );
 
     target.setPointerCapture?.(event.pointerId);
+    const pointerTarget = event.nativeEvent.target;
+
+    if (pointerTarget instanceof HTMLElement) {
+      pointerTarget.addEventListener(
+        "lostpointercapture",
+        (lostEvent) => {
+          const activeDrag = dragRef.current;
+
+          if (!activeDrag || activeDrag.pointerId !== lostEvent.pointerId) {
+            return;
+          }
+
+          dragRef.current = null;
+          if (activeDrag.mode === "move-deck") {
+            onPreviewDeckPosition(null);
+          }
+          setDragging(false);
+          canvas.style.cursor = "grab";
+          invalidate();
+        },
+        { once: true }
+      );
+    }
+
     dragRef.current = {
       mode,
       pointerId: event.pointerId,
@@ -388,9 +435,12 @@ export function CardMesh({
       startRotation: card.rotation,
       previewRotation: card.rotation,
     };
+    if (mode === "move-deck") {
+      onPreviewDeckPosition([group.position.x, group.position.y]);
+    }
     setDragging(true);
     canvas.style.cursor = mode === "rotate" ? "crosshair" : "grabbing";
-    onSelect(card.id);
+    onSelect(mode === "move-deck" ? null : card.id);
     invalidate();
   };
 
@@ -404,9 +454,16 @@ export function CardMesh({
 
     if (!drag) {
       if (event.nativeEvent.pointerType !== "touch") {
+        const deckMoveReady =
+          card.zone === "deck" &&
+          (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey);
         const ready =
           card.zone === "table" && selected && isNearCardEdge(event);
-        canvas.style.cursor = ready ? "crosshair" : "grab";
+        canvas.style.cursor = deckMoveReady
+          ? "move"
+          : ready
+            ? "crosshair"
+            : "grab";
       }
 
       return;
@@ -461,6 +518,9 @@ export function CardMesh({
     drag.lastPoint.copy(point);
     group.position.x = nextX;
     group.position.y = nextY;
+    if (drag.mode === "move-deck") {
+      onPreviewDeckPosition([nextX, nextY]);
+    }
     invalidate();
   };
 
@@ -474,6 +534,7 @@ export function CardMesh({
 
     event.stopPropagation();
     const target = event.target as unknown as PointerCaptureTarget;
+    dragRef.current = null;
     target.releasePointerCapture?.(event.pointerId);
 
     if (!cancelled) {
@@ -482,14 +543,16 @@ export function CardMesh({
           card.id,
           drag.previewRotation - drag.startRotation
         );
-      } else if (drag.mode === "move" && drag.moved) {
+      } else if (drag.mode !== "rotate" && drag.moved) {
         const point = getPointerPoint(event);
         const nextPoint = layout.toPoint(
           point.x - drag.offset.x,
           point.y - drag.offset.y
         );
 
-        if (card.zone === "deck") {
+        if (drag.mode === "move-deck") {
+          onMoveDeck(nextPoint);
+        } else if (card.zone === "deck") {
           onDraw(card.id, nextPoint);
         } else {
           onMove(card.id, nextPoint);
@@ -497,7 +560,9 @@ export function CardMesh({
       }
     }
 
-    dragRef.current = null;
+    if (drag.mode === "move-deck") {
+      onPreviewDeckPosition(null);
+    }
     setDragging(false);
     canvas.style.cursor = "grab";
     invalidate();
@@ -557,9 +622,16 @@ export function CardMesh({
             event.stopPropagation();
             setHovered(true);
             onHover(card.zone === "table" ? card.id : null);
+            const deckMoveReady =
+              card.zone === "deck" &&
+              (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey);
             const ready =
               card.zone === "table" && selected && isNearCardEdge(event);
-            canvas.style.cursor = ready ? "crosshair" : "grab";
+            canvas.style.cursor = deckMoveReady
+              ? "move"
+              : ready
+                ? "crosshair"
+                : "grab";
             invalidate();
           }
         }}
@@ -570,6 +642,15 @@ export function CardMesh({
             canvas.style.cursor = "default";
           }
           invalidate();
+        }}
+        onContextMenu={(event) => {
+          if (
+            card.zone === "deck" &&
+            (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey)
+          ) {
+            event.stopPropagation();
+            event.nativeEvent.preventDefault();
+          }
         }}
         onDoubleClick={handleDoubleClick}
       >

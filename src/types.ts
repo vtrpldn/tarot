@@ -52,12 +52,14 @@ export type TableCard = {
 
 export type TableSnapshot = {
   cards: TableCard[];
+  deckPosition: TablePoint;
   selectedCardId: string | null;
 };
 
 export type TarotSession = {
   cardSetId: string;
   cards: TableCard[];
+  deckPosition: TablePoint;
   selectedCardId: string | null;
   history: TableSnapshot[];
 };

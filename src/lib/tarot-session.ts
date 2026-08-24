@@ -37,6 +37,7 @@ function cloneCards(cards: TableCard[]): TableCard[] {
 function snapshot(session: TarotSession): TableSnapshot {
   return {
     cards: cloneCards(session.cards),
+    deckPosition: [...session.deckPosition] as TablePoint,
     selectedCardId: session.selectedCardId,
   };
 }
@@ -44,11 +45,13 @@ function snapshot(session: TarotSession): TableSnapshot {
 function commit(
   session: TarotSession,
   cards: TableCard[],
-  selectedCardId = session.selectedCardId
+  selectedCardId = session.selectedCardId,
+  deckPosition = session.deckPosition
 ): TarotSession {
   return {
     ...session,
     cards,
+    deckPosition: [...deckPosition] as TablePoint,
     selectedCardId,
     history: [...session.history, snapshot(session)].slice(-HISTORY_LIMIT),
   };
@@ -78,6 +81,7 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
   return {
     cardSetId: cardSet.id,
     cards,
+    deckPosition: [0, 0],
     selectedCardId: null,
     history: [],
   };
@@ -190,6 +194,7 @@ export function createLayout(
 export type TarotSessionAction =
   | { type: "select"; cardId: string | null }
   | { type: "draw"; cardId: string; position: TablePoint }
+  | { type: "move-deck"; position: TablePoint }
   | { type: "move"; cardId: string; position: TablePoint }
   | { type: "flip"; cardId: string }
   | { type: "rotate"; cardId: string; degrees?: number }
@@ -228,6 +233,7 @@ export function tarotSessionReducer(
     return {
       ...session,
       cards: cloneCards(previous.cards),
+      deckPosition: [...previous.deckPosition] as TablePoint,
       selectedCardId: previous.selectedCardId,
       history: session.history.slice(0, -1),
     };
@@ -235,6 +241,22 @@ export function tarotSessionReducer(
 
   if (action.type === "new-shuffle") {
     return createTarotSession(action.cardSet);
+  }
+
+  if (action.type === "move-deck") {
+    const deckPosition: TablePoint = [
+      clampTablePoint(action.position[0]),
+      clampTablePoint(action.position[1]),
+    ];
+
+    if (
+      deckPosition[0] === session.deckPosition[0] &&
+      deckPosition[1] === session.deckPosition[1]
+    ) {
+      return session;
+    }
+
+    return commit(session, session.cards, null, deckPosition);
   }
 
   if (action.type === "layout") {

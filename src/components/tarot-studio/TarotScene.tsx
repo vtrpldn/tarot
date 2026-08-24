@@ -2,8 +2,21 @@
 
 import { RoundedBox } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useMemo } from "react";
-import { MathUtils, OrthographicCamera, SRGBColorSpace } from "three";
+import {
+  type MutableRefObject,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
+import {
+  Group,
+  MathUtils,
+  OrthographicCamera,
+  SRGBColorSpace,
+} from "three";
 import type {
   CardSetDefinition,
   TablePoint,
@@ -28,6 +41,7 @@ type TarotSceneProps = {
   viewZoom: number;
   onSelect: (cardId: string | null) => void;
   onDraw: (cardId: string, position: TablePoint) => void;
+  onMoveDeck: (position: TablePoint) => void;
   onMove: (cardId: string, position: TablePoint) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
@@ -93,14 +107,74 @@ function DeckStack({
   width,
   height,
   backUrl,
+  reducedMotion,
+  previewPositionRef,
 }: {
   count: number;
-  position: [number, number];
+  position: TablePoint;
   width: number;
   height: number;
   backUrl: string;
+  reducedMotion: boolean;
+  previewPositionRef: MutableRefObject<TablePoint | null>;
 }) {
+  const groupRef = useRef<Group>(null);
+  const hasPositionedRef = useRef(false);
+  const invalidate = useThree((state) => state.invalidate);
   const metrics = getDeckMetrics(count);
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+
+    if (!group || hasPositionedRef.current) {
+      return;
+    }
+
+    group.position.set(position[0], position[1], 0);
+    hasPositionedRef.current = true;
+  }, [metrics.layerCount, position]);
+
+  useEffect(() => {
+    if (metrics.layerCount === 0) {
+      hasPositionedRef.current = false;
+    }
+
+    invalidate();
+  }, [invalidate, metrics.layerCount, position]);
+
+  useFrame((_, delta) => {
+    const group = groupRef.current;
+
+    if (!group) {
+      return;
+    }
+
+    const previewPosition = previewPositionRef.current;
+    const target = previewPosition ?? position;
+
+    if (previewPosition) {
+      group.position.x = target[0];
+      group.position.y = target[1];
+      return;
+    }
+
+    const nextX = reducedMotion
+      ? target[0]
+      : MathUtils.damp(group.position.x, target[0], 24, delta);
+    const nextY = reducedMotion
+      ? target[1]
+      : MathUtils.damp(group.position.y, target[1], 24, delta);
+
+    group.position.x = nextX;
+    group.position.y = nextY;
+
+    if (
+      Math.abs(nextX - target[0]) > 0.0008 ||
+      Math.abs(nextY - target[1]) > 0.0008
+    ) {
+      invalidate();
+    }
+  });
 
   if (metrics.layerCount === 0) {
     return null;
@@ -113,7 +187,7 @@ function DeckStack({
   const topOffsetY = ((metrics.layerCount - 1) % 2 ? -1 : 1) * 0.01;
 
   return (
-    <group position={[position[0], position[1], 0]}>
+    <group ref={groupRef}>
       {Array.from({ length: metrics.layerCount }, (_, index) => {
         const offsetX = (index % 3 - 1) * 0.012;
         const offsetY = (index % 2 ? -1 : 1) * 0.01;
@@ -206,12 +280,15 @@ function TarotTable({
   reducedMotion,
   onSelect,
   onDraw,
+  onMoveDeck,
   onMove,
   onFlip,
   onRotate,
   onHover,
 }: TarotSceneProps) {
   const size = useThree((state) => state.size);
+  const invalidate = useThree((state) => state.invalidate);
+  const deckPreviewPositionRef = useRef<TablePoint | null>(null);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
   const layout = useMemo(
@@ -236,16 +313,16 @@ function TarotTable({
   const tableCards = getTableCards(session);
   const topDeckCard = getTopDeckCard(session);
   const deckCount = getRemainingDeckCount(session);
-  const sceneLayout = useMemo(
-    () => ({
-      ...layout,
-      deckPosition: [
-        layout.deckPosition[0] -
-          (tableCards.length > 0 ? layout.cardWidth * 0.28 : 0),
-        layout.deckPosition[1],
-      ] as [number, number],
-    }),
-    [layout, tableCards.length]
+  const deckPosition = useMemo(
+    () => layout.toWorld(session.deckPosition),
+    [layout, session.deckPosition]
+  );
+  const previewDeckPosition = useCallback(
+    (position: TablePoint | null) => {
+      deckPreviewPositionRef.current = position;
+      invalidate();
+    },
+    [invalidate]
   );
   const deckMetrics = getDeckMetrics(Math.max(0, deckCount - 1));
   const visibleCards = topDeckCard
@@ -281,10 +358,12 @@ function TarotTable({
       />
       <DeckStack
         count={Math.max(0, deckCount - 1)}
-        position={sceneLayout.deckPosition}
-        width={sceneLayout.cardWidth}
-        height={sceneLayout.cardHeight}
+        position={deckPosition}
+        width={layout.cardWidth}
+        height={layout.cardHeight}
         backUrl={cardSet.back.preview}
+        reducedMotion={reducedMotion}
+        previewPositionRef={deckPreviewPositionRef}
       />
       {visibleCards.map((card) => {
         const definition = definitions.get(card.cardId);
@@ -308,12 +387,15 @@ function TarotTable({
             card={card}
             definition={definition}
             cardSet={cardSet}
-            layout={sceneLayout}
+            layout={layout}
+            deckPosition={deckPosition}
             restingZ={restingZ}
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}
             onSelect={onSelect}
             onDraw={onDraw}
+            onMoveDeck={onMoveDeck}
+            onPreviewDeckPosition={previewDeckPosition}
             onMove={onMove}
             onFlip={onFlip}
             onRotate={onRotate}

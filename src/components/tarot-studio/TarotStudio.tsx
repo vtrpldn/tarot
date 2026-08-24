@@ -293,7 +293,7 @@ export function TarotStudio() {
         className="tarot-canvas-shell"
         tabIndex={0}
         role="region"
-        aria-label="Interactive tarot table. Drag the top card to draw it, drag table cards to arrange them, scroll over a card to change its layer, and drag near a selected card edge to rotate it."
+        aria-label="Interactive tarot table. Drag the top card to draw it, hold Control or Command while dragging to move the whole deck, drag table cards to arrange them, scroll over a card to change its layer, and drag near a selected card edge to rotate it."
         onKeyDown={handleKeyDown}
         onWheel={handleTableWheel}
       >
@@ -305,6 +305,9 @@ export function TarotStudio() {
           onSelect={(cardId) => dispatch({ type: "select", cardId })}
           onDraw={(cardId, position) =>
             dispatch({ type: "draw", cardId, position })
+          }
+          onMoveDeck={(position) =>
+            dispatch({ type: "move-deck", position })
           }
           onMove={(cardId, position) =>
             dispatch({ type: "move", cardId, position })
