@@ -48,11 +48,19 @@ function DeckStack({
     <group position={[position[0], position[1], -depth / 2]}>
       <mesh castShadow receiveShadow>
         <boxGeometry args={[width * 0.98, height * 0.98, depth]} />
-        <meshStandardMaterial color="#e5d2a9" roughness={0.78} metalness={0.02} />
+        <meshStandardMaterial color="#dac9a5" roughness={0.76} metalness={0.03} />
       </mesh>
-      <mesh position={[0.025, -0.025, depth / 2 + 0.002]}>
-        <planeGeometry args={[width * 0.93, height * 0.93]} />
-        <meshBasicMaterial color="#1e4039" />
+      <mesh position={[0.018, -0.018, depth / 2 + 0.002]}>
+        <planeGeometry args={[width * 0.94, height * 0.94]} />
+        <meshStandardMaterial color="#172d29" roughness={0.54} metalness={0.12} />
+      </mesh>
+      <mesh position={[0.018, -0.018, depth / 2 + 0.004]}>
+        <planeGeometry args={[width * 0.89, height * 0.89]} />
+        <meshStandardMaterial color="#a57d3d" roughness={0.44} metalness={0.44} />
+      </mesh>
+      <mesh position={[0.018, -0.018, depth / 2 + 0.006]}>
+        <planeGeometry args={[width * 0.84, height * 0.84]} />
+        <meshStandardMaterial color="#1f4e48" roughness={0.68} metalness={0.04} />
       </mesh>
     </group>
   );
@@ -65,15 +73,23 @@ function TableSurface({ onSelect }: { onSelect: (cardId: string | null) => void 
     <>
       <mesh position={[0, 0, -0.44]} receiveShadow onPointerDown={() => onSelect(null)}>
         <planeGeometry args={[viewport.width, viewport.height]} />
-        <meshStandardMaterial color="#14352f" roughness={0.9} metalness={0.02} />
+        <meshStandardMaterial
+          color="#12342e"
+          roughness={0.88}
+          metalness={0.025}
+          emissive="#071d1a"
+          emissiveIntensity={0.24}
+        />
       </mesh>
       <mesh position={[0, 0, -0.43]}>
-        <ringGeometry args={[Math.min(viewport.width, viewport.height) * 0.13, Math.min(viewport.width, viewport.height) * 0.132, 64]} />
-        <meshBasicMaterial color="#d9b65f" transparent opacity={0.24} />
-      </mesh>
-      <mesh position={[0, 0, -0.43]}>
-        <ringGeometry args={[Math.min(viewport.width, viewport.height) * 0.255, Math.min(viewport.width, viewport.height) * 0.257, 96]} />
-        <meshBasicMaterial color="#d9b65f" transparent opacity={0.12} />
+        <ringGeometry
+          args={[
+            Math.min(viewport.width, viewport.height) * 0.31,
+            Math.min(viewport.width, viewport.height) * 0.313,
+            96,
+          ]}
+        />
+        <meshBasicMaterial color="#d9b65f" transparent opacity={0.075} />
       </mesh>
     </>
   );
@@ -110,9 +126,17 @@ function TarotTable({
 
   return (
     <>
-      <ambientLight intensity={1.45} />
-      <directionalLight position={[-4, 7, 8]} intensity={2.4} color="#ffe8bd" />
-      <pointLight position={[4, -2, 5]} intensity={9} distance={14} color="#739c92" />
+      <ambientLight intensity={0.76} />
+      <directionalLight
+        castShadow
+        position={[-4, 7, 8]}
+        intensity={2.7}
+        color="#ffe8bd"
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
+        shadow-bias={-0.0004}
+      />
+      <pointLight position={[4, -2, 5]} intensity={5.6} distance={14} color="#6e9b91" />
       <TableSurface onSelect={onSelect} />
       <DeckStack
         count={deckCount}

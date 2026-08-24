@@ -190,18 +190,6 @@ export function TarotStudio() {
         />
       </div>
 
-      <header className="tarot-header">
-        <p className="tarot-eyebrow">Tarot table · v2</p>
-        <h1>
-          Shuffle by touch.
-          <span>Read by instinct.</span>
-        </h1>
-        <p className="tarot-intro">
-          A real-feeling table for drawing, turning, reversing, and arranging
-          your own spread.
-        </p>
-      </header>
-
       <div className="tarot-set-picker">
         <label htmlFor="card-set">Card set</label>
         <select
@@ -222,53 +210,47 @@ export function TarotStudio() {
         <span>{deckCount} cards in the deck</span>
       </div>
 
-      <aside className="tarot-inspector" aria-live="polite">
-        <p className="tarot-eyebrow">Selected card</p>
-        <h2>{selectedTitle}</h2>
-        <p>{selectedHint}</p>
-        <div className="tarot-card-browser">
-          <label htmlFor="drawn-card">Browse cards on the table</label>
-          <select
-            id="drawn-card"
-            value={session.selectedCardId ?? ""}
-            disabled={tableCards.length === 0}
-            onChange={(event) =>
-              dispatch({ type: "select", cardId: event.target.value || null })
-            }
-          >
-            <option value="">Select a drawn card</option>
-            {tableCards.map((card, index) => {
-              const definition = activeCardSet.cards.find(
-                (candidate) => candidate.id === card.cardId
-              );
+      {selectedCard?.zone === "table" && (
+        <aside className="tarot-inspector" aria-live="polite">
+          <p className="tarot-eyebrow">Selected card</p>
+          <h2>{selectedTitle}</h2>
+          <p>{selectedHint}</p>
+          <div className="tarot-card-browser">
+            <label htmlFor="drawn-card">Browse cards on the table</label>
+            <select
+              id="drawn-card"
+              value={session.selectedCardId ?? ""}
+              disabled={tableCards.length === 0}
+              onChange={(event) =>
+                dispatch({ type: "select", cardId: event.target.value || null })
+              }
+            >
+              <option value="">Select a drawn card</option>
+              {tableCards.map((card, index) => {
+                const definition = activeCardSet.cards.find(
+                  (candidate) => candidate.id === card.cardId
+                );
 
-              return (
-                <option key={card.id} value={card.id}>
-                  {card.faceUp
-                    ? definition?.name ?? `Card ${index + 1}`
-                    : `Face-down card ${index + 1}`}
-                </option>
-              );
-            })}
-          </select>
-        </div>
-        <div className="tarot-inspector-actions">
-          <button
-            type="button"
-            onClick={flipSelected}
-            disabled={selectedCard?.zone !== "table"}
-          >
-            Flip <Shortcut>F</Shortcut>
-          </button>
-          <button
-            type="button"
-            onClick={rotateSelected}
-            disabled={selectedCard?.zone !== "table"}
-          >
-            Rotate <Shortcut>R</Shortcut>
-          </button>
-        </div>
-      </aside>
+                return (
+                  <option key={card.id} value={card.id}>
+                    {card.faceUp
+                      ? definition?.name ?? `Card ${index + 1}`
+                      : `Face-down card ${index + 1}`}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <div className="tarot-inspector-actions">
+            <button type="button" onClick={flipSelected}>
+              Flip <Shortcut>F</Shortcut>
+            </button>
+            <button type="button" onClick={rotateSelected}>
+              Rotate <Shortcut>R</Shortcut>
+            </button>
+          </div>
+        </aside>
+      )}
 
       <nav className="tarot-toolbar" aria-label="Table actions">
         <button

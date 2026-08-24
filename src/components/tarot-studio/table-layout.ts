@@ -24,22 +24,28 @@ export function createSceneTableLayout({
   cardAspectRatio: number;
 }): SceneTableLayout {
   const isMobile = pixelWidth < 720;
-  const cardWidth = clamp(
-    viewportWidth * (isMobile ? 0.22 : 0.12),
-    isMobile ? 0.94 : 1.05,
-    isMobile ? 1.22 : 1.46
+  const requestedCardWidth = clamp(
+    viewportWidth * (isMobile ? 0.44 : 0.24),
+    isMobile ? 1.88 : 2.1,
+    isMobile ? 2.44 : 2.92
   );
+  const verticalUiReserve = isMobile ? 2.75 : 2.15;
+  const widthAllowedByHeight = Math.max(
+    1.2,
+    Math.max(0, viewportHeight - verticalUiReserve) * cardAspectRatio
+  );
+  const cardWidth = Math.min(requestedCardWidth, widthAllowedByHeight);
   const cardHeight = cardWidth / cardAspectRatio;
-  const horizontalPadding = isMobile ? 0.3 : 0.6;
+  const horizontalPadding = isMobile ? 0.18 : 0.42;
   const deckX = -viewportWidth / 2 + cardWidth / 2 + horizontalPadding;
   const deckY = isMobile
     ? viewportHeight * 0.08
-    : -Math.min(viewportHeight * 0.18, 2.2);
-  const tableLeft = deckX + cardWidth / 2 + (isMobile ? 0.32 : 0.72);
+    : -Math.min(viewportHeight * 0.16, 1.9);
+  const tableLeft = deckX + cardWidth / 2 + (isMobile ? 0.34 : 0.54);
   const tableRight = viewportWidth / 2 - horizontalPadding - cardWidth / 2;
-  const tableTop = viewportHeight / 2 - cardHeight / 2 - (isMobile ? 1.08 : 1.25);
+  const tableTop = viewportHeight / 2 - cardHeight / 2 - (isMobile ? 0.55 : 0.6);
   const tableBottom =
-    -viewportHeight / 2 + cardHeight / 2 + (isMobile ? 1.58 : 1.25);
+    -viewportHeight / 2 + cardHeight / 2 + (isMobile ? 1.72 : 1.08);
   const centerX = (tableLeft + tableRight) / 2;
   const centerY = (tableBottom + tableTop) / 2;
   const halfWidth = Math.max((tableRight - tableLeft) / 2, cardWidth / 2);
@@ -49,7 +55,7 @@ export function createSceneTableLayout({
     cardWidth,
     cardHeight,
     deckPosition: [deckX, deckY],
-    drawPoint: isMobile ? [0.14, 0.03] : [-0.3, 0],
+    drawPoint: isMobile ? [0.16, 0.02] : [-0.22, 0.02],
     toWorld: ([x, y]) => [centerX + x * halfWidth, centerY + y * halfHeight],
     toPoint: (x, y) => [
       clamp((x - centerX) / halfWidth, -1, 1),
