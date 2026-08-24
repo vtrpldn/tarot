@@ -2,7 +2,13 @@
 
 import { RoundedBox, useTexture } from "@react-three/drei";
 import { ThreeEvent, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   Group,
   LinearFilter,
@@ -18,7 +24,9 @@ import type { SceneTableLayout } from "./table-layout";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const DRAG_THRESHOLD = 0.045;
-const CARD_THICKNESS = 0.13;
+const ROTATION_EDGE_THRESHOLD = 0.14;
+
+export const CARD_THICKNESS = 0.11;
 
 type PointerCaptureTarget = Mesh & {
   setPointerCapture?: (pointerId: number) => void;
@@ -26,6 +34,7 @@ type PointerCaptureTarget = Mesh & {
 };
 
 type DragState = {
+  mode: "move" | "rotate";
   pointerId: number;
   origin: Vector3;
   offset: Vector3;
@@ -33,6 +42,9 @@ type DragState = {
   moved: boolean;
   tiltX: number;
   tiltY: number;
+  startAngle: number;
+  startRotation: number;
+  previewRotation: number;
 };
 
 type CardMeshProps = {
@@ -40,19 +52,21 @@ type CardMeshProps = {
   definition: CardDefinition;
   cardSet: CardSetDefinition;
   layout: SceneTableLayout;
+  restingZ: number;
   selected: boolean;
   reducedMotion: boolean;
   onSelect: (cardId: string | null) => void;
   onDraw: (cardId: string, position: TablePoint) => void;
   onMove: (cardId: string, position: TablePoint) => void;
   onFlip: (cardId: string) => void;
+  onRotate: (cardId: string, degrees: number) => void;
 };
 
 function useTextureForCard(url: string): Texture {
   const texture = useTexture(url);
   const gl = useThree((state) => state.gl);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     texture.colorSpace = SRGBColorSpace;
     texture.minFilter = LinearFilter;
     texture.magFilter = LinearFilter;
@@ -64,7 +78,7 @@ function useTextureForCard(url: string): Texture {
   return texture;
 }
 
-function CardArtwork({
+export function CardArtwork({
   url,
   position,
   rotation,
@@ -82,12 +96,7 @@ function CardArtwork({
   return (
     <mesh position={position} rotation={rotation} renderOrder={2}>
       <planeGeometry args={[width, height]} />
-      <meshBasicMaterial
-        map={texture}
-        transparent
-        alphaTest={0.02}
-        toneMapped={false}
-      />
+      <meshBasicMaterial map={texture} toneMapped={false} />
     </mesh>
   );
 }
@@ -107,12 +116,13 @@ function CardFaceLayers({
   const rotation: [number, number, number] | undefined = reverse
     ? [0, Math.PI, 0]
     : undefined;
-  const outerInset = Math.min(0.1, cardWidth * 0.065);
-  const artInset = Math.min(0.19, cardWidth * 0.12);
+  const outerInset = Math.min(0.2, cardWidth * 0.08);
+  const ruleInset = Math.min(0.32, cardWidth * 0.13);
+  const artInset = Math.min(0.42, cardWidth * 0.17);
   const fieldWidth = Math.max(0.2, cardWidth - outerInset);
   const fieldHeight = Math.max(0.3, cardHeight - outerInset);
-  const ruleWidth = Math.max(0.18, cardWidth - outerInset * 1.7);
-  const ruleHeight = Math.max(0.28, cardHeight - outerInset * 1.7);
+  const ruleWidth = Math.max(0.18, cardWidth - ruleInset);
+  const ruleHeight = Math.max(0.28, cardHeight - ruleInset);
   const artworkWidth = Math.max(0.16, cardWidth - artInset);
   const artworkHeight = Math.max(0.26, cardHeight - artInset);
 
@@ -141,13 +151,15 @@ function CardFaceLayers({
           metalness={0.48}
         />
       </mesh>
-      <CardArtwork
-        url={artworkUrl}
-        position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.005)]}
-        rotation={rotation}
-        width={artworkWidth}
-        height={artworkHeight}
-      />
+      <Suspense fallback={null}>
+        <CardArtwork
+          url={artworkUrl}
+          position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.005)]}
+          rotation={rotation}
+          width={artworkWidth}
+          height={artworkHeight}
+        />
+      </Suspense>
     </>
   );
 }
@@ -156,31 +168,68 @@ function getPointerPoint(event: ThreeEvent<PointerEvent>): Vector3 {
   return event.ray.intersectPlane(DRAG_PLANE, new Vector3()) ?? event.point;
 }
 
+function isNearCardEdge(event: ThreeEvent<PointerEvent>): boolean {
+  const uv = event.uv;
+
+  if (!uv) {
+    return false;
+  }
+
+  return (
+    Math.min(uv.x, 1 - uv.x, uv.y, 1 - uv.y) <=
+    ROTATION_EDGE_THRESHOLD
+  );
+}
+
 export function CardMesh({
   card,
   definition,
   cardSet,
   layout,
+  restingZ,
   selected,
   reducedMotion,
   onSelect,
   onDraw,
   onMove,
   onFlip,
+  onRotate,
 }: CardMeshProps) {
   const groupRef = useRef<Group>(null);
-  const faceRef = useRef<Group>(null);
+  const flipRef = useRef<Group>(null);
   const dragRef = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [rotationReady, setRotationReady] = useState(false);
+  const [hasRevealed, setHasRevealed] = useState(card.faceUp);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
   const invalidate = useThree((state) => state.invalidate);
+  const canvas = useThree((state) => state.gl.domElement);
   const targetPosition =
     card.zone === "deck" ? layout.deckPosition : layout.toWorld(card.position);
-  const baseZ = card.zone === "deck" ? 0.035 : card.zIndex * 0.003;
-  const cardWidth = layout.cardWidth * card.scale;
-  const cardHeight = layout.cardHeight * card.scale;
+  const cardWidth = layout.cardWidth;
+  const cardHeight = layout.cardHeight;
+  const frontTexture = definition.image.preview;
+
+  useEffect(() => {
+    if (card.faceUp) {
+      setHasRevealed(true);
+    }
+  }, [card.faceUp]);
+
+  useEffect(() => {
+    if (card.zone === "table" && selected) {
+      useTexture.preload(frontTexture);
+    }
+  }, [card.zone, frontTexture, selected]);
+
+  useEffect(
+    () => () => {
+      canvas.style.cursor = "grab";
+    },
+    [canvas]
+  );
 
   useLayoutEffect(() => {
     const group = groupRef.current;
@@ -190,34 +239,45 @@ export function CardMesh({
       return;
     }
 
-    group.position.set(targetPosition[0], targetPosition[1], baseZ);
+    const initialPosition =
+      card.zone === "table" ? layout.deckPosition : targetPosition;
+
+    group.position.set(initialPosition[0], initialPosition[1], restingZ);
+    group.scale.set(1, 1, 1);
     hasPositionedRef.current = true;
     cardIdentityRef.current = card.id;
-  }, [baseZ, card.id, targetPosition]);
+  }, [card.id, card.zone, layout.deckPosition, restingZ, targetPosition]);
 
   useFrame((_, delta) => {
     const group = groupRef.current;
-    const faces = faceRef.current;
+    const flippingCard = flipRef.current;
 
-    if (!group || !faces) {
+    if (!group || !flippingCard) {
       return;
     }
 
     const flipTarget = card.faceUp ? 0 : Math.PI;
-    const rotationTarget = MathUtils.degToRad(card.rotation);
     const drag = dragRef.current;
-    const tiltXTarget = dragging ? drag?.tiltX ?? 0 : 0;
-    const tiltYTarget = dragging ? drag?.tiltY ?? 0 : 0;
-    const lift = dragging ? 0.25 : selected ? 0.12 : hovered ? 0.055 : 0;
+    const rotationDegrees =
+      dragging && drag?.mode === "rotate"
+        ? drag.previewRotation
+        : card.rotation;
+    const rotationTarget = MathUtils.degToRad(rotationDegrees);
+    const tiltXTarget =
+      dragging && drag?.mode === "move" ? drag.tiltX : 0;
+    const tiltYTarget =
+      dragging && drag?.mode === "move" ? drag.tiltY : 0;
+    const lift = dragging ? (drag?.mode === "move" ? 0.18 : 0.035) : hovered ? 0.006 : 0;
     const flipLift = reducedMotion
       ? 0
-      : Math.abs(Math.sin(faces.rotation.y)) * 0.072;
-    const zTarget = baseZ + lift + flipLift;
+      : Math.abs(Math.sin(flippingCard.rotation.y)) * 0.1;
+    const zTarget = restingZ + lift + flipLift;
     const positionXTarget = targetPosition[0];
     const positionYTarget = targetPosition[1];
+    const scaleTarget = card.scale;
 
     if (reducedMotion) {
-      faces.rotation.y = flipTarget;
+      flippingCard.rotation.y = flipTarget;
       group.rotation.x = 0;
       group.rotation.y = 0;
       group.rotation.z = rotationTarget;
@@ -226,10 +286,16 @@ export function CardMesh({
         group.position.y = positionYTarget;
       }
       group.position.z = zTarget;
+      group.scale.set(scaleTarget, scaleTarget, 1);
       return;
     }
 
-    const nextFlip = MathUtils.damp(faces.rotation.y, flipTarget, 16, delta);
+    const nextFlip = MathUtils.damp(
+      flippingCard.rotation.y,
+      flipTarget,
+      10,
+      delta
+    );
     const nextTiltX = MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
     const nextTiltY = MathUtils.damp(group.rotation.y, tiltYTarget, 14, delta);
     const nextRotation = MathUtils.damp(
@@ -245,6 +311,12 @@ export function CardMesh({
       ? group.position.y
       : MathUtils.damp(group.position.y, positionYTarget, 15, delta);
     const nextZ = MathUtils.damp(group.position.z, zTarget, 18, delta);
+    const nextScale = MathUtils.damp(
+      group.scale.x,
+      scaleTarget,
+      12,
+      delta
+    );
 
     const needsAnotherFrame =
       Math.abs(nextFlip - flipTarget) > 0.0008 ||
@@ -253,15 +325,17 @@ export function CardMesh({
       Math.abs(nextRotation - rotationTarget) > 0.0008 ||
       Math.abs(nextX - positionXTarget) > 0.0008 ||
       Math.abs(nextY - positionYTarget) > 0.0008 ||
-      Math.abs(nextZ - zTarget) > 0.0008;
+      Math.abs(nextZ - zTarget) > 0.0008 ||
+      Math.abs(nextScale - scaleTarget) > 0.0008;
 
-    faces.rotation.y = nextFlip;
+    flippingCard.rotation.y = nextFlip;
     group.rotation.x = nextTiltX;
     group.rotation.y = nextTiltY;
     group.rotation.z = nextRotation;
     group.position.x = nextX;
     group.position.y = nextY;
     group.position.z = nextZ;
+    group.scale.set(nextScale, nextScale, 1);
 
     if (needsAnotherFrame) {
       invalidate();
@@ -278,8 +352,21 @@ export function CardMesh({
       return;
     }
 
+    const mode =
+      card.zone === "table" &&
+      selected &&
+      event.nativeEvent.pointerType !== "touch" &&
+      isNearCardEdge(event)
+        ? "rotate"
+        : "move";
+    const startAngle = Math.atan2(
+      point.y - group.position.y,
+      point.x - group.position.x
+    );
+
     target.setPointerCapture?.(event.pointerId);
     dragRef.current = {
+      mode,
       pointerId: event.pointerId,
       origin: point.clone(),
       offset: new Vector3(
@@ -291,8 +378,12 @@ export function CardMesh({
       moved: false,
       tiltX: 0,
       tiltY: 0,
+      startAngle,
+      startRotation: card.rotation,
+      previewRotation: card.rotation,
     };
     setDragging(true);
+    canvas.style.cursor = mode === "rotate" ? "crosshair" : "grabbing";
     onSelect(card.id);
     invalidate();
   };
@@ -301,12 +392,60 @@ export function CardMesh({
     const drag = dragRef.current;
     const group = groupRef.current;
 
-    if (!drag || drag.pointerId !== event.pointerId || !group) {
+    if (!group) {
+      return;
+    }
+
+    if (!drag) {
+      if (event.nativeEvent.pointerType !== "touch") {
+        const ready =
+          card.zone === "table" && selected && isNearCardEdge(event);
+
+        if (ready !== rotationReady) {
+          setRotationReady(ready);
+        }
+
+        canvas.style.cursor = ready ? "crosshair" : "grab";
+      }
+
+      return;
+    }
+
+    if (drag.pointerId !== event.pointerId) {
       return;
     }
 
     event.stopPropagation();
     const point = getPointerPoint(event);
+
+    if (drag.mode === "rotate") {
+      const pointerAngle = Math.atan2(
+        point.y - group.position.y,
+        point.x - group.position.x
+      );
+      let angleDelta = pointerAngle - drag.startAngle;
+
+      if (angleDelta > Math.PI) {
+        angleDelta -= Math.PI * 2;
+      } else if (angleDelta < -Math.PI) {
+        angleDelta += Math.PI * 2;
+      }
+
+      const rawRotation =
+        drag.startRotation + MathUtils.radToDeg(angleDelta);
+      const previewRotation = event.nativeEvent.shiftKey
+        ? Math.round(rawRotation / 15) * 15
+        : rawRotation;
+
+      drag.previewRotation = previewRotation;
+      drag.moved =
+        Math.abs(previewRotation - drag.startRotation) > 0.8;
+      drag.lastPoint.copy(point);
+      group.rotation.z = MathUtils.degToRad(previewRotation);
+      invalidate();
+      return;
+    }
+
     const nextX = point.x - drag.offset.x;
     const nextY = point.y - drag.offset.y;
     const deltaX = point.x - drag.lastPoint.x;
@@ -335,22 +474,32 @@ export function CardMesh({
     event.stopPropagation();
     const target = event.target as unknown as PointerCaptureTarget;
     target.releasePointerCapture?.(event.pointerId);
-    const point = getPointerPoint(event);
-    const nextPoint = layout.toPoint(
-      point.x - drag.offset.x,
-      point.y - drag.offset.y
-    );
 
     if (!cancelled) {
-      if (card.zone === "deck" && drag.moved) {
-        onDraw(card.id, nextPoint);
-      } else if (drag.moved) {
-        onMove(card.id, nextPoint);
+      if (drag.mode === "rotate" && drag.moved) {
+        onRotate(
+          card.id,
+          drag.previewRotation - drag.startRotation
+        );
+      } else if (drag.mode === "move" && drag.moved) {
+        const point = getPointerPoint(event);
+        const nextPoint = layout.toPoint(
+          point.x - drag.offset.x,
+          point.y - drag.offset.y
+        );
+
+        if (card.zone === "deck") {
+          onDraw(card.id, nextPoint);
+        } else {
+          onMove(card.id, nextPoint);
+        }
       }
     }
 
     dragRef.current = null;
     setDragging(false);
+    setRotationReady(false);
+    canvas.style.cursor = "grab";
     invalidate();
   };
 
@@ -362,50 +511,69 @@ export function CardMesh({
     }
   };
 
-  // Keep the Three.js texture cache bounded: the canvas only loads compact
-  // artwork, while the higher-resolution variant remains available for a
-  // future close-reading panel outside the WebGL texture cache.
-  const frontTexture = definition.image.preview;
-
   return (
     <group
       ref={groupRef}
-      position={[targetPosition[0], targetPosition[1], baseZ]}
+      position={[targetPosition[0], targetPosition[1], restingZ]}
       rotation={[0, 0, MathUtils.degToRad(card.rotation)]}
     >
-      {selected && (
-        <mesh position={[0, 0, -CARD_THICKNESS / 2 - 0.008]} renderOrder={0}>
-          <planeGeometry args={[cardWidth + 0.13, cardHeight + 0.13]} />
-          <meshBasicMaterial
-            color="#d7b66e"
-            transparent
-            opacity={0.42}
-            depthWrite={false}
-          />
-        </mesh>
+      {selected && card.zone === "table" && (
+        <>
+          <RoundedBox
+            args={[cardWidth + 0.14, cardHeight + 0.14, 0.018]}
+            radius={0.085}
+            smoothness={5}
+            position={[0, 0, -CARD_THICKNESS / 2 - 0.009]}
+            renderOrder={0}
+          >
+            <meshBasicMaterial
+              color={rotationReady ? "#f1d18a" : "#c7a361"}
+              transparent
+              opacity={rotationReady ? 0.86 : 0.5}
+              depthWrite={false}
+            />
+          </RoundedBox>
+          {[
+            [-cardWidth / 2, -cardHeight / 2],
+            [-cardWidth / 2, cardHeight / 2],
+            [cardWidth / 2, -cardHeight / 2],
+            [cardWidth / 2, cardHeight / 2],
+          ].map(([x, y]) => (
+            <mesh
+              key={`${x}-${y}`}
+              position={[x, y, CARD_THICKNESS / 2 + 0.015]}
+              renderOrder={8}
+            >
+              <circleGeometry args={[0.052, 20]} />
+              <meshBasicMaterial
+                color={rotationReady ? "#f1d18a" : "#c7a361"}
+                depthTest={false}
+              />
+            </mesh>
+          ))}
+        </>
       )}
-      <RoundedBox
-        args={[cardWidth, cardHeight, CARD_THICKNESS]}
-        radius={0.055}
-        smoothness={4}
-        castShadow
-        receiveShadow
-      >
-        <meshStandardMaterial
-          color="#eee1c5"
-          roughness={0.62}
-          metalness={0.04}
-        />
-      </RoundedBox>
-      <group
-        ref={faceRef}
-        rotation={[0, card.faceUp ? 0 : Math.PI, 0]}
-      >
-        <CardFaceLayers
-          artworkUrl={frontTexture}
-          cardWidth={cardWidth}
-          cardHeight={cardHeight}
-        />
+      <group ref={flipRef} rotation={[0, card.faceUp ? 0 : Math.PI, 0]}>
+        <RoundedBox
+          args={[cardWidth, cardHeight, CARD_THICKNESS]}
+          radius={0.075}
+          smoothness={5}
+          castShadow
+          receiveShadow
+        >
+          <meshStandardMaterial
+            color="#eee1c5"
+            roughness={0.62}
+            metalness={0.04}
+          />
+        </RoundedBox>
+        {hasRevealed && (
+          <CardFaceLayers
+            artworkUrl={frontTexture}
+            cardWidth={cardWidth}
+            cardHeight={cardHeight}
+          />
+        )}
         <CardFaceLayers
           artworkUrl={cardSet.back.preview}
           cardWidth={cardWidth}
@@ -423,11 +591,19 @@ export function CardMesh({
         onPointerOver={(event) => {
           if (event.nativeEvent.pointerType !== "touch") {
             setHovered(true);
+            const ready =
+              card.zone === "table" && selected && isNearCardEdge(event);
+            setRotationReady(ready);
+            canvas.style.cursor = ready ? "crosshair" : "grab";
             invalidate();
           }
         }}
         onPointerOut={() => {
           setHovered(false);
+          if (!dragRef.current) {
+            setRotationReady(false);
+            canvas.style.cursor = "default";
+          }
           invalidate();
         }}
         onDoubleClick={handleDoubleClick}

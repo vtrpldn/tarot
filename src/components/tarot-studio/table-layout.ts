@@ -24,11 +24,11 @@ export function createSceneTableLayout({
 }): SceneTableLayout {
   const isMobile = pixelWidth < 720;
   const requestedCardWidth = clamp(
-    viewportWidth * (isMobile ? 0.44 : 0.24),
-    isMobile ? 1.88 : 2.1,
-    isMobile ? 2.44 : 2.92
+    viewportWidth * (isMobile ? 0.66 : 0.36),
+    isMobile ? 2.82 : 3.15,
+    isMobile ? 3.66 : 4.38
   );
-  const verticalUiReserve = isMobile ? 2.75 : 2.15;
+  const verticalUiReserve = isMobile ? 3.2 : 2.35;
   const widthAllowedByHeight = Math.max(
     1.2,
     Math.max(0, viewportHeight - verticalUiReserve) * cardAspectRatio
@@ -40,7 +40,9 @@ export function createSceneTableLayout({
   const deckY = isMobile
     ? viewportHeight * 0.08
     : -Math.min(viewportHeight * 0.16, 1.9);
-  const tableLeft = deckX + cardWidth / 2 + (isMobile ? 0.34 : 0.54);
+  const tableLeft = isMobile
+    ? -viewportWidth / 2 + horizontalPadding + cardWidth / 2
+    : deckX + cardWidth / 2 + 0.54;
   const tableRight = viewportWidth / 2 - horizontalPadding - cardWidth / 2;
   const tableTop = viewportHeight / 2 - cardHeight / 2 - (isMobile ? 0.55 : 0.6);
   const tableBottom =

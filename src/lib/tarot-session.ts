@@ -267,7 +267,6 @@ export function tarotSessionReducer(
         ? {
           ...candidate,
           position: action.position,
-          scale: 1,
           zIndex: nextZIndex(session.cards),
           }
         : candidate
@@ -296,7 +295,7 @@ export function tarotSessionReducer(
       candidate.id === action.cardId
         ? {
             ...candidate,
-            rotation: (candidate.rotation + degrees) % 360,
+            rotation: candidate.rotation + degrees,
             zIndex: nextZIndex(session.cards),
           }
         : candidate
@@ -313,7 +312,6 @@ export function tarotSessionReducer(
             clampTablePoint(candidate.position[0] + action.delta[0]),
             clampTablePoint(candidate.position[1] + action.delta[1]),
           ] as TablePoint,
-          scale: 1,
           zIndex: nextZIndex(session.cards),
         }
       : candidate

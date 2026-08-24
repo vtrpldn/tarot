@@ -51,6 +51,7 @@ function Shortcut({ children }: { children: ReactNode }) {
 
 export function TarotStudio() {
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
+  const [viewZoom, setViewZoom] = useState(1);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -99,11 +100,17 @@ export function TarotStudio() {
     }
   }, [selectedCard]);
 
-  const rotateSelected = useCallback(() => {
+  const turnSelected = useCallback((degrees: number) => {
     if (selectedCard?.zone === "table") {
-      dispatch({ type: "rotate", cardId: selectedCard.id });
+      dispatch({ type: "rotate", cardId: selectedCard.id, degrees });
     }
   }, [selectedCard]);
+
+  const adjustViewZoom = useCallback((delta: number) => {
+    setViewZoom((current) =>
+      Math.min(1.35, Math.max(0.65, Number((current + delta).toFixed(2))))
+    );
+  }, []);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -122,7 +129,37 @@ export function TarotStudio() {
 
     if (key === "r" && selectedCard?.zone === "table") {
       event.preventDefault();
-      rotateSelected();
+      turnSelected(180);
+      return;
+    }
+
+    if (event.key === "[" && selectedCard?.zone === "table") {
+      event.preventDefault();
+      turnSelected(-15);
+      return;
+    }
+
+    if (event.key === "]" && selectedCard?.zone === "table") {
+      event.preventDefault();
+      turnSelected(15);
+      return;
+    }
+
+    if (event.key === "-" || event.key === "_") {
+      event.preventDefault();
+      adjustViewZoom(-0.1);
+      return;
+    }
+
+    if (event.key === "+" || event.key === "=") {
+      event.preventDefault();
+      adjustViewZoom(0.1);
+      return;
+    }
+
+    if (event.key === "0") {
+      event.preventDefault();
+      setViewZoom(1);
       return;
     }
 
@@ -154,13 +191,16 @@ export function TarotStudio() {
     }
   };
 
+  const normalizedRotation = selectedCard
+    ? ((selectedCard.rotation % 360) + 360) % 360
+    : 0;
   const selectedTitle = selectedCard?.faceUp
     ? selectedDefinition?.name ?? "Selected card"
     : selectedCard
       ? "Face-down card"
       : "Nothing selected";
   const selectedHint = selectedCard?.faceUp
-    ? `${selectedCard.rotation ? "Reversed · " : ""}${selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"}`
+    ? `${Math.abs(normalizedRotation - 180) < 0.8 ? "Reversed · " : normalizedRotation > 0.8 ? `Rotation ${Math.round(normalizedRotation)}° · ` : ""}${selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"}`
     : selectedCard
       ? "Select Flip when you are ready to reveal it."
       : "Draw a card or tap one on the table.";
@@ -171,14 +211,15 @@ export function TarotStudio() {
       <div
         className="tarot-canvas-shell"
         tabIndex={0}
-        role="application"
-        aria-label="Interactive tarot table. Drag the top card to draw it, drag table cards to arrange them, and use the controls to flip or rotate a selected card."
+        role="region"
+        aria-label="Interactive tarot table. Drag the top card to draw it, drag table cards to arrange them, and drag near a selected card edge to rotate it."
         onKeyDown={handleKeyDown}
       >
         <TarotScene
           cardSet={activeCardSet}
           session={session}
           reducedMotion={reducedMotion}
+          viewZoom={viewZoom}
           onSelect={(cardId) => dispatch({ type: "select", cardId })}
           onDraw={(cardId, position) =>
             dispatch({ type: "draw", cardId, position })
@@ -187,6 +228,9 @@ export function TarotStudio() {
             dispatch({ type: "move", cardId, position })
           }
           onFlip={(cardId) => dispatch({ type: "flip", cardId })}
+          onRotate={(cardId, degrees) =>
+            dispatch({ type: "rotate", cardId, degrees })
+          }
         />
       </div>
 
@@ -245,8 +289,14 @@ export function TarotStudio() {
             <button type="button" onClick={flipSelected}>
               Flip <Shortcut>F</Shortcut>
             </button>
-            <button type="button" onClick={rotateSelected}>
-              Rotate <Shortcut>R</Shortcut>
+            <button type="button" onClick={() => turnSelected(-15)}>
+              Turn −15° <Shortcut>[</Shortcut>
+            </button>
+            <button type="button" onClick={() => turnSelected(15)}>
+              Turn +15° <Shortcut>]</Shortcut>
+            </button>
+            <button type="button" onClick={() => turnSelected(180)}>
+              Reverse <Shortcut>R</Shortcut>
             </button>
           </div>
         </aside>
@@ -262,6 +312,32 @@ export function TarotStudio() {
           Draw card
           <span>{topDeckCard ? "or drag the deck" : "deck is empty"}</span>
         </button>
+        <div className="tarot-zoom-controls" aria-label="Table zoom">
+          <button
+            type="button"
+            aria-label="Zoom out"
+            onClick={() => adjustViewZoom(-0.1)}
+            disabled={viewZoom <= 0.65}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            aria-label="Reset table zoom"
+            title="Reset zoom"
+            onClick={() => setViewZoom(1)}
+          >
+            {Math.round(viewZoom * 100)}%
+          </button>
+          <button
+            type="button"
+            aria-label="Zoom in"
+            onClick={() => adjustViewZoom(0.1)}
+            disabled={viewZoom >= 1.35}
+          >
+            +
+          </button>
+        </div>
         <div className="tarot-arrange-actions" aria-label="Arrange cards">
           <button
             type="button"
