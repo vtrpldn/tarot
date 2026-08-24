@@ -9,6 +9,8 @@ import type {
 
 const HISTORY_LIMIT = 24;
 
+const clampTablePoint = (value: number) => Math.min(1, Math.max(-1, value));
+
 function shuffle<T>(items: T[]): T[] {
   const shuffled = [...items];
 
@@ -62,6 +64,7 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
     zone: "deck" as const,
     position: [0, 0] as TablePoint,
     rotation: 0,
+    scale: 1,
     zIndex: index,
     faceUp: false,
   }));
@@ -96,10 +99,13 @@ export function createLayout(
   cards: TableCard[],
   cardSet: CardSetDefinition,
   layout: TableLayout
-): Map<string, Pick<TableCard, "position" | "rotation" | "zIndex">> {
+): Map<
+  string,
+  Pick<TableCard, "position" | "rotation" | "scale" | "zIndex">
+> {
   const placements = new Map<
     string,
-    Pick<TableCard, "position" | "rotation" | "zIndex">
+    Pick<TableCard, "position" | "rotation" | "scale" | "zIndex">
   >();
   const orderedCards =
     layout === "sort"
@@ -119,7 +125,8 @@ export function createLayout(
     orderedCards.forEach((card, index) => {
       placements.set(card.id, {
         position: [index * 0.008, index * 0.01],
-        rotation: 0,
+        rotation: card.rotation,
+        scale: 1,
         zIndex: index + 1,
       });
     });
@@ -135,7 +142,8 @@ export function createLayout(
       const offset = index - midpoint;
       placements.set(card.id, {
         position: [offset * spread, -Math.abs(offset) * 0.025],
-        rotation: offset * 8,
+        rotation: card.rotation + offset * 8,
+        scale: 1,
         zIndex: index + 1,
       });
     });
@@ -150,6 +158,7 @@ export function createLayout(
   const rows = Math.max(1, Math.ceil(orderedCards.length / columns));
   const horizontalGap = Math.min(0.44, 1.65 / Math.max(columns - 1, 1));
   const verticalGap = Math.min(0.54, 1.45 / Math.max(rows - 1, 1));
+  const cardScale = Math.min(1, 2.3 / Math.max(columns, rows));
 
   orderedCards.forEach((card, index) => {
     const column = index % columns;
@@ -159,7 +168,8 @@ export function createLayout(
         (column - (columns - 1) / 2) * horizontalGap,
         ((rows - 1) / 2 - row) * verticalGap,
       ],
-      rotation: 0,
+      rotation: card.rotation,
+      scale: cardScale,
       zIndex: index + 1,
     });
   });
@@ -178,7 +188,7 @@ export type TarotSessionAction =
       type: "layout";
       placements: Map<
         string,
-        Pick<TableCard, "position" | "rotation" | "zIndex">
+        Pick<TableCard, "position" | "rotation" | "scale" | "zIndex">
       >;
     }
   | { type: "undo" }
@@ -238,6 +248,7 @@ export function tarotSessionReducer(
             ...candidate,
             zone: "table" as const,
             position: action.position,
+            scale: 1,
             zIndex: nextZIndex(session.cards),
           }
         : candidate
@@ -254,9 +265,10 @@ export function tarotSessionReducer(
     const cards = session.cards.map((candidate) =>
       candidate.id === action.cardId
         ? {
-            ...candidate,
-            position: action.position,
-            zIndex: nextZIndex(session.cards),
+          ...candidate,
+          position: action.position,
+          scale: 1,
+          zIndex: nextZIndex(session.cards),
           }
         : candidate
     );
@@ -298,9 +310,10 @@ export function tarotSessionReducer(
       ? {
           ...candidate,
           position: [
-            candidate.position[0] + action.delta[0],
-            candidate.position[1] + action.delta[1],
+            clampTablePoint(candidate.position[0] + action.delta[0]),
+            clampTablePoint(candidate.position[1] + action.delta[1]),
           ] as TablePoint,
+          scale: 1,
           zIndex: nextZIndex(session.cards),
         }
       : candidate

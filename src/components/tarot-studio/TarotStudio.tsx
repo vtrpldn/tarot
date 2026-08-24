@@ -226,6 +226,32 @@ export function TarotStudio() {
         <p className="tarot-eyebrow">Selected card</p>
         <h2>{selectedTitle}</h2>
         <p>{selectedHint}</p>
+        <div className="tarot-card-browser">
+          <label htmlFor="drawn-card">Browse cards on the table</label>
+          <select
+            id="drawn-card"
+            value={session.selectedCardId ?? ""}
+            disabled={tableCards.length === 0}
+            onChange={(event) =>
+              dispatch({ type: "select", cardId: event.target.value || null })
+            }
+          >
+            <option value="">Select a drawn card</option>
+            {tableCards.map((card, index) => {
+              const definition = activeCardSet.cards.find(
+                (candidate) => candidate.id === card.cardId
+              );
+
+              return (
+                <option key={card.id} value={card.id}>
+                  {card.faceUp
+                    ? definition?.name ?? `Card ${index + 1}`
+                    : `Face-down card ${index + 1}`}
+                </option>
+              );
+            })}
+          </select>
+        </div>
         <div className="tarot-inspector-actions">
           <button
             type="button"

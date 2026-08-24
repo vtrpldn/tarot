@@ -114,6 +114,8 @@ export function CardMesh({
   const targetPosition =
     card.zone === "deck" ? layout.deckPosition : layout.toWorld(card.position);
   const baseZ = card.zone === "deck" ? 0.035 : card.zIndex * 0.003;
+  const cardWidth = layout.cardWidth * card.scale;
+  const cardHeight = layout.cardHeight * card.scale;
 
   useEffect(() => {
     if (card.faceUp) {
@@ -257,7 +259,10 @@ export function CardMesh({
     }
   };
 
-  const frontTexture = selected ? definition.image.detail : definition.image.preview;
+  // Keep the Three.js texture cache bounded: the canvas only loads compact
+  // artwork, while the higher-resolution variant remains available for a
+  // future close-reading panel outside the WebGL texture cache.
+  const frontTexture = definition.image.preview;
 
   return (
     <group
@@ -267,12 +272,12 @@ export function CardMesh({
     >
       {selected && (
         <mesh position={[0, 0, -0.045]} renderOrder={0}>
-          <planeGeometry args={[layout.cardWidth + 0.13, layout.cardHeight + 0.13]} />
+          <planeGeometry args={[cardWidth + 0.13, cardHeight + 0.13]} />
           <meshBasicMaterial color="#d7b66e" />
         </mesh>
       )}
       <mesh castShadow receiveShadow>
-        <boxGeometry args={[layout.cardWidth, layout.cardHeight, 0.075]} />
+        <boxGeometry args={[cardWidth, cardHeight, 0.075]} />
         <meshStandardMaterial color="#f0e4cc" roughness={0.72} metalness={0.04} />
       </mesh>
       <group
@@ -283,16 +288,16 @@ export function CardMesh({
           <CardArtwork
             url={frontTexture}
             position={[0, 0, 0.041]}
-            width={layout.cardWidth}
-            height={layout.cardHeight}
+            width={cardWidth}
+            height={cardHeight}
           />
         )}
         <CardArtwork
           url={cardSet.back.preview}
           position={[0, 0, -0.041]}
           rotation={[0, Math.PI, 0]}
-          width={layout.cardWidth}
-          height={layout.cardHeight}
+          width={cardWidth}
+          height={cardHeight}
         />
       </group>
       <mesh
@@ -314,7 +319,7 @@ export function CardMesh({
         }}
         onDoubleClick={handleDoubleClick}
       >
-        <planeGeometry args={[layout.cardWidth, layout.cardHeight]} />
+        <planeGeometry args={[cardWidth, cardHeight]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
     </group>

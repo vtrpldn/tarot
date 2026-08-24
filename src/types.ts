@@ -43,6 +43,7 @@ export type TableCard = {
   zone: TableZone;
   position: TablePoint;
   rotation: number;
+  scale: number;
   zIndex: number;
   faceUp: boolean;
 };

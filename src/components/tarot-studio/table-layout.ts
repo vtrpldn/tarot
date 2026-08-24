@@ -33,8 +33,8 @@ export function createSceneTableLayout({
   const horizontalPadding = isMobile ? 0.3 : 0.6;
   const deckX = -viewportWidth / 2 + cardWidth / 2 + horizontalPadding;
   const deckY = isMobile
-    ? viewportHeight / 2 - cardHeight / 2 - 0.75
-    : 0;
+    ? viewportHeight * 0.08
+    : -Math.min(viewportHeight * 0.18, 2.2);
   const tableLeft = deckX + cardWidth / 2 + (isMobile ? 0.32 : 0.72);
   const tableRight = viewportWidth / 2 - horizontalPadding - cardWidth / 2;
   const tableTop = viewportHeight / 2 - cardHeight / 2 - (isMobile ? 1.08 : 1.25);
