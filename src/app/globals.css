@@ -885,24 +885,6 @@ button {
   font-size: 0.74rem;
 }
 
-.tarot-card-perspective {
-  margin-top: 0.72rem;
-  padding-top: 0.72rem;
-  border-top: 1px solid rgba(234, 212, 155, 0.12);
-}
-
-.tarot-card-perspective > span {
-  color: var(--faint-ink);
-  font-family: var(--font-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.tarot-card-perspective p {
-  margin: 0.3rem 0 0;
-}
-
 @media (min-width: 768px) and (hover: hover) and (pointer: fine) {
   .tarot-toolbar[data-dock-state="hidden"] {
     opacity: 0;

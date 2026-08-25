@@ -2038,12 +2038,6 @@ export function TarotStudio() {
                           {selectedReading.traditionNote}
                         </p>
                       )}
-                      {selectedReading.perspective && (
-                        <div className="tarot-card-perspective">
-                          <span>{selectedReading.perspective.label}</span>
-                          <p>{selectedReading.perspective.text}</p>
-                        </div>
-                      )}
                       <div className="tarot-card-sources">
                         <span>{messages.sources}</span>
                         <ul>
