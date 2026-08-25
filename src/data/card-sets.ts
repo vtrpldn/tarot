@@ -18,7 +18,13 @@ const artwork = (filename: string): CardArtwork => {
 const lenormandArtwork = (filename: string): CardArtwork => ({
   preview: `/decks/classic-lenormand/preview/${filename}.webp`,
   detail: `/decks/classic-lenormand/detail/${filename}.webp`,
-  source: `/decks/classic-lenormand/source/${filename}.jpg`,
+  source: `/decks/classic-lenormand/source/${filename}.avif`,
+});
+
+const marseilleArtwork = (filename: string): CardArtwork => ({
+  preview: `/decks/tarot-de-marseille/preview/${filename}.webp`,
+  detail: `/decks/tarot-de-marseille/detail/${filename}.webp`,
+  source: `/decks/tarot-de-marseille/source/${filename}.webp`,
 });
 
 const majorArcana = [
@@ -107,6 +113,100 @@ export const riderWaiteSmith: CardSetDefinition = {
   cards: riderWaiteSmithCards,
 };
 
+const marseilleMajorArcana = [
+  ["00-le-mat", "Le Mat"],
+  ["01-le-bateleur", "Le Bateleur"],
+  ["02-la-papesse", "La Papesse"],
+  ["03-l-imperatrice", "L'Impératrice"],
+  ["04-l-empereur", "L'Empereur"],
+  ["05-le-pape", "Le Pape"],
+  ["06-l-amoureux", "L'Amoureux"],
+  ["07-le-chariot", "Le Chariot"],
+  ["08-la-justice", "La Justice"],
+  ["09-l-ermite", "L'Ermite"],
+  ["10-la-roue-de-fortune", "La Roue de Fortune"],
+  ["11-la-force", "La Force"],
+  ["12-le-pendu", "Le Pendu"],
+  ["13-arcane-xiii", "Arcane XIII"],
+  ["14-temperance", "Tempérance"],
+  ["15-le-diable", "Le Diable"],
+  ["16-la-maison-dieu", "La Maison Dieu"],
+  ["17-l-etoile", "L'Étoile"],
+  ["18-la-lune", "La Lune"],
+  ["19-le-soleil", "Le Soleil"],
+  ["20-le-jugement", "Le Jugement"],
+  ["21-le-monde", "Le Monde"],
+] as const;
+
+const marseilleRanks = [
+  ["1", "As"],
+  ["2", "Deux"],
+  ["3", "Trois"],
+  ["4", "Quatre"],
+  ["5", "Cinq"],
+  ["6", "Six"],
+  ["7", "Sept"],
+  ["8", "Huit"],
+  ["9", "Neuf"],
+  ["10", "Dix"],
+  ["page", "Valet"],
+  ["knight", "Cavalier"],
+  ["queen", "Reine"],
+  ["king", "Roi"],
+] as const;
+
+const marseilleSuits: Array<{
+  id: TarotSuit;
+  filename: string;
+  label: string;
+}> = [
+  { id: "cups", filename: "cups", label: "Coupes" },
+  { id: "pentacles", filename: "pentacles", label: "Deniers" },
+  { id: "swords", filename: "swords", label: "Épées" },
+  { id: "wands", filename: "wands", label: "Bâtons" },
+];
+
+const tarotDeMarseilleCards: CardDefinition[] = [
+  ...marseilleMajorArcana.map(([filename, name], order) => ({
+    id: filename,
+    name,
+    order,
+    image: marseilleArtwork(filename),
+    arcana: "major" as const,
+    rank: String(order),
+  })),
+  ...marseilleSuits.flatMap(({ id: suit, filename, label }, suitIndex) =>
+    marseilleRanks.map(([rank, rankLabel], rankIndex) => {
+      const cardFilename = `${filename}-${rank}`;
+
+      return {
+        id: cardFilename,
+        name: `${rankLabel} de ${label}`,
+        order:
+          marseilleMajorArcana.length +
+          suitIndex * marseilleRanks.length +
+          rankIndex,
+        image: marseilleArtwork(cardFilename),
+        arcana: "minor" as const,
+        suit,
+        rank,
+      };
+    })
+  ),
+];
+
+export const tarotDeMarseille: CardSetDefinition = {
+  id: "tarot-de-marseille",
+  kind: "tarot",
+  label: "Tarot de Marseille · Jean Dodal",
+  shortLabel: "Tarot de Marseille",
+  description:
+    "Jean Dodal's complete 78-card Tarot de Marseille, printed in Lyon circa 1701–1715.",
+  cardAspectRatio: 33 / 61,
+  back: marseilleArtwork("back"),
+  cards: tarotDeMarseilleCards,
+};
+
 const classicLenormandCards = [
   ["01-rider", "Rider"],
   ["02-clover", "Clover"],
@@ -149,11 +249,11 @@ const classicLenormandCards = [
 export const classicLenormand: CardSetDefinition = {
   id: "classic-lenormand",
   kind: "lenormand",
-  label: "Classic Lenormand",
-  shortLabel: "Classic Lenormand",
+  label: "Stralsund Lenormand",
+  shortLabel: "Stralsund Lenormand",
   description:
-    "The original 36-card Game of Hope, the historic foundation of Petit Lenormand.",
-  cardAspectRatio: 25 / 33,
+    "A complete 36-card Stralsund deck from Spielkartenfabrik Altenburg, circa 1890.",
+  cardAspectRatio: 51 / 83,
   back: lenormandArtwork("back"),
   cards: classicLenormandCards.map(([id, name], order) => ({
     id,
@@ -169,6 +269,7 @@ export const classicLenormand: CardSetDefinition = {
  */
 export const cardSets: CardSetDefinition[] = [
   riderWaiteSmith,
+  tarotDeMarseille,
   classicLenormand,
 ];
 

@@ -26,6 +26,10 @@ import {
   popularTarotSpreads,
   type TarotSpread,
 } from "@/lib/tarot-spreads";
+import {
+  loadTarotWorkspace,
+  saveTarotWorkspace,
+} from "@/lib/tarot-workspace";
 import type { CardLayerDirection, TableLayout } from "@/types";
 import {
   MAX_VIEW_ZOOM,
@@ -68,6 +72,8 @@ export function TarotStudio() {
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
   const activeSpreadRef = useRef<TarotSpread | null>(null);
+  const arrangeMenuRef = useRef<HTMLDivElement>(null);
+  const arrangeMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const shuffleMenuRef = useRef<HTMLDivElement>(null);
   const shuffleMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const layerWheelRef = useRef({
@@ -77,9 +83,11 @@ export function TarotStudio() {
   });
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
   const [viewZoom, setViewZoom] = useState(1);
+  const [isArrangeMenuOpen, setIsArrangeMenuOpen] = useState(false);
   const [isShuffleMenuOpen, setIsShuffleMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
+  const [isWorkspaceReady, setIsWorkspaceReady] = useState(false);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -107,6 +115,70 @@ export function TarotStudio() {
   const deckCount = getRemainingDeckCount(session);
   const deckCardNoun = deckCount === 1 ? "card" : "cards";
   const tableCardNoun = tableCards.length === 1 ? "card" : "cards";
+
+  useEffect(() => {
+    const workspace = loadTarotWorkspace(cardSets);
+
+    if (workspace) {
+      setActiveCardSetId(workspace.activeCardSetId);
+      setViewZoom(
+        Math.min(MAX_VIEW_ZOOM, Math.max(MIN_VIEW_ZOOM, workspace.viewZoom))
+      );
+      setIsInspectorCollapsed(workspace.isInspectorCollapsed);
+      dispatch({ type: "restore", session: workspace.session });
+    }
+
+    setIsWorkspaceReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isWorkspaceReady) {
+      return;
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      saveTarotWorkspace({
+        activeCardSetId,
+        isInspectorCollapsed,
+        session,
+        viewZoom,
+      });
+    }, 160);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [
+    activeCardSetId,
+    isInspectorCollapsed,
+    isWorkspaceReady,
+    session,
+    viewZoom,
+  ]);
+
+  useEffect(() => {
+    if (!isArrangeMenuOpen) {
+      return;
+    }
+
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!arrangeMenuRef.current?.contains(event.target as Node)) {
+        setIsArrangeMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsArrangeMenuOpen(false);
+        arrangeMenuTriggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isArrangeMenuOpen]);
 
   useEffect(() => {
     if (!isShuffleMenuOpen) {
@@ -395,6 +467,17 @@ export function TarotStudio() {
       ? `Face down · Layer ${selectedTableIndex + 1} of ${tableCards.length}. Scroll over it to restack.`
       : "Draw a card or tap one on the table.";
 
+  if (!isWorkspaceReady) {
+    return (
+      <main className="tarot-app tarot-app--restoring">
+        <div className="tarot-grain" aria-hidden="true" />
+        <div className="tarot-workspace-loading" role="status">
+          Opening the table…
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="tarot-app">
       <div className="tarot-grain" aria-hidden="true" />
@@ -600,42 +683,78 @@ export function TarotStudio() {
             +
           </button>
         </div>
-        <div className="tarot-arrange-actions" aria-label="Arrange cards">
+        <div className="tarot-arrange-menu" ref={arrangeMenuRef}>
           <button
+            ref={arrangeMenuTriggerRef}
             type="button"
-            onClick={() => arrangeCards("fan")}
-            disabled={!tableCards.length}
+            className="tarot-arrange-trigger"
+            aria-label="Arrange cards and undo"
+            aria-controls="arrange-actions"
+            aria-expanded={isArrangeMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              setIsShuffleMenuOpen(false);
+              setIsArrangeMenuOpen((isOpen) => !isOpen);
+            }}
+            disabled={!tableCards.length && !session.history.length}
           >
-            Fan
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 7.5h10v12H5zM9 4.5h10v12" />
+              <path d="M8 11.5h4M8 14.5h4" />
+            </svg>
+            <span>Arrange</span>
+            <svg
+              className="tarot-menu-chevron"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="m8 10 4 4 4-4" />
+            </svg>
           </button>
-          <button
-            type="button"
-            onClick={() => arrangeCards("grid")}
-            disabled={!tableCards.length}
-          >
-            Grid
-          </button>
-          <button
-            type="button"
-            onClick={() => arrangeCards("stack")}
-            disabled={!tableCards.length}
-          >
-            Stack
-          </button>
-          <button
-            type="button"
-            onClick={() => arrangeCards("sort")}
-            disabled={!tableCards.length}
-          >
-            Sort
-          </button>
-          <button
-            type="button"
-            onClick={undoLastAction}
-            disabled={!session.history.length}
-          >
-            Undo
-          </button>
+          {isArrangeMenuOpen && (
+            <div
+              id="arrange-actions"
+              className="tarot-arrange-popover"
+              role="dialog"
+              aria-label="Arrange cards and undo"
+            >
+              <p>Table actions</p>
+              <div>
+                {(
+                  [
+                    ["fan", "Fan", "Open arc"],
+                    ["grid", "Grid", "Even rows"],
+                    ["stack", "Stack", "Single pile"],
+                    ["sort", "Sort", "Deck order"],
+                  ] as const
+                ).map(([layout, label, hint]) => (
+                  <button
+                    key={layout}
+                    type="button"
+                    onClick={() => {
+                      arrangeCards(layout);
+                      setIsArrangeMenuOpen(false);
+                    }}
+                    disabled={!tableCards.length}
+                  >
+                    <span>{label}</span>
+                    <small>{hint}</small>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    undoLastAction();
+                    setIsArrangeMenuOpen(false);
+                  }}
+                  disabled={!session.history.length}
+                >
+                  <span>Undo</span>
+                  <small>Last table move</small>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="tarot-shuffle-menu" ref={shuffleMenuRef}>
           <button
@@ -646,14 +765,17 @@ export function TarotStudio() {
             aria-controls="shuffle-actions"
             aria-expanded={isShuffleMenuOpen}
             aria-haspopup="dialog"
-            onClick={() => setIsShuffleMenuOpen((isOpen) => !isOpen)}
+            onClick={() => {
+              setIsArrangeMenuOpen(false);
+              setIsShuffleMenuOpen((isOpen) => !isOpen);
+            }}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7h2.7c3.2 0 4 10 7.3 10H20" />
               <path d="m17 14 3 3-3 3M4 17h2.7c1.2 0 2-.7 2.8-1.7M14.5 7H20m-3-3 3 3-3 3" />
             </svg>
             <span>Shuffle</span>
-            <svg className="tarot-shuffle-chevron" viewBox="0 0 24 24" aria-hidden="true">
+            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
               <path d="m8 10 4 4 4-4" />
             </svg>
           </button>

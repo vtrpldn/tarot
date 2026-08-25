@@ -187,6 +187,7 @@ export function createLayout(
 }
 
 export type TarotSessionAction =
+  | { type: "restore"; session: TarotSession }
   | { type: "select"; cardId: string | null }
   | {
       type: "draw";
@@ -229,6 +230,19 @@ export function tarotSessionReducer(
   session: TarotSession,
   action: TarotSessionAction
 ): TarotSession {
+  if (action.type === "restore") {
+    return {
+      ...action.session,
+      cards: cloneCards(action.session.cards),
+      deckPosition: cloneDeckPosition(action.session.deckPosition),
+      history: action.session.history.map((entry) => ({
+        cards: cloneCards(entry.cards),
+        deckPosition: cloneDeckPosition(entry.deckPosition),
+        selectedCardId: entry.selectedCardId,
+      })),
+    };
+  }
+
   if (action.type === "select") {
     return { ...session, selectedCardId: action.cardId };
   }
@@ -385,10 +399,6 @@ export function tarotSessionReducer(
         ? {
             ...candidate,
             faceUp: !candidate.faceUp,
-            zIndex:
-              card.zone === "table"
-                ? nextZIndex(session.cards)
-                : candidate.zIndex,
           }
         : candidate
     );
@@ -458,7 +468,6 @@ export function tarotSessionReducer(
         ? {
             ...candidate,
             rotation: candidate.rotation + degrees,
-            zIndex: nextZIndex(session.cards),
           }
         : candidate
     );
@@ -474,7 +483,6 @@ export function tarotSessionReducer(
             clampTablePoint(candidate.position[0] + action.delta[0]),
             clampTablePoint(candidate.position[1] + action.delta[1]),
           ] as TablePoint,
-          zIndex: nextZIndex(session.cards),
         }
       : candidate
   );

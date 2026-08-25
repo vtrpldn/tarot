@@ -16,47 +16,67 @@ const expected = [
   "31-sun", "32-moon", "33-key", "34-fish", "35-anchor", "36-cross", "back",
 ];
 
-const dimensions = async (path) => {
-  const { stdout } = await execFileAsync("identify", ["-format", "%w %h", path]);
-  return stdout.trim().split(" ").map(Number);
-};
-const expectedDimensions = {
-  source: [600, 792],
-  preview: [512, 676],
-  detail: [600, 792],
+const metadata = async (path) => {
+  const { stdout } = await execFileAsync("identify", [
+    "-format",
+    "%m %w %h %[opaque]",
+    path,
+  ]);
+  const [format, width, height, opaque] = stdout.trim().split(" ");
+  return { format, width: Number(width), height: Number(height), opaque };
 };
 
 const failures = [];
-const report = [];
-const variantDimensions = new Map();
 
 for (const name of expected) {
   const files = [
-    { label: "source", path: join(deckDirectory, "source", `${name}.jpg`) },
-    { label: "preview", path: join(deckDirectory, "preview", `${name}.webp`) },
-    { label: "detail", path: join(deckDirectory, "detail", `${name}.webp`) },
+    {
+      label: "source",
+      path: join(deckDirectory, "source", `${name}.avif`),
+      format: "AVIF",
+    },
+    {
+      label: "preview",
+      path: join(deckDirectory, "preview", `${name}.webp`),
+      format: "WEBP",
+      width: 510,
+      height: 830,
+    },
+    {
+      label: "detail",
+      path: join(deckDirectory, "detail", `${name}.webp`),
+      format: "WEBP",
+      width: 918,
+      height: 1494,
+    },
   ];
 
   for (const file of files) {
     try {
       await access(file.path);
-      const [width, height] = await dimensions(file.path);
-      const [expectedWidth, expectedHeight] = expectedDimensions[file.label];
-      if (width !== expectedWidth || height !== expectedHeight) {
+      const result = await metadata(file.path);
+
+      if (result.format !== file.format) {
         failures.push(
-          `${file.label}/${name}: ${width}x${height}, expected ${expectedWidth}x${expectedHeight}`
+          `${file.label}/${name}: ${result.format}, expected ${file.format}`
         );
       }
-      const key = file.label;
-      const previous = variantDimensions.get(key);
-      if (previous && (previous[0] !== width || previous[1] !== height)) {
+
+      if (file.label === "source") {
+        if (result.width < 1200 || result.height < 2000) {
+          failures.push(
+            `${file.label}/${name}: ${result.width}x${result.height}, expected at least 1200x2000`
+          );
+        }
+      } else if (result.width !== file.width || result.height !== file.height) {
         failures.push(
-          `${file.label}/${name}: ${width}x${height}, expected ${previous[0]}x${previous[1]}`
+          `${file.label}/${name}: ${result.width}x${result.height}, expected ${file.width}x${file.height}`
         );
-      } else if (!previous) {
-        variantDimensions.set(key, [width, height]);
       }
-      report.push(`${file.label}/${name} ${width}x${height}`);
+
+      if (result.opaque !== "False") {
+        failures.push(`${file.label}/${name}: expected preserved edge transparency`);
+      }
     } catch {
       failures.push(`${file.label}/${name}: missing or unreadable`);
     }
@@ -68,10 +88,6 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`Validated ${expected.length} source, preview, and detail assets.`);
 console.log(
-  `Uniform dimensions: ${[...variantDimensions.entries()]
-    .map(([variant, [width, height]]) => `${variant} ${width}x${height}`)
-    .join(", ")}.`
+  `Validated ${expected.length} native Stralsund sources and optimized transparent preview/detail assets.`
 );
-console.log(report.join("\n"));
