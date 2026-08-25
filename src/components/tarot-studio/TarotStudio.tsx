@@ -1029,6 +1029,12 @@ export function TarotStudio() {
 
       event.preventDefault();
       event.stopPropagation();
+      hoveredCardIdRef.current = null;
+      layerWheelRef.current = {
+        accumulatedDelta: 0,
+        direction: 0,
+        lastChangeAt: 0,
+      };
       event.currentTarget.setPointerCapture(event.pointerId);
       panGestureRef.current = {
         pointerId: event.pointerId,
