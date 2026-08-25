@@ -1,5 +1,5 @@
 import type { AppLocale } from "./locale";
-import type { CardSpreadId } from "@/lib/tarot-spreads";
+import type { CardSpreadId } from "@/types";
 
 type CardCategory = "lenormand" | "major" | "minor";
 

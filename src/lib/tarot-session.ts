@@ -1,4 +1,5 @@
 import type {
+  ActiveSpreadReading,
   CardLayerDirection,
   CardSetDefinition,
   TableCard,
@@ -39,12 +40,21 @@ function cloneCards(cards: TableCard[]): TableCard[] {
   }));
 }
 
+function cloneActiveSpread(
+  activeSpread: ActiveSpreadReading | null
+): ActiveSpreadReading | null {
+  return activeSpread
+    ? { ...activeSpread, cardIds: [...activeSpread.cardIds] }
+    : null;
+}
+
 function cloneDeckPosition(position: TablePoint | null): TablePoint | null {
   return position ? ([...position] as TablePoint) : null;
 }
 
 function cloneSnapshots(snapshots: TableSnapshot[]): TableSnapshot[] {
   return snapshots.map((entry) => ({
+    activeSpread: cloneActiveSpread(entry.activeSpread),
     cards: cloneCards(entry.cards),
     deckPosition: cloneDeckPosition(entry.deckPosition),
     selectedCardId: entry.selectedCardId,
@@ -53,6 +63,7 @@ function cloneSnapshots(snapshots: TableSnapshot[]): TableSnapshot[] {
 
 function snapshot(session: TarotSession): TableSnapshot {
   return {
+    activeSpread: cloneActiveSpread(session.activeSpread),
     cards: cloneCards(session.cards),
     deckPosition: cloneDeckPosition(session.deckPosition),
     selectedCardId: session.selectedCardId,
@@ -63,10 +74,12 @@ function commit(
   session: TarotSession,
   cards: TableCard[],
   selectedCardId = session.selectedCardId,
-  deckPosition = session.deckPosition
+  deckPosition = session.deckPosition,
+  activeSpread = session.activeSpread
 ): TarotSession {
   return {
     ...session,
+    activeSpread: cloneActiveSpread(activeSpread),
     cards,
     deckPosition: cloneDeckPosition(deckPosition),
     selectedCardId,
@@ -96,6 +109,7 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
   }));
 
   return {
+    activeSpread: null,
     cardSetId: cardSet.id,
     cards,
     deckPosition: null,
@@ -270,6 +284,7 @@ export function tarotSessionReducer(
   if (action.type === "restore") {
     return {
       ...action.session,
+      activeSpread: cloneActiveSpread(action.session.activeSpread),
       cards: cloneCards(action.session.cards),
       deckPosition: cloneDeckPosition(action.session.deckPosition),
       history: cloneSnapshots(action.session.history),
@@ -294,6 +309,7 @@ export function tarotSessionReducer(
 
     return {
       ...session,
+      activeSpread: cloneActiveSpread(previous.activeSpread),
       cards: cloneCards(previous.cards),
       deckPosition: cloneDeckPosition(previous.deckPosition),
       selectedCardId: previous.selectedCardId,
@@ -311,6 +327,7 @@ export function tarotSessionReducer(
 
     return {
       ...session,
+      activeSpread: cloneActiveSpread(next.activeSpread),
       cards: cloneCards(next.cards),
       deckPosition: cloneDeckPosition(next.deckPosition),
       selectedCardId: next.selectedCardId,
@@ -385,7 +402,8 @@ export function tarotSessionReducer(
       session,
       cards,
       session.selectedCardId,
-      action.deckPosition ?? session.deckPosition
+      action.deckPosition ?? session.deckPosition,
+      null
     );
   }
 
@@ -430,7 +448,11 @@ export function tarotSessionReducer(
       session,
       cards,
       null,
-      action.deckPosition ?? session.deckPosition
+      action.deckPosition ?? session.deckPosition,
+      {
+        id: action.spread.id,
+        cardIds: deckCards.map((card) => card.id),
+      }
     );
   }
 
@@ -500,7 +522,8 @@ export function tarotSessionReducer(
       session,
       cards,
       null,
-      action.deckPosition ?? session.deckPosition
+      action.deckPosition ?? session.deckPosition,
+      null
     );
   }
 
