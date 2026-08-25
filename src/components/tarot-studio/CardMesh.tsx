@@ -13,9 +13,11 @@ import {
   useState,
 } from "react";
 import {
+  Euler,
   ExtrudeGeometry,
   Group,
   LinearFilter,
+  Matrix4,
   MathUtils,
   Mesh,
   Plane,
@@ -50,10 +52,13 @@ const MAX_RELEASE_GLIDE = 0.32;
 const MIN_THROW_SPEED = 0.7;
 const MAX_THROW_ROTATION = 11;
 const FLIP_DURATION_SECONDS = 0.52;
-const FLIP_LIFT = 0.14;
+const FLIP_SURFACE_CLEARANCE = 0.0005;
 const DRAG_SCALE = 1.035;
 
 export const CARD_THICKNESS = 0.018;
+const CARD_FACE_PLANE_OFFSET = 0.002;
+const CARD_VISIBLE_HALF_DEPTH =
+  CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET;
 const CARD_CORNER_RADIUS = 0.16;
 const CARD_BEVEL_SIZE = 0.006;
 const CARD_BEVEL_THICKNESS = 0.003;
@@ -279,7 +284,7 @@ function CardFaceLayers({
       <CardArtwork
         url={artworkUrl}
         crop={artworkCrop}
-        position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.002)]}
+        position={[0, 0, direction * CARD_VISIBLE_HALF_DEPTH]}
         rotation={rotation}
         width={artworkWidth}
         height={artworkHeight}
@@ -442,6 +447,10 @@ export const CardMesh = memo(function CardMesh({
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
   const slabRef = useRef<Mesh>(null);
+  const parentRotationRef = useRef(new Euler());
+  const parentRotationMatrixRef = useRef(new Matrix4());
+  const flipRotationMatrixRef = useRef(new Matrix4());
+  const combinedRotationMatrixRef = useRef(new Matrix4());
   const dragRef = useRef<DragState | null>(null);
   const flipAnimationRef = useRef<FlipAnimation | null>(null);
   const pendingPositionRef = useRef<[number, number] | null>(null);
@@ -995,20 +1004,78 @@ export const CardMesh = memo(function CardMesh({
       slab.castShadow = !flipIsActive;
     }
 
-    const flipLift =
-      reducedMotion || !flipIsActive
-        ? 0
-        : Math.abs(Math.sin(flippingCard.rotation.y)) * FLIP_LIFT;
-    const zTarget =
-      drag?.moved && drag.mode !== "move-deck"
-        ? draggingZ + flipLift
-        : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0) + flipLift;
     const positionXTarget = moving
       ? drag.target.x
       : pendingPosition?.[0] ?? targetPositionX;
     const positionYTarget = moving
       ? drag.target.y
       : pendingPosition?.[1] ?? targetPositionY;
+    const positionLambda = moving
+      ? DRAG_FOLLOW_LAMBDA
+      : POSITION_SETTLE_LAMBDA;
+    const nextTiltX = reducedMotion
+      ? 0
+      : MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
+    const nextTiltY = reducedMotion
+      ? 0
+      : MathUtils.damp(group.rotation.y, tiltYTarget, 14, delta);
+    const nextRotation = reducedMotion
+      ? rotationTarget
+      : MathUtils.damp(group.rotation.z, rotationTarget, 14, delta);
+    const nextX = reducedMotion
+      ? positionXTarget
+      : MathUtils.damp(
+          group.position.x,
+          positionXTarget,
+          positionLambda,
+          delta
+        );
+    const nextY = reducedMotion
+      ? positionYTarget
+      : MathUtils.damp(
+          group.position.y,
+          positionYTarget,
+          positionLambda,
+          delta
+        );
+    const nextScale = reducedMotion
+      ? scaleTarget
+      : MathUtils.damp(group.scale.x, scaleTarget, 17, delta);
+    let flipLift = 0;
+
+    if (flipIsActive) {
+      const parentRotation = parentRotationRef.current.set(
+        nextTiltX,
+        nextTiltY,
+        nextRotation,
+        group.rotation.order
+      );
+      const combinedRotation = combinedRotationMatrixRef.current.multiplyMatrices(
+        parentRotationMatrixRef.current.makeRotationFromEuler(parentRotation),
+        flipRotationMatrixRef.current.makeRotationFromEuler(
+          flippingCard.rotation
+        )
+      );
+      const rotationElements = combinedRotation.elements;
+      const projectedHalfDepth =
+        nextScale *
+        (Math.abs(rotationElements[2]) * (cardWidth / 2) +
+          Math.abs(rotationElements[6]) * (cardHeight / 2) +
+          Math.abs(rotationElements[10]) * CARD_VISIBLE_HALF_DEPTH);
+
+      // Keep the lowest visible corner on or above the surface throughout the
+      // turn. A fixed cosmetic lift lets most of a wide card pass through the
+      // table when the card approaches edge-on.
+      flipLift =
+        Math.max(0, projectedHalfDepth - CARD_VISIBLE_HALF_DEPTH) +
+        FLIP_SURFACE_CLEARANCE;
+    }
+
+    const zBase =
+      drag?.moved && drag.mode !== "move-deck"
+        ? draggingZ
+        : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0);
+    const zTarget = zBase + flipLift;
 
     if (reducedMotion) {
       group.rotation.x = 0;
@@ -1024,36 +1091,12 @@ export const CardMesh = memo(function CardMesh({
       return;
     }
 
-    const nextTiltX = MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
-    const nextTiltY = MathUtils.damp(group.rotation.y, tiltYTarget, 14, delta);
-    const nextRotation = MathUtils.damp(
-      group.rotation.z,
-      rotationTarget,
-      14,
-      delta
-    );
-    const positionLambda = moving
-      ? DRAG_FOLLOW_LAMBDA
-      : POSITION_SETTLE_LAMBDA;
-    const nextX = MathUtils.damp(
-      group.position.x,
-      positionXTarget,
-      positionLambda,
-      delta
-    );
-    const nextY = MathUtils.damp(
-      group.position.y,
-      positionYTarget,
-      positionLambda,
-      delta
-    );
-    const nextZ = MathUtils.damp(group.position.z, zTarget, 18, delta);
-    const nextScale = MathUtils.damp(
-      group.scale.x,
-      scaleTarget,
-      17,
-      delta
-    );
+    const nextZ = flipIsActive
+      ? Math.max(
+          MathUtils.damp(group.position.z, zTarget, 18, delta),
+          zTarget
+        )
+      : MathUtils.damp(group.position.z, zTarget, 18, delta);
 
     const needsAnotherFrame =
       flipIsActive ||
