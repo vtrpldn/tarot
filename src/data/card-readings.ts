@@ -783,8 +783,6 @@ function getMinorReading(
         { label: "Esoteric theme", value: theme },
       ],
       sources: [WAITE_SOURCE, BOOK_T_SOURCE],
-      traditionNote:
-        "Smith’s image and Waite’s companion text ground the card; the elemental and number synthesis is presented as an editorial esoteric reading framework.",
     };
   }
 
@@ -1086,8 +1084,6 @@ function getPortugueseMinorReading(
         { label: "Domínio do naipe", value: suitReading.domain },
       ],
       sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE]),
-      traditionNote:
-        "A imagem de Smith e o texto de Waite fundamentam a carta; a síntese elemental e numérica é apresentada como uma estrutura editorial de leitura esotérica.",
     };
   }
 
