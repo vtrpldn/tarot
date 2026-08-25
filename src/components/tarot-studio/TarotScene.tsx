@@ -28,11 +28,12 @@ import type {
 } from "@/types";
 import {
   getRemainingDeckCount,
-  getTableCards,
   getTopDeckCard,
 } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
+import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
+import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
   MIN_VIEW_ZOOM,
@@ -43,7 +44,9 @@ import { TAROT_SCENE_PALETTE } from "./theme";
 
 const BASE_CAMERA_ZOOM = 75;
 const TABLE_SURFACE_Z = -0.16;
-const TABLE_CARD_GAP = 0.0015;
+const CARD_SURFACE_CLEARANCE = 0.002;
+const DECK_MAT_SURFACE_Z = TABLE_SURFACE_Z + 0.003;
+const TABLE_CARD_CONTACT_GAP = 0.002;
 const DECK_STACK_RENDER_ORDER = 10;
 const DECK_CARD_RENDER_ORDER = 20;
 const TABLE_CARD_RENDER_ORDER = 100;
@@ -457,10 +460,11 @@ function getDeckMetrics(count: number) {
       : 0;
   const layerThickness = 0.018;
   const layerStep = 0.019;
-  const firstCenter = TABLE_SURFACE_Z + 0.008 + layerThickness / 2;
+  const firstCenter =
+    DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + layerThickness / 2;
   const topSurface = layerCount
     ? firstCenter + (layerCount - 1) * layerStep + layerThickness / 2
-    : TABLE_SURFACE_Z + 0.007;
+    : DECK_MAT_SURFACE_Z;
 
   return {
     firstCenter,
@@ -468,7 +472,8 @@ function getDeckMetrics(count: number) {
     layerStep,
     layerThickness,
     topSurface,
-    topCardCenter: topSurface + CARD_THICKNESS / 2 + 0.006,
+    topCardCenter:
+      topSurface + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE,
   };
 }
 
@@ -509,7 +514,7 @@ function DeckMat({ width, height }: { width: number; height: number }) {
       ),
     [matHeight, matWidth]
   );
-  const surfaceZ = TABLE_SURFACE_Z + 0.003;
+  const surfaceZ = DECK_MAT_SURFACE_Z;
 
   return (
     <group renderOrder={0}>
@@ -669,15 +674,17 @@ function DeckStack({
               metrics.firstCenter + index * metrics.layerStep,
             ]}
             renderOrder={index}
+            castShadow
+            receiveShadow
           >
-            <meshStandardMaterial
+            <CardPaperMaterial
               color={
                 index % 2
                   ? TAROT_SCENE_PALETTE.cardPaper
                   : TAROT_SCENE_PALETTE.cardPaperShadow
               }
               roughness={index % 2 ? 0.88 : 0.84}
-              metalness={0}
+              paperSeed={getPaperSeed(`${backUrl}:${index}`)}
             />
           </RoundedBox>
         );
@@ -693,6 +700,7 @@ function DeckStack({
             width={width - frameInset}
             height={height - frameInset}
             renderOrder={metrics.layerCount + 1}
+            paperSeed={getPaperSeed(`${backUrl}:passive`)}
           />
         </Suspense>
       )}
@@ -866,7 +874,13 @@ function TarotTable({
         }),
     [definitions, session.cards]
   );
-  const tableCards = getTableCards(session);
+  const tableCards = useMemo(
+    () =>
+      session.cards
+        .filter((card) => card.zone === "table")
+        .sort((first, second) => first.zIndex - second.zIndex),
+    [session.cards]
+  );
   const topDeckCard = getTopDeckCard(session);
   const deckCount = getRemainingDeckCount(session);
   const resolvedDeckPosition =
@@ -890,10 +904,21 @@ function TarotTable({
     tableCards.map((card, index) => [card.id, index])
   );
   const baseTableCardZ =
-    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + 0.008;
-  const highestTableCardZ =
-    baseTableCardZ +
-    Math.max(0, tableCards.length - 1) * TABLE_CARD_GAP;
+    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE;
+  const tableCardRestingHeights = useMemo(
+    () =>
+      getTableCardRestingHeights({
+        cards: tableCards,
+        layout,
+        baseHeight: baseTableCardZ,
+        layerStep: CARD_THICKNESS + TABLE_CARD_CONTACT_GAP,
+      }),
+    [baseTableCardZ, layout, tableCards]
+  );
+  const highestTableCardZ = Math.max(
+    baseTableCardZ,
+    ...Array.from(tableCardRestingHeights.values())
+  );
   const draggingZ =
     Math.max(deckMetrics.topCardCenter, highestTableCardZ) +
     CARD_THICKNESS +
@@ -910,10 +935,10 @@ function TarotTable({
 
   return (
     <>
-      <ambientLight intensity={0.7} />
+      <ambientLight intensity={0.48} />
       <directionalLight
         castShadow
-        position={[-4, 7, 8]}
+        position={[-3, 4.5, 12]}
         intensity={2.45}
         color={TAROT_SCENE_PALETTE.keyLight}
         shadow-mapSize-width={1024}
@@ -963,7 +988,7 @@ function TarotTable({
         const restingZ =
           card.zone === "deck"
             ? deckMetrics.topCardCenter
-            : baseTableCardZ + tableIndex * TABLE_CARD_GAP;
+            : tableCardRestingHeights.get(card.id) ?? baseTableCardZ;
         const renderOrder =
           card.zone === "deck"
             ? DECK_CARD_RENDER_ORDER

@@ -13,9 +13,11 @@ import {
   useState,
 } from "react";
 import {
+  Euler,
   ExtrudeGeometry,
   Group,
   LinearFilter,
+  Matrix4,
   MathUtils,
   Mesh,
   Plane,
@@ -36,6 +38,7 @@ import type {
 } from "@/types";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import type { SceneTableLayout } from "./table-layout";
+import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
@@ -49,11 +52,16 @@ const MAX_RELEASE_GLIDE = 0.32;
 const MIN_THROW_SPEED = 0.7;
 const MAX_THROW_ROTATION = 11;
 const FLIP_DURATION_SECONDS = 0.52;
-const FLIP_LIFT = 0.14;
+const FLIP_SURFACE_CLEARANCE = 0.0005;
 const DRAG_SCALE = 1.035;
 
-export const CARD_THICKNESS = 0.075;
+export const CARD_THICKNESS = 0.018;
+const CARD_FACE_PLANE_OFFSET = 0.002;
+const CARD_VISIBLE_HALF_DEPTH =
+  CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET;
 const CARD_CORNER_RADIUS = 0.16;
+const CARD_BEVEL_SIZE = 0.006;
+const CARD_BEVEL_THICKNESS = 0.003;
 
 type PointerCaptureTarget = Mesh & {
   setPointerCapture?: (pointerId: number) => void;
@@ -194,6 +202,7 @@ export function CardArtwork({
   width,
   height,
   renderOrder = 3,
+  paperSeed = 0,
 }: {
   url: string;
   crop?: CardArtworkCrop;
@@ -202,6 +211,7 @@ export function CardArtwork({
   width: number;
   height: number;
   renderOrder?: number;
+  paperSeed?: number;
 }) {
   const texture = useTextureForCard(url);
   const geometry = useMemo(() => {
@@ -233,15 +243,14 @@ export function CardArtwork({
       position={position}
       rotation={rotation}
       renderOrder={renderOrder}
+      receiveShadow
     >
-      <meshStandardMaterial
+      <CardPaperMaterial
         map={texture}
         color="#fffdf7"
-        roughness={0.92}
-        metalness={0}
+        roughness={0.9}
+        paperSeed={paperSeed}
         toneMapped={false}
-        depthTest={false}
-        depthWrite={false}
       />
     </mesh>
   );
@@ -253,12 +262,14 @@ function CardFaceLayers({
   cardWidth,
   cardHeight,
   reverse = false,
+  paperSeed,
 }: {
   artworkUrl: string;
   artworkCrop?: CardArtworkCrop;
   cardWidth: number;
   cardHeight: number;
   reverse?: boolean;
+  paperSeed: number;
 }) {
   const direction = reverse ? -1 : 1;
   const rotation: [number, number, number] | undefined = reverse
@@ -273,11 +284,12 @@ function CardFaceLayers({
       <CardArtwork
         url={artworkUrl}
         crop={artworkCrop}
-        position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.002)]}
+        position={[0, 0, direction * CARD_VISIBLE_HALF_DEPTH]}
         rotation={rotation}
         width={artworkWidth}
         height={artworkHeight}
         renderOrder={1}
+        paperSeed={paperSeed}
       />
     </Suspense>
   );
@@ -323,14 +335,18 @@ function createCardSlabGeometry(width: number, height: number) {
     -halfHeight
   );
 
+  const faceDepth = CARD_THICKNESS - CARD_BEVEL_THICKNESS * 2;
   const geometry = new ExtrudeGeometry(shape, {
-    bevelEnabled: false,
+    bevelEnabled: true,
+    bevelSegments: 2,
+    bevelSize: CARD_BEVEL_SIZE,
+    bevelThickness: CARD_BEVEL_THICKNESS,
     curveSegments: 8,
-    depth: CARD_THICKNESS,
+    depth: faceDepth,
     steps: 1,
   });
 
-  geometry.translate(0, 0, -CARD_THICKNESS / 2);
+  geometry.translate(0, 0, -faceDepth / 2);
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -431,6 +447,10 @@ export const CardMesh = memo(function CardMesh({
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
   const slabRef = useRef<Mesh>(null);
+  const parentRotationRef = useRef(new Euler());
+  const parentRotationMatrixRef = useRef(new Matrix4());
+  const flipRotationMatrixRef = useRef(new Matrix4());
+  const combinedRotationMatrixRef = useRef(new Matrix4());
   const dragRef = useRef<DragState | null>(null);
   const flipAnimationRef = useRef<FlipAnimation | null>(null);
   const pendingPositionRef = useRef<[number, number] | null>(null);
@@ -462,6 +482,7 @@ export const CardMesh = memo(function CardMesh({
     [cardHeight, cardWidth]
   );
   const frontTexture = definition.image.preview;
+  const paperSeed = useMemo(() => getPaperSeed(card.id), [card.id]);
 
   useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
 
@@ -983,20 +1004,78 @@ export const CardMesh = memo(function CardMesh({
       slab.castShadow = !flipIsActive;
     }
 
-    const flipLift =
-      reducedMotion || !flipIsActive
-        ? 0
-        : Math.abs(Math.sin(flippingCard.rotation.y)) * FLIP_LIFT;
-    const zTarget =
-      drag?.moved && drag.mode !== "move-deck"
-        ? draggingZ + flipLift
-        : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0) + flipLift;
     const positionXTarget = moving
       ? drag.target.x
       : pendingPosition?.[0] ?? targetPositionX;
     const positionYTarget = moving
       ? drag.target.y
       : pendingPosition?.[1] ?? targetPositionY;
+    const positionLambda = moving
+      ? DRAG_FOLLOW_LAMBDA
+      : POSITION_SETTLE_LAMBDA;
+    const nextTiltX = reducedMotion
+      ? 0
+      : MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
+    const nextTiltY = reducedMotion
+      ? 0
+      : MathUtils.damp(group.rotation.y, tiltYTarget, 14, delta);
+    const nextRotation = reducedMotion
+      ? rotationTarget
+      : MathUtils.damp(group.rotation.z, rotationTarget, 14, delta);
+    const nextX = reducedMotion
+      ? positionXTarget
+      : MathUtils.damp(
+          group.position.x,
+          positionXTarget,
+          positionLambda,
+          delta
+        );
+    const nextY = reducedMotion
+      ? positionYTarget
+      : MathUtils.damp(
+          group.position.y,
+          positionYTarget,
+          positionLambda,
+          delta
+        );
+    const nextScale = reducedMotion
+      ? scaleTarget
+      : MathUtils.damp(group.scale.x, scaleTarget, 17, delta);
+    let flipLift = 0;
+
+    if (flipIsActive) {
+      const parentRotation = parentRotationRef.current.set(
+        nextTiltX,
+        nextTiltY,
+        nextRotation,
+        group.rotation.order
+      );
+      const combinedRotation = combinedRotationMatrixRef.current.multiplyMatrices(
+        parentRotationMatrixRef.current.makeRotationFromEuler(parentRotation),
+        flipRotationMatrixRef.current.makeRotationFromEuler(
+          flippingCard.rotation
+        )
+      );
+      const rotationElements = combinedRotation.elements;
+      const projectedHalfDepth =
+        nextScale *
+        (Math.abs(rotationElements[2]) * (cardWidth / 2) +
+          Math.abs(rotationElements[6]) * (cardHeight / 2) +
+          Math.abs(rotationElements[10]) * CARD_VISIBLE_HALF_DEPTH);
+
+      // Keep the lowest visible corner on or above the surface throughout the
+      // turn. A fixed cosmetic lift lets most of a wide card pass through the
+      // table when the card approaches edge-on.
+      flipLift =
+        Math.max(0, projectedHalfDepth - CARD_VISIBLE_HALF_DEPTH) +
+        FLIP_SURFACE_CLEARANCE;
+    }
+
+    const zBase =
+      drag?.moved && drag.mode !== "move-deck"
+        ? draggingZ
+        : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0);
+    const zTarget = zBase + flipLift;
 
     if (reducedMotion) {
       group.rotation.x = 0;
@@ -1012,36 +1091,12 @@ export const CardMesh = memo(function CardMesh({
       return;
     }
 
-    const nextTiltX = MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
-    const nextTiltY = MathUtils.damp(group.rotation.y, tiltYTarget, 14, delta);
-    const nextRotation = MathUtils.damp(
-      group.rotation.z,
-      rotationTarget,
-      14,
-      delta
-    );
-    const positionLambda = moving
-      ? DRAG_FOLLOW_LAMBDA
-      : POSITION_SETTLE_LAMBDA;
-    const nextX = MathUtils.damp(
-      group.position.x,
-      positionXTarget,
-      positionLambda,
-      delta
-    );
-    const nextY = MathUtils.damp(
-      group.position.y,
-      positionYTarget,
-      positionLambda,
-      delta
-    );
-    const nextZ = MathUtils.damp(group.position.z, zTarget, 18, delta);
-    const nextScale = MathUtils.damp(
-      group.scale.x,
-      scaleTarget,
-      17,
-      delta
-    );
+    const nextZ = flipIsActive
+      ? Math.max(
+          MathUtils.damp(group.position.z, zTarget, 18, delta),
+          zTarget
+        )
+      : MathUtils.damp(group.position.z, zTarget, 18, delta);
 
     const needsAnotherFrame =
       flipIsActive ||
@@ -1298,12 +1353,10 @@ export const CardMesh = memo(function CardMesh({
           receiveShadow
           renderOrder={0}
         >
-          <meshStandardMaterial
+          <CardPaperMaterial
             color={TAROT_SCENE_PALETTE.cardPaper}
-            roughness={0.96}
-            metalness={0}
-            depthTest={false}
-            depthWrite={false}
+            roughness={0.94}
+            paperSeed={paperSeed}
           />
         </mesh>
         {hasRevealed && (
@@ -1312,6 +1365,7 @@ export const CardMesh = memo(function CardMesh({
             artworkCrop={cardSet.artworkCrop}
             cardWidth={cardWidth}
             cardHeight={cardHeight}
+            paperSeed={paperSeed}
           />
         )}
         <CardFaceLayers
@@ -1319,6 +1373,7 @@ export const CardMesh = memo(function CardMesh({
           artworkCrop={cardSet.artworkCrop}
           cardWidth={cardWidth}
           cardHeight={cardHeight}
+          paperSeed={paperSeed + 0.417}
           reverse
         />
       </group>
