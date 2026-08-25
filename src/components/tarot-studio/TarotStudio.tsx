@@ -76,6 +76,10 @@ const WHEEL_LAYER_THRESHOLD = 36;
 const DOCK_EDGE_REVEAL_DISTANCE = 52;
 const DOCK_HIDE_DELAY = 850;
 const DOCK_INITIAL_HIDE_DELAY = 1800;
+const MOBILE_VIEWPORT_QUERY =
+  "(max-width: 767px), ((pointer: coarse) and (max-height: 767px))";
+const MOBILE_DEFAULT_VIEW_ZOOM = 0.5;
+const DESKTOP_DEFAULT_VIEW_ZOOM = 1;
 const LANGUAGE_OPTIONS = ["en", "pt-BR"] as const satisfies readonly AppLocale[];
 const COURT_RANKS = new Set(["page", "knight", "queen", "king"]);
 
@@ -182,9 +186,7 @@ function useMobileViewport() {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia(
-      "(max-width: 767px), ((pointer: coarse) and (max-height: 767px))"
-    );
+    const mediaQuery = window.matchMedia(MOBILE_VIEWPORT_QUERY);
     const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
 
     updateViewport();
@@ -195,6 +197,9 @@ function useMobileViewport() {
 
   return isMobileViewport;
 }
+
+const getDefaultViewZoom = (isMobileViewport: boolean) =>
+  isMobileViewport ? MOBILE_DEFAULT_VIEW_ZOOM : DESKTOP_DEFAULT_VIEW_ZOOM;
 
 function MobilePopoverPortal({
   children,
@@ -550,6 +555,7 @@ export function TarotStudio() {
     ...DEFAULT_SCENE_SETTINGS,
   }));
   const isMobileViewport = useMobileViewport();
+  const defaultViewZoom = getDefaultViewZoom(isMobileViewport);
 
   useEffect(() => {
     const updateFullscreenState = () => {
@@ -690,6 +696,12 @@ export function TarotStudio() {
       setSceneSettings(resolveSceneSettings(workspace.sceneSettings));
       setIsInspectorCollapsed(true);
       dispatch({ type: "restore", session: workspace.session });
+    } else {
+      setViewZoom(
+        getDefaultViewZoom(
+          window.matchMedia(MOBILE_VIEWPORT_QUERY).matches
+        )
+      );
     }
 
     setIsWorkspaceReady(true);
@@ -1169,11 +1181,11 @@ export function TarotStudio() {
     setIsDeckMoveMode(false);
     setIsInspectorCollapsed(true);
     setViewPan([0, 0]);
-    setViewZoom(1);
+    setViewZoom(defaultViewZoom);
     playCardSound("shuffle");
     dispatch({ type: "reset-table", cardSet: activeCardSet });
     window.requestAnimationFrame(() => canvasShellRef.current?.focus());
-  }, [activeCardSet, playCardSound]);
+  }, [activeCardSet, defaultViewZoom, playCardSound]);
 
   const showTarotCollection = useCallback(
     (collection: TarotCollectionId) => {
@@ -1510,7 +1522,7 @@ export function TarotStudio() {
 
     if (event.key === "0") {
       event.preventDefault();
-      setViewZoom(1);
+      setViewZoom(defaultViewZoom);
       setViewPan([0, 0]);
       return;
     }
@@ -1619,6 +1631,7 @@ export function TarotStudio() {
           session={session}
           reducedMotion={reducedMotion}
           sceneSettings={sceneSettings}
+          isMobileViewport={isMobileViewport}
           viewZoom={viewZoom}
           viewPan={viewPan}
           deckMoveMode={isDeckMoveMode}
@@ -1711,7 +1724,7 @@ export function TarotStudio() {
                     setActiveCardSetId(nextCardSet.id);
                     playCardSound("shuffle");
                     dispatch({ type: "new-shuffle", cardSet: nextCardSet });
-                    setViewZoom(1);
+                    setViewZoom(defaultViewZoom);
                     setViewPan([0, 0]);
                     setIsDeckMenuOpen(false);
                     window.requestAnimationFrame(() =>
@@ -2065,7 +2078,7 @@ export function TarotStudio() {
                 type="button"
                 aria-label={messages.resetZoom}
                 title={messages.resetZoom}
-                onClick={() => setViewZoom(1)}
+                onClick={() => setViewZoom(defaultViewZoom)}
               >
                 {Math.round(viewZoom * 100)}%
               </button>

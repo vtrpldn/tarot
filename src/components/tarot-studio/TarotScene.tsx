@@ -510,6 +510,7 @@ type TarotSceneProps = {
   session: TarotSession;
   reducedMotion: boolean;
   sceneSettings: SceneSettings;
+  isMobileViewport: boolean;
   viewZoom: number;
   /**
    * The camera centre in scene world units. This intentionally stays
@@ -1594,6 +1595,7 @@ function TarotTable({
   session,
   reducedMotion,
   sceneSettings,
+  isMobileViewport,
   viewZoom,
   viewPan,
   deckMoveMode,
@@ -1621,12 +1623,14 @@ function TarotTable({
         viewportWidth: baseViewportWidth,
         viewportHeight: baseViewportHeight,
         pixelWidth: size.width,
+        isMobileViewport,
         cardAspectRatio: cardSet.cardAspectRatio,
       }),
     [
       baseViewportHeight,
       baseViewportWidth,
       cardSet.cardAspectRatio,
+      isMobileViewport,
       size.width,
     ]
   );
