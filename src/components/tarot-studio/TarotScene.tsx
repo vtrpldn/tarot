@@ -54,6 +54,7 @@ import {
 } from "./CardMesh";
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { TableClothMaterial } from "./TableClothMaterial";
+import { ConstellationReading } from "./ConstellationReading";
 import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
@@ -1809,6 +1810,16 @@ function TarotTable({
         dragBounds={layout.dragBounds}
         reducedMotion={reducedMotion}
         onSelect={handleTableSelect}
+      />
+      <ConstellationReading
+        activeSpread={session.activeSpread}
+        cards={tableCards}
+        isMobileViewport={isMobileViewport}
+        layout={layout}
+        palette={palette}
+        reducedMotion={reducedMotion}
+        selectedCardId={session.selectedCardId}
+        surfaceZ={TABLE_SURFACE_Z + 0.006}
       />
       <Suspense fallback={null}>
         <PhysicalDeck
