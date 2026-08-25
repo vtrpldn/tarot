@@ -36,6 +36,7 @@ import type {
 } from "@/types";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import type { SceneTableLayout } from "./table-layout";
+import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
@@ -52,8 +53,10 @@ const FLIP_DURATION_SECONDS = 0.52;
 const FLIP_LIFT = 0.14;
 const DRAG_SCALE = 1.035;
 
-export const CARD_THICKNESS = 0.075;
+export const CARD_THICKNESS = 0.018;
 const CARD_CORNER_RADIUS = 0.16;
+const CARD_BEVEL_SIZE = 0.006;
+const CARD_BEVEL_THICKNESS = 0.003;
 
 type PointerCaptureTarget = Mesh & {
   setPointerCapture?: (pointerId: number) => void;
@@ -194,6 +197,7 @@ export function CardArtwork({
   width,
   height,
   renderOrder = 3,
+  paperSeed = 0,
 }: {
   url: string;
   crop?: CardArtworkCrop;
@@ -202,6 +206,7 @@ export function CardArtwork({
   width: number;
   height: number;
   renderOrder?: number;
+  paperSeed?: number;
 }) {
   const texture = useTextureForCard(url);
   const geometry = useMemo(() => {
@@ -233,15 +238,14 @@ export function CardArtwork({
       position={position}
       rotation={rotation}
       renderOrder={renderOrder}
+      receiveShadow
     >
-      <meshStandardMaterial
+      <CardPaperMaterial
         map={texture}
         color="#fffdf7"
-        roughness={0.92}
-        metalness={0}
+        roughness={0.9}
+        paperSeed={paperSeed}
         toneMapped={false}
-        depthTest={false}
-        depthWrite={false}
       />
     </mesh>
   );
@@ -253,12 +257,14 @@ function CardFaceLayers({
   cardWidth,
   cardHeight,
   reverse = false,
+  paperSeed,
 }: {
   artworkUrl: string;
   artworkCrop?: CardArtworkCrop;
   cardWidth: number;
   cardHeight: number;
   reverse?: boolean;
+  paperSeed: number;
 }) {
   const direction = reverse ? -1 : 1;
   const rotation: [number, number, number] | undefined = reverse
@@ -278,6 +284,7 @@ function CardFaceLayers({
         width={artworkWidth}
         height={artworkHeight}
         renderOrder={1}
+        paperSeed={paperSeed}
       />
     </Suspense>
   );
@@ -323,14 +330,18 @@ function createCardSlabGeometry(width: number, height: number) {
     -halfHeight
   );
 
+  const faceDepth = CARD_THICKNESS - CARD_BEVEL_THICKNESS * 2;
   const geometry = new ExtrudeGeometry(shape, {
-    bevelEnabled: false,
+    bevelEnabled: true,
+    bevelSegments: 2,
+    bevelSize: CARD_BEVEL_SIZE,
+    bevelThickness: CARD_BEVEL_THICKNESS,
     curveSegments: 8,
-    depth: CARD_THICKNESS,
+    depth: faceDepth,
     steps: 1,
   });
 
-  geometry.translate(0, 0, -CARD_THICKNESS / 2);
+  geometry.translate(0, 0, -faceDepth / 2);
   geometry.computeVertexNormals();
   return geometry;
 }
@@ -462,6 +473,7 @@ export const CardMesh = memo(function CardMesh({
     [cardHeight, cardWidth]
   );
   const frontTexture = definition.image.preview;
+  const paperSeed = useMemo(() => getPaperSeed(card.id), [card.id]);
 
   useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
 
@@ -1298,12 +1310,10 @@ export const CardMesh = memo(function CardMesh({
           receiveShadow
           renderOrder={0}
         >
-          <meshStandardMaterial
+          <CardPaperMaterial
             color={TAROT_SCENE_PALETTE.cardPaper}
-            roughness={0.96}
-            metalness={0}
-            depthTest={false}
-            depthWrite={false}
+            roughness={0.94}
+            paperSeed={paperSeed}
           />
         </mesh>
         {hasRevealed && (
@@ -1312,6 +1322,7 @@ export const CardMesh = memo(function CardMesh({
             artworkCrop={cardSet.artworkCrop}
             cardWidth={cardWidth}
             cardHeight={cardHeight}
+            paperSeed={paperSeed}
           />
         )}
         <CardFaceLayers
@@ -1319,6 +1330,7 @@ export const CardMesh = memo(function CardMesh({
           artworkCrop={cardSet.artworkCrop}
           cardWidth={cardWidth}
           cardHeight={cardHeight}
+          paperSeed={paperSeed + 0.417}
           reverse
         />
       </group>
