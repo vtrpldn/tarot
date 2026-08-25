@@ -1,4 +1,5 @@
 import type { CardDefinition, TarotSuit } from "@/types";
+import type { AppLocale } from "@/i18n/locale";
 
 export type CardReading = {
   summary: string;
@@ -12,6 +13,10 @@ export type CardReading = {
     locator?: string;
   }>;
   traditionNote?: string;
+  perspective?: {
+    label: string;
+    text: string;
+  };
 };
 
 const WAITE_SOURCE = {
@@ -24,6 +29,12 @@ const BOOK_T_SOURCE = {
   label: "Golden Dawn attributions · The Equinox",
   href: "https://www.100thmonkeypress.com/biblio/acrowley/books/equinox_1_8_1912/equinox_1_8_1912.htm",
   locator: "Vol. I, No. VIII, 1912",
+} as const;
+
+const POLLACK_SOURCE = {
+  label: "Rachel Pollack · Seventy-Eight Degrees of Wisdom",
+  href: "https://redwheelweiser.com/book/seventy-eight-degrees-of-wisdom-9781578636655/",
+  locator: "Publisher overview; picture-led psychological tarot method",
 } as const;
 
 const DODAL_SOURCE = {
@@ -735,9 +746,19 @@ function getMajorReading(
         { label: "Astrology", value: reading.goldenDawn },
         { label: "Hebrew path", value: reading.hebrew },
       ],
-      sources: [WAITE_SOURCE, BOOK_T_SOURCE],
+      sources: [WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE],
       traditionNote:
         "The image note follows Waite’s companion text; astrology and Hebrew letters are labeled Golden Dawn correspondences.",
+      perspective:
+        majorKey === "fool"
+          ? {
+              label: "Rachel Pollack lens",
+              text: "A picture-led psychological reading can meet the Fool as the self at the threshold: open to experience, not yet fixed, and invited to discover itself through the journey. This is an original synopsis, not a quotation.",
+            }
+          : {
+              label: "Rachel Pollack lens",
+              text: "A picture-led psychological reading asks what in this scene is becoming conscious. Use the card as a prompt for self-discovery rather than a fixed prediction; this is a general methodology note, not a card-by-card paraphrase.",
+            },
     };
   }
 
@@ -781,9 +802,13 @@ function getMinorReading(
         { label: "Number or role", value: rankReading.correspondence },
         { label: "Esoteric theme", value: theme },
       ],
-      sources: [WAITE_SOURCE, BOOK_T_SOURCE],
+      sources: [WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE],
       traditionNote:
         "Smith’s image and Waite’s companion text ground the card; the elemental and number synthesis is presented as an editorial esoteric reading framework.",
+      perspective: {
+        label: "Rachel Pollack lens",
+        text: "A picture-led psychological reading asks what in this scene is becoming conscious. Use the card as a prompt for self-discovery rather than a fixed prediction; this is a general methodology note, not a card-by-card paraphrase.",
+      },
     };
   }
 
@@ -820,10 +845,380 @@ function getLenormandReading(definition: CardDefinition): CardReading | undefine
   };
 }
 
-export function getCardReading(
-  cardSetId: string,
+const PORTUGUESE_MAJOR_THEMES: Record<MajorKey, string> = {
+  fool: "Começos · liberdade · o desconhecido",
+  magician: "Vontade · habilidade · manifestação",
+  priestess: "Intuição · mistério · saber interior",
+  empress: "Criação · nutrição · abundância",
+  emperor: "Estrutura · autoridade · limites",
+  hierophant: "Tradição · ensino · iniciação",
+  lovers: "Escolha · união · valores alinhados",
+  chariot: "Direção · impulso · autodomínio",
+  strength: "Coragem · instinto · domínio gentil",
+  hermit: "Solidão · discernimento · orientação",
+  wheel: "Ciclos · mudança · fortuna em movimento",
+  justice: "Verdade · equilíbrio · consequência",
+  hanged: "Entrega · suspensão · nova perspectiva",
+  death: "Encerramento · liberação · transformação",
+  temperance: "Integração · cura · medida justa",
+  devil: "Apego · desejo · sombra",
+  tower: "Ruptura · revelação · libertação",
+  star: "Esperança · reparação · renovação",
+  moon: "Imaginação · incerteza · inconsciente",
+  sun: "Vitalidade · clareza · alegria",
+  judgement: "Despertar · chamado · acerto de contas",
+  world: "Conclusão · integração · totalidade",
+};
+
+const PORTUGUESE_SUIT_READINGS: Record<
+  TarotSuit,
+  { label: string; element: string; domain: string }
+> = {
+  wands: {
+    label: "Paus",
+    element: "Fogo 🜂",
+    domain: "vontade, iniciativa, criatividade e espírito",
+  },
+  cups: {
+    label: "Copas",
+    element: "Água 🜄",
+    domain: "afeto, relação, imaginação e receptividade",
+  },
+  swords: {
+    label: "Espadas",
+    element: "Ar 🜁",
+    domain: "pensamento, verdade, conflito e discernimento",
+  },
+  pentacles: {
+    label: "Ouros",
+    element: "Terra 🜃",
+    domain: "corpo, recursos, ofício e vida material",
+  },
+};
+
+const PORTUGUESE_RANKS: Record<
+  string,
+  { label: string; marseilleLabel: string; correspondence: string }
+> = {
+  "1": { label: "Ás", marseilleLabel: "Ás", correspondence: "Unidade · semente · potencial indiviso" },
+  "2": { label: "Dois", marseilleLabel: "Dois", correspondence: "Polaridade · relação · escolha" },
+  "3": { label: "Três", marseilleLabel: "Três", correspondence: "Crescimento · expressão · primeiro resultado" },
+  "4": { label: "Quatro", marseilleLabel: "Quatro", correspondence: "Estrutura · estabilidade · contenção" },
+  "5": { label: "Cinco", marseilleLabel: "Cinco", correspondence: "Ruptura · tensão · adaptação" },
+  "6": { label: "Seis", marseilleLabel: "Seis", correspondence: "Troca · harmonia · ajuste" },
+  "7": { label: "Sete", marseilleLabel: "Sete", correspondence: "Prova · avaliação · convicção" },
+  "8": { label: "Oito", marseilleLabel: "Oito", correspondence: "Organização · movimento · poder em forma" },
+  "9": { label: "Nove", marseilleLabel: "Nove", correspondence: "Amadurecimento · intensidade · quase conclusão" },
+  "10": { label: "Dez", marseilleLabel: "Dez", correspondence: "Conclusão · consequência · renovação do ciclo" },
+  page: { label: "Pajem", marseilleLabel: "Valete", correspondence: "Mensageiro · estudante · expressão emergente" },
+  knight: { label: "Cavaleiro", marseilleLabel: "Cavaleiro", correspondence: "Movimento · busca · força em prova" },
+  queen: { label: "Rainha", marseilleLabel: "Rainha", correspondence: "Domínio interno · corporificação · cuidado" },
+  king: { label: "Rei", marseilleLabel: "Rei", correspondence: "Domínio externo · direção · responsabilidade" },
+};
+
+const PORTUGUESE_LENORMAND_THEMES: Record<string, string> = {
+  "01-rider": "Notícias · chegada · movimento",
+  "02-clover": "Pequena sorte · oportunidade · brevidade",
+  "03-ship": "Jornada · distância · comércio",
+  "04-house": "Lar · segurança · limites",
+  "05-tree": "Saúde · raízes · crescimento lento",
+  "06-clouds": "Confusão · incerteza · condições mutáveis",
+  "07-snake": "Complexidade · estratégia · desejo",
+  "08-coffin": "Fechamento · quietude · fim",
+  "09-bouquet": "Presente · beleza · apreciação",
+  "10-scythe": "Corte · decisão · mudança súbita",
+  "11-whip": "Repetição · conflito · intensidade",
+  "12-birds": "Conversa · nervosismo · troca",
+  "13-child": "Começo · pequenez · inocência",
+  "14-fox": "Cautela · trabalho · interesse próprio",
+  "15-bear": "Poder · proteção · recursos",
+  "16-stars": "Orientação · esperança · padrão",
+  "17-stork": "Mudança · movimento · melhora",
+  "18-dog": "Lealdade · amizade · apoio",
+  "19-tower": "Instituição · distância · solidão",
+  "20-garden": "Vida pública · encontro · comunidade",
+  "21-mountain": "Obstáculo · atraso · resistência",
+  "22-crossroads": "Escolha · alternativas · divergência",
+  "23-mice": "Erosão · preocupação · perda gradual",
+  "24-heart": "Amor · desejo · sinceridade",
+  "25-ring": "Compromisso · contrato · ciclo",
+  "26-book": "Conhecimento · estudo · segredo",
+  "27-letter": "Mensagem · documento · detalhe",
+  "28-man": "Pessoa · identidade · ponto de vista",
+  "29-woman": "Pessoa · identidade · ponto de vista",
+  "30-lily": "Maturidade · paz · sensualidade",
+  "31-sun": "Sucesso · vitalidade · visibilidade",
+  "32-moon": "Emoção · reconhecimento · ciclos",
+  "33-key": "Solução · certeza · acesso",
+  "34-fish": "Recursos · fluxo · comércio",
+  "35-anchor": "Estabilidade · trabalho · persistência",
+  "36-cross": "Fardo · fé · necessidade",
+};
+
+const PORTUGUESE_SOURCE_METADATA: Record<
+  string,
+  { label: string; locator?: string }
+> = {
+  [WAITE_SOURCE.href]: {
+    label: "A. E. Waite · The Pictorial Key to the Tarot",
+    locator: "Texto de 1910; Partes II–III",
+  },
+  [BOOK_T_SOURCE.href]: {
+    label: "Atribuições da Golden Dawn · The Equinox",
+    locator: "Vol. I, n.º VIII, 1912",
+  },
+  [POLLACK_SOURCE.href]: {
+    label: "Rachel Pollack · Seventy-Eight Degrees of Wisdom",
+    locator: "Página da editora; método pictórico e psicológico",
+  },
+  [DODAL_SOURCE.href]: {
+    label: "Tarô de Jean Dodal · Biblioteca Nacional da França",
+    locator: "Lyon, c. 1701–1715",
+  },
+  [DODAL_SCAN_SOURCE.href]: {
+    label: "Tarô de Jean Dodal · reprodução Gallica",
+    locator: "Artefato completo de 78 cartas",
+  },
+  [PAPUS_SOURCE.href]: {
+    label: "Papus · Le Tarot des Bohémiens",
+    locator: "Sistema ocultista francês posterior, 1889",
+  },
+  [STRALSUND_SOURCE.href]: {
+    label: "Lenormand de Stralsund · Fundação Etteilla",
+    locator: "Reprodução do baralho completo, c. 1890",
+  },
+  [GAME_OF_HOPE_SOURCE.href]: {
+    label: "Das Spiel der Hoffnung · Museu Britânico",
+    locator: "Precursor histórico de 36 cartas, c. 1800",
+  },
+};
+
+function getPortugueseName(definition: CardDefinition): string {
+  return definition.displayNames?.["pt-BR"] ?? definition.name;
+}
+
+function localizeSources(
+  sources: CardReading["sources"]
+): CardReading["sources"] {
+  return sources.map((source) => {
+    const translation = PORTUGUESE_SOURCE_METADATA[source.href];
+
+    return translation
+      ? { ...source, ...translation }
+      : source;
+  });
+}
+
+function localizeAstrology(value: string): string {
+  const [name, ...symbol] = value.split(" ");
+  const names: Record<string, string> = {
+    Air: "Ar",
+    Aquarius: "Aquário",
+    Aries: "Áries",
+    Cancer: "Câncer",
+    Capricorn: "Capricórnio",
+    Earth: "Terra",
+    Fire: "Fogo",
+    Gemini: "Gêmeos",
+    Jupiter: "Júpiter",
+    Leo: "Leão",
+    Libra: "Libra",
+    Mars: "Marte",
+    Mercury: "Mercúrio",
+    Moon: "Lua",
+    Pisces: "Peixes",
+    Sagittarius: "Sagitário",
+    Saturn: "Saturno",
+    Scorpio: "Escorpião",
+    Sun: "Sol",
+    Taurus: "Touro",
+    Venus: "Vênus",
+    Virgo: "Virgem",
+    Water: "Água",
+  };
+
+  return [names[name] ?? name, ...symbol].join(" ");
+}
+
+function getPortuguesePollackPerspective(majorKey?: MajorKey): NonNullable<CardReading["perspective"]> {
+  if (majorKey === "fool") {
+    return {
+      label: "Perspectiva de Rachel Pollack",
+      text: "Uma leitura psicológica orientada pela imagem pode encontrar o Louco como o eu no limiar: aberto à experiência, ainda não fixado e convidado a se descobrir pela jornada. Esta é uma síntese original, não uma citação.",
+    };
+  }
+
+  return {
+    label: "Perspectiva de Rachel Pollack",
+    text: "Uma leitura psicológica orientada pela imagem pergunta o que está se tornando consciente na cena. Use a carta como convite à autodescoberta, não como previsão fixa; esta é uma nota metodológica geral, não uma paráfrase carta a carta.",
+  };
+}
+
+function getPortugueseMajorReading(
+  cardSetId: "rider-waite-smith" | "tarot-de-marseille",
   definition: CardDefinition
 ): CardReading | undefined {
+  const majorKey =
+    cardSetId === "rider-waite-smith"
+      ? RWS_MAJOR_KEYS[definition.id]
+      : MARSEILLE_MAJOR_KEYS[definition.id];
+
+  if (!majorKey) {
+    return undefined;
+  }
+
+  const reading = MAJOR_READINGS[majorKey];
+  const name = getPortugueseName(definition);
+
+  if (cardSetId === "rider-waite-smith") {
+    return {
+      summary: `Nesta imagem da Rider–Waite–Smith, ${name} concentra ${PORTUGUESE_MAJOR_THEMES[majorKey].toLocaleLowerCase("pt-BR")}. A cena oferece uma pergunta aberta sobre como essas forças se movem na situação presente.`,
+      correspondences: [
+        { label: "Arquétipo", value: PORTUGUESE_MAJOR_THEMES[majorKey] },
+        { label: "Astrologia", value: localizeAstrology(reading.goldenDawn) },
+        { label: "Caminho hebraico", value: reading.hebrew },
+      ],
+      sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE]),
+      traditionNote:
+        "A imagem é contextualizada pelo texto de Waite; astrologia e letras hebraicas são correspondências identificadas como Golden Dawn.",
+      perspective: getPortuguesePollackPerspective(majorKey),
+    };
+  }
+
+  return {
+    summary: `Nesta lâmina de Jean Dodal, ${name} põe em primeiro plano ${PORTUGUESE_MAJOR_THEMES[majorKey].toLocaleLowerCase("pt-BR")}. A composição histórica permite observar como o símbolo organiza a pergunta antes de acrescentar qualquer sistema posterior.`,
+    correspondences: [
+      { label: "Arquétipo", value: PORTUGUESE_MAJOR_THEMES[majorKey] },
+      { label: "Sequência", value: name },
+      { label: "Lente ocultista", value: "Tarô francês posterior · 1889" },
+    ],
+    sources: localizeSources([DODAL_SOURCE, PAPUS_SOURCE]),
+    traditionNote:
+      "Dodal não deixou um guia esotérico carta a carta. O registro do objeto fundamenta a imagem; Papus é uma lente ocultista francesa claramente posterior.",
+  };
+}
+
+function getPortugueseMinorReading(
+  cardSetId: "rider-waite-smith" | "tarot-de-marseille",
+  definition: CardDefinition
+): CardReading | undefined {
+  const suit = definition.suit;
+  const rank = definition.rank;
+
+  if (!suit || !rank) {
+    return undefined;
+  }
+
+  const suitReading = PORTUGUESE_SUIT_READINGS[suit];
+  const rankReading = PORTUGUESE_RANKS[rank];
+
+  if (!rankReading) {
+    return undefined;
+  }
+
+  const name = getPortugueseName(definition);
+  const rankLabel =
+    cardSetId === "tarot-de-marseille"
+      ? rankReading.marseilleLabel
+      : rankReading.label;
+
+  if (cardSetId === "rider-waite-smith") {
+    return {
+      summary: `Na Rider–Waite–Smith, ${name} une ${suitReading.domain} a ${rankReading.correspondence.toLocaleLowerCase("pt-BR")}. A cena pode ser usada como uma pergunta sobre onde essa dinâmica já está visível na vida cotidiana.`,
+      correspondences: [
+        { label: "Elemento", value: suitReading.element },
+        { label: "Número ou figura", value: rankReading.correspondence },
+        { label: "Domínio do naipe", value: suitReading.domain },
+      ],
+      sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE]),
+      traditionNote:
+        "A imagem de Smith e o texto de Waite fundamentam a carta; a síntese elemental e numérica é apresentada como uma estrutura editorial de leitura esotérica.",
+      perspective: getPortuguesePollackPerspective(),
+    };
+  }
+
+  return {
+    summary: `No ${rankLabel} de ${suitReading.label} de Dodal, o número ou a figura da corte organiza o naipe sem uma cena totalmente ilustrada. Como lente comparativa posterior, a carta une ${suitReading.domain} a ${rankReading.correspondence.toLocaleLowerCase("pt-BR")}.`,
+    correspondences: [
+      { label: "Elemento", value: suitReading.element },
+      { label: "Número ou figura", value: rankReading.correspondence },
+      { label: "Domínio do naipe", value: suitReading.domain },
+    ],
+    sources: localizeSources([DODAL_SCAN_SOURCE, PAPUS_SOURCE]),
+    traditionNote:
+      "A reprodução da BnF fundamenta a imagem do ás, número ou corte de Dodal; a camada interpretativa é posterior e não é apresentada como original ao baralho de c. 1701–1715.",
+  };
+}
+
+const PORTUGUESE_PLAYING_CARD_RANKS: Record<string, string> = {
+  Ace: "Ás",
+  King: "Rei",
+  Queen: "Rainha",
+  Jack: "Valete",
+  Ten: "Dez",
+  Nine: "Nove",
+  Eight: "Oito",
+  Seven: "Sete",
+  Six: "Seis",
+};
+
+const PORTUGUESE_PLAYING_CARD_SUITS: Record<string, string> = {
+  Diamonds: "Ouros",
+  Hearts: "Copas",
+  Clubs: "Paus",
+  Spades: "Espadas",
+};
+
+function localizePlayingCard(value: string): string {
+  const [rank, suit] = value.split(" of ");
+
+  return `${PORTUGUESE_PLAYING_CARD_RANKS[rank] ?? rank} de ${PORTUGUESE_PLAYING_CARD_SUITS[suit] ?? suit}`;
+}
+
+function getPortugueseLenormandReading(
+  definition: CardDefinition
+): CardReading | undefined {
+  const reading = LENORMAND_READINGS[definition.id];
+  const themes = PORTUGUESE_LENORMAND_THEMES[definition.id];
+
+  if (!reading || !themes) {
+    return undefined;
+  }
+
+  const name = getPortugueseName(definition);
+
+  return {
+    summary: `No Petit Lenormand, ${name} orienta a leitura por ${themes.toLocaleLowerCase("pt-BR")}. A imagem ganha precisão no contexto, especialmente em combinação com as cartas vizinhas e a pergunta formulada.`,
+    correspondences: [
+      { label: "Carta do baralho comum", value: localizePlayingCard(reading.playingCard) },
+      { label: "Temas editoriais", value: themes },
+      { label: "Sistema", value: `Petit Lenormand · Carta ${definition.order + 1}` },
+    ],
+    sources: localizeSources([STRALSUND_SOURCE, GAME_OF_HOPE_SOURCE]),
+    traditionNote:
+      "As fontes do baralho e do museu estabelecem imagem, número, inserto e história. Os temas carta a carta são uma leitura editorial concisa, não um texto canônico do baralho de 1890.",
+  };
+}
+
+export function getCardReading(
+  cardSetId: string,
+  definition: CardDefinition,
+  locale: AppLocale = "en"
+): CardReading | undefined {
+  if (locale === "pt-BR") {
+    if (cardSetId === "classic-lenormand") {
+      return getPortugueseLenormandReading(definition);
+    }
+
+    if (cardSetId === "rider-waite-smith" || cardSetId === "tarot-de-marseille") {
+      return definition.arcana === "major"
+        ? getPortugueseMajorReading(cardSetId, definition)
+        : getPortugueseMinorReading(cardSetId, definition);
+    }
+
+    return undefined;
+  }
+
   if (cardSetId === "classic-lenormand") {
     return getLenormandReading(definition);
   }

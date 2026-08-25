@@ -5,6 +5,7 @@ import type {
   CardSetDefinition,
   TarotSuit,
 } from "@/types";
+import type { AppLocale } from "@/i18n/locale";
 
 const getCroppedAspectRatio = (
   sourceAspectRatio: number,
@@ -14,17 +15,17 @@ const getCroppedAspectRatio = (
   ((1 - crop.left - crop.right) / (1 - crop.top - crop.bottom));
 
 const marseilleArtworkCrop = {
-  left: 24 / 792,
-  right: 24 / 792,
+  left: 40 / 792,
+  right: 40 / 792,
   top: 44 / 1464,
-  bottom: 26 / 1464,
+  bottom: 40 / 1464,
 } satisfies CardArtworkCrop;
 
 const lenormandArtworkCrop = {
-  left: 48 / 918,
-  right: 33 / 918,
-  top: 49 / 1494,
-  bottom: 49 / 1494,
+  left: 64 / 918,
+  right: 60 / 918,
+  top: 70 / 1494,
+  bottom: 70 / 1494,
 } satisfies CardArtworkCrop;
 
 const artwork = (filename: string): CardArtwork => {
@@ -74,6 +75,31 @@ const majorArcana = [
   ["21-the-world.png", "The World"],
 ] as const;
 
+const riderWaitePortugueseMajorNames: Record<string, string> = {
+  "0-the-fool": "O Louco",
+  "1-the-magician": "O Mago",
+  "2-the-high-priestess": "A Sacerdotisa",
+  "3-the-empress": "A Imperatriz",
+  "4-the-emperor": "O Imperador",
+  "5-the-hierophant": "O Hierofante",
+  "6-the-lovers": "Os Enamorados",
+  "7-the-chariot": "O Carro",
+  "8-strength": "A Força",
+  "9-the-hermit": "O Eremita",
+  "10-wheel-of-fortune": "A Roda da Fortuna",
+  "11-justice": "A Justiça",
+  "12-the-hanged-man": "O Enforcado",
+  "13-death": "A Morte",
+  "14-temperance": "A Temperança",
+  "15-the-devil": "O Diabo",
+  "16-the-tower": "A Torre",
+  "17-the-star": "A Estrela",
+  "18-the-moon": "A Lua",
+  "19-the-sun": "O Sol",
+  "20-judgement": "O Julgamento",
+  "21-the-world": "O Mundo",
+};
+
 const minorRanks = [
   ["1", "Ace"],
   ["2", "Two"],
@@ -98,10 +124,37 @@ const suits: Array<{ id: TarotSuit; label: string }> = [
   { id: "wands", label: "Wands" },
 ];
 
+const portugueseMinorRanks: Record<string, string> = {
+  "1": "Ás",
+  "2": "Dois",
+  "3": "Três",
+  "4": "Quatro",
+  "5": "Cinco",
+  "6": "Seis",
+  "7": "Sete",
+  "8": "Oito",
+  "9": "Nove",
+  "10": "Dez",
+  page: "Pajem",
+  knight: "Cavaleiro",
+  queen: "Rainha",
+  king: "Rei",
+};
+
+const portugueseTarotSuits: Record<TarotSuit, string> = {
+  cups: "Copas",
+  pentacles: "Ouros",
+  swords: "Espadas",
+  wands: "Paus",
+};
+
 const riderWaiteSmithCards: CardDefinition[] = [
   ...majorArcana.map(([filename, name], order) => ({
     id: filename.replace(/\.png$/i, ""),
     name,
+    displayNames: {
+      "pt-BR": riderWaitePortugueseMajorNames[filename.replace(/\.png$/i, "")],
+    },
     order,
     image: artwork(filename),
     arcana: "major" as const,
@@ -114,6 +167,9 @@ const riderWaiteSmithCards: CardDefinition[] = [
       return {
         id: filename.replace(/\.png$/i, ""),
         name: `${rankLabel} of ${suitLabel}`,
+        displayNames: {
+          "pt-BR": `${portugueseMinorRanks[rank]} de ${portugueseTarotSuits[suit]}`,
+        },
         order: majorArcana.length + suitIndex * minorRanks.length + rankIndex,
         image: artwork(filename),
         arcana: "minor" as const,
@@ -130,6 +186,11 @@ export const riderWaiteSmith: CardSetDefinition = {
   label: "Rider–Waite–Smith Tarot",
   shortLabel: "Rider–Waite–Smith",
   description: "A complete 78-card deck for open-ended readings and spreads.",
+  displayLabels: { "pt-BR": "Tarô Rider–Waite–Smith" },
+  displayShortLabels: { "pt-BR": "Rider–Waite–Smith" },
+  displayDescriptions: {
+    "pt-BR": "Um baralho completo de 78 cartas para tiragens e leituras abertas.",
+  },
   cardAspectRatio: 1017 / 1776,
   back: artwork("back.png"),
   cards: riderWaiteSmithCards,
@@ -160,6 +221,31 @@ const marseilleMajorArcana = [
   ["21-le-monde", "Le Monde"],
 ] as const;
 
+const marseillePortugueseMajorNames: Record<string, string> = {
+  "00-le-mat": "O Louco",
+  "01-le-bateleur": "O Mago",
+  "02-la-papesse": "A Papisa",
+  "03-l-imperatrice": "A Imperatriz",
+  "04-l-empereur": "O Imperador",
+  "05-le-pape": "O Papa",
+  "06-l-amoureux": "Os Enamorados",
+  "07-le-chariot": "O Carro",
+  "08-la-justice": "A Justiça",
+  "09-l-ermite": "O Eremita",
+  "10-la-roue-de-fortune": "A Roda da Fortuna",
+  "11-la-force": "A Força",
+  "12-le-pendu": "O Enforcado",
+  "13-arcane-xiii": "Arcano XIII",
+  "14-temperance": "A Temperança",
+  "15-le-diable": "O Diabo",
+  "16-la-maison-dieu": "A Casa de Deus",
+  "17-l-etoile": "A Estrela",
+  "18-la-lune": "A Lua",
+  "19-le-soleil": "O Sol",
+  "20-le-jugement": "O Julgamento",
+  "21-le-monde": "O Mundo",
+};
+
 const marseilleRanks = [
   ["1", "As"],
   ["2", "Deux"],
@@ -188,10 +274,16 @@ const marseilleSuits: Array<{
   { id: "wands", filename: "wands", label: "Bâtons" },
 ];
 
+const portugueseMarseilleRanks: Record<string, string> = {
+  ...portugueseMinorRanks,
+  page: "Valete",
+};
+
 const tarotDeMarseilleCards: CardDefinition[] = [
   ...marseilleMajorArcana.map(([filename, name], order) => ({
     id: filename,
     name,
+    displayNames: { "pt-BR": marseillePortugueseMajorNames[filename] },
     order,
     image: marseilleArtwork(filename),
     arcana: "major" as const,
@@ -204,6 +296,9 @@ const tarotDeMarseilleCards: CardDefinition[] = [
       return {
         id: cardFilename,
         name: `${rankLabel} de ${label}`,
+        displayNames: {
+          "pt-BR": `${portugueseMarseilleRanks[rank]} de ${portugueseTarotSuits[suit]}`,
+        },
         order:
           marseilleMajorArcana.length +
           suitIndex * marseilleRanks.length +
@@ -224,6 +319,11 @@ export const tarotDeMarseille: CardSetDefinition = {
   shortLabel: "Tarot de Marseille",
   description:
     "Jean Dodal's complete 78-card Tarot de Marseille, printed in Lyon circa 1701–1715.",
+  displayLabels: { "pt-BR": "Tarô de Marselha · Jean Dodal" },
+  displayShortLabels: { "pt-BR": "Tarô de Marselha" },
+  displayDescriptions: {
+    "pt-BR": "O Tarô de Marselha completo de Jean Dodal, impresso em Lyon por volta de 1701–1715.",
+  },
   cardAspectRatio: getCroppedAspectRatio(33 / 61, marseilleArtworkCrop),
   artworkCrop: marseilleArtworkCrop,
   back: marseilleArtwork("back"),
@@ -269,6 +369,45 @@ const classicLenormandCards = [
   ["36-cross", "Cross"],
 ] as const;
 
+const lenormandPortugueseNames: Record<string, string> = {
+  "01-rider": "Cavaleiro",
+  "02-clover": "Trevo",
+  "03-ship": "Navio",
+  "04-house": "Casa",
+  "05-tree": "Árvore",
+  "06-clouds": "Nuvens",
+  "07-snake": "Cobra",
+  "08-coffin": "Caixão",
+  "09-bouquet": "Buquê",
+  "10-scythe": "Foice",
+  "11-whip": "Chicote",
+  "12-birds": "Pássaros",
+  "13-child": "Criança",
+  "14-fox": "Raposa",
+  "15-bear": "Urso",
+  "16-stars": "Estrelas",
+  "17-stork": "Cegonha",
+  "18-dog": "Cão",
+  "19-tower": "Torre",
+  "20-garden": "Jardim",
+  "21-mountain": "Montanha",
+  "22-crossroads": "Encruzilhada",
+  "23-mice": "Ratos",
+  "24-heart": "Coração",
+  "25-ring": "Anel",
+  "26-book": "Livro",
+  "27-letter": "Carta",
+  "28-man": "Homem",
+  "29-woman": "Mulher",
+  "30-lily": "Lírios",
+  "31-sun": "Sol",
+  "32-moon": "Lua",
+  "33-key": "Chave",
+  "34-fish": "Peixes",
+  "35-anchor": "Âncora",
+  "36-cross": "Cruz",
+};
+
 export const classicLenormand: CardSetDefinition = {
   id: "classic-lenormand",
   kind: "lenormand",
@@ -276,12 +415,18 @@ export const classicLenormand: CardSetDefinition = {
   shortLabel: "Stralsund Lenormand",
   description:
     "A complete 36-card Stralsund deck from Spielkartenfabrik Altenburg, circa 1890.",
+  displayLabels: { "pt-BR": "Lenormand de Stralsund" },
+  displayShortLabels: { "pt-BR": "Lenormand de Stralsund" },
+  displayDescriptions: {
+    "pt-BR": "Um Lenormand completo de 36 cartas da Spielkartenfabrik Altenburg, por volta de 1890.",
+  },
   cardAspectRatio: getCroppedAspectRatio(51 / 83, lenormandArtworkCrop),
   artworkCrop: lenormandArtworkCrop,
   back: lenormandArtwork("back"),
   cards: classicLenormandCards.map(([id, name], order) => ({
     id,
     name,
+    displayNames: { "pt-BR": lenormandPortugueseNames[id] },
     order,
     image: lenormandArtwork(id),
   })),
@@ -305,4 +450,32 @@ export function getCardSet(cardSetId: string): CardSetDefinition {
   }
 
   return cardSet;
+}
+
+export function getCardDisplayName(
+  definition: CardDefinition,
+  locale: AppLocale
+): string {
+  return definition.displayNames?.[locale] ?? definition.name;
+}
+
+export function getCardSetDisplayLabel(
+  cardSet: CardSetDefinition,
+  locale: AppLocale
+): string {
+  return cardSet.displayLabels?.[locale] ?? cardSet.label;
+}
+
+export function getCardSetDisplayShortLabel(
+  cardSet: CardSetDefinition,
+  locale: AppLocale
+): string {
+  return cardSet.displayShortLabels?.[locale] ?? cardSet.shortLabel;
+}
+
+export function getCardSetDisplayDescription(
+  cardSet: CardSetDefinition,
+  locale: AppLocale
+): string {
+  return cardSet.displayDescriptions?.[locale] ?? cardSet.description;
 }

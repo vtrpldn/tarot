@@ -188,9 +188,15 @@ type DriftingAstrologicalMark = {
 };
 
 function createDriftingAstrologicalMarks(): DriftingAstrologicalMark[] {
-  return ASTROLOGICAL_KINDS.map((kind, index) => {
+  const markCount = 4 + Math.floor(Math.random() * 3);
+
+  return Array.from({ length: markCount }, (_, index) => {
+    const kind =
+      ASTROLOGICAL_KINDS[
+        Math.floor(Math.random() * ASTROLOGICAL_KINDS.length)
+      ];
     const angle =
-      (index / ASTROLOGICAL_KINDS.length) * Math.PI * 2 +
+      (index / markCount) * Math.PI * 2 +
       (Math.random() - 0.5) * 0.68;
     const radiusX = 0.32 + Math.random() * 0.1;
     const radiusY = 0.27 + Math.random() * 0.1;
