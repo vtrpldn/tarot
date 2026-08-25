@@ -5,7 +5,6 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
   memo,
-  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -29,7 +28,7 @@ import {
   getTopDeckCard,
 } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
-import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
+import { CARD_THICKNESS, CardMesh } from "./CardMesh";
 import {
   createSceneTableLayout,
   MIN_VIEW_ZOOM,
@@ -45,6 +44,15 @@ const DECK_CARD_RENDER_ORDER = 20;
 const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
+const DECK_LAYER_REGISTRATION = [
+  [-0.0065, 0.0035],
+  [0.006, 0.0025],
+  [-0.0035, -0.004],
+  [0.008, -0.0015],
+  [-0.005, 0.0013],
+  [0.003, -0.0045],
+  [-0.0007, 0.0042],
+] as const;
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
   [-0.29, 0.18, 0.011],
@@ -120,10 +128,15 @@ function AnimatedCameraZoom({
 
 function getDeckMetrics(count: number) {
   const layerCount =
-    count > 0 ? Math.min(12, Math.max(1, Math.ceil(count / 7))) : 0;
-  const layerThickness = 0.034;
-  const layerStep = 0.023;
-  const firstCenter = TABLE_SURFACE_Z + 0.007 + layerThickness / 2;
+    count > 0
+      ? Math.min(
+          DECK_LAYER_REGISTRATION.length,
+          Math.max(1, Math.ceil(count / 11))
+        )
+      : 0;
+  const layerThickness = 0.012;
+  const layerStep = 0.016;
+  const firstCenter = TABLE_SURFACE_Z + 0.006 + layerThickness / 2;
   const topSurface = layerCount
     ? firstCenter + (layerCount - 1) * layerStep + layerThickness / 2
     : TABLE_SURFACE_Z + 0.007;
@@ -143,7 +156,6 @@ function DeckStack({
   position,
   width,
   height,
-  backUrl,
   reducedMotion,
   previewPositionRef,
 }: {
@@ -151,7 +163,6 @@ function DeckStack({
   position: TablePoint;
   width: number;
   height: number;
-  backUrl: string;
   reducedMotion: boolean;
   previewPositionRef: MutableRefObject<TablePoint | null>;
 }) {
@@ -217,31 +228,29 @@ function DeckStack({
     return null;
   }
 
-  const outerInset = Math.min(0.2, width * 0.08);
-  const ruleInset = Math.min(0.32, width * 0.13);
-  const artInset = Math.min(0.42, width * 0.17);
-  const topOffsetX = ((metrics.layerCount - 1) % 3 - 1) * 0.012;
-  const topOffsetY = ((metrics.layerCount - 1) % 2 ? -1 : 1) * 0.01;
-
   return (
     <group ref={groupRef} renderOrder={DECK_STACK_RENDER_ORDER}>
       {Array.from({ length: metrics.layerCount }, (_, index) => {
-        const offsetX = (index % 3 - 1) * 0.012;
-        const offsetY = (index % 2 ? -1 : 1) * 0.01;
+        const registration = DECK_LAYER_REGISTRATION[index];
+        const distanceFromTop = metrics.layerCount - index;
+        const offsetX =
+          registration[0] * width * 0.25 -
+          distanceFromTop * width * 0.0035;
+        const offsetY =
+          registration[1] * height * 0.25 +
+          distanceFromTop * height * 0.0025;
 
         return (
           <RoundedBox
             key={index}
             args={[width, height, metrics.layerThickness]}
-            radius={0.055}
-            smoothness={4}
+            radius={0.045}
+            smoothness={3}
             position={[
               offsetX,
               offsetY,
               metrics.firstCenter + index * metrics.layerStep,
             ]}
-            castShadow
-            receiveShadow
             renderOrder={index}
           >
             <meshStandardMaterial
@@ -250,49 +259,12 @@ function DeckStack({
                   ? TAROT_SCENE_PALETTE.cardEdge
                   : TAROT_SCENE_PALETTE.cardEdgeShadow
               }
-              roughness={0.72}
-              metalness={0.025}
-              depthTest={false}
-              depthWrite={false}
+              roughness={index % 2 ? 0.88 : 0.84}
+              metalness={0}
             />
           </RoundedBox>
         );
       })}
-      <mesh
-        position={[topOffsetX, topOffsetY, metrics.topSurface + 0.001]}
-        renderOrder={metrics.layerCount + 1}
-      >
-        <planeGeometry args={[width - outerInset, height - outerInset]} />
-        <meshStandardMaterial
-          color={TAROT_SCENE_PALETTE.cardField}
-          roughness={0.52}
-          metalness={0.12}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
-      <mesh
-        position={[topOffsetX, topOffsetY, metrics.topSurface + 0.003]}
-        renderOrder={metrics.layerCount + 2}
-      >
-        <planeGeometry args={[width - ruleInset, height - ruleInset]} />
-        <meshStandardMaterial
-          color={TAROT_SCENE_PALETTE.cardRule}
-          roughness={0.46}
-          metalness={0.48}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
-      <Suspense fallback={null}>
-        <CardArtwork
-          url={backUrl}
-          position={[topOffsetX, topOffsetY, metrics.topSurface + 0.005]}
-          width={width - artInset}
-          height={height - artInset}
-          renderOrder={metrics.layerCount + 3}
-        />
-      </Suspense>
     </group>
   );
 }
@@ -523,7 +495,6 @@ function TarotTable({
         position={deckPosition}
         width={layout.cardWidth}
         height={layout.cardHeight}
-        backUrl={cardSet.back.preview}
         reducedMotion={reducedMotion}
         previewPositionRef={deckPreviewPositionRef}
       />
