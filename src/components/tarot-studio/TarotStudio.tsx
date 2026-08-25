@@ -17,6 +17,11 @@ import {
 } from "react";
 import { cardSets, getCardSet } from "@/data/card-sets";
 import {
+  createCardSoundEngine,
+  type CardSoundEvent,
+  type CardSoundPlayOptions,
+} from "@/lib/card-sounds";
+import {
   createLayout,
   createTarotSession,
   getRemainingDeckCount,
@@ -42,6 +47,9 @@ import {
 
 const WHEEL_LAYER_COOLDOWN = 110;
 const WHEEL_LAYER_THRESHOLD = 36;
+const DOCK_EDGE_REVEAL_DISTANCE = 52;
+const DOCK_HIDE_DELAY = 850;
+const DOCK_INITIAL_HIDE_DELAY = 1800;
 
 const TarotScene = dynamic(
   () => import("./TarotScene").then((module) => module.TarotScene),
@@ -65,6 +73,201 @@ function useReducedMotionPreference() {
   }, []);
 
   return reducedMotion;
+}
+
+function useCardSounds() {
+  const engineRef = useRef<ReturnType<typeof createCardSoundEngine> | null>(
+    null
+  );
+  const [isMuted, setIsMuted] = useState(false);
+
+  useEffect(() => {
+    const engine = createCardSoundEngine();
+    engineRef.current = engine;
+    setIsMuted(engine.getMuted());
+
+    return () => {
+      engine.dispose();
+
+      if (engineRef.current === engine) {
+        engineRef.current = null;
+      }
+    };
+  }, []);
+
+  const play = useCallback(
+    (event: CardSoundEvent, options?: CardSoundPlayOptions) => {
+      engineRef.current?.play(event, options);
+    },
+    []
+  );
+  const toggle = useCallback(() => {
+    const engine = engineRef.current;
+
+    if (!engine) {
+      return;
+    }
+
+    setIsMuted(engine.toggleMuted());
+  }, []);
+
+  return { isMuted, play, toggle };
+}
+
+function useAutoHidingDock(
+  isPinned: boolean,
+  fallbackFocusRef: RefObject<HTMLElement | null>
+) {
+  const dockRef = useRef<HTMLElement>(null);
+  const hideTimerRef = useRef<number | null>(null);
+  const finePointerRef = useRef(false);
+  const keyboardFocusRef = useRef(true);
+  const pointerInsideRef = useRef(false);
+  const pinnedRef = useRef(isPinned);
+  const [isVisible, setIsVisible] = useState(true);
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = null;
+  }, []);
+  const showDock = useCallback(() => {
+    clearHideTimer();
+    setIsVisible(true);
+  }, [clearHideTimer]);
+  const scheduleHide = useCallback(
+    (delay = DOCK_HIDE_DELAY) => {
+      if (
+        !finePointerRef.current ||
+        pinnedRef.current ||
+        pointerInsideRef.current ||
+        hideTimerRef.current !== null
+      ) {
+        return;
+      }
+
+      hideTimerRef.current = window.setTimeout(() => {
+        hideTimerRef.current = null;
+        const dock = dockRef.current;
+
+        if (
+          !finePointerRef.current ||
+          pinnedRef.current ||
+          pointerInsideRef.current
+        ) {
+          return;
+        }
+
+        if (dock?.contains(document.activeElement)) {
+          if (keyboardFocusRef.current) {
+            return;
+          }
+
+          fallbackFocusRef.current?.focus({ preventScroll: true });
+        }
+
+        setIsVisible(false);
+      }, delay);
+    },
+    [fallbackFocusRef]
+  );
+
+  useEffect(() => {
+    pinnedRef.current = isPinned;
+
+    if (isPinned) {
+      showDock();
+    } else {
+      scheduleHide();
+    }
+  }, [isPinned, scheduleHide, showDock]);
+
+  useEffect(() => {
+    const finePointer = window.matchMedia(
+      "(min-width: 768px) and (hover: hover) and (pointer: fine)"
+    );
+    const updatePointerMode = () => {
+      finePointerRef.current = finePointer.matches;
+
+      if (finePointer.matches) {
+        scheduleHide(DOCK_INITIAL_HIDE_DELAY);
+      } else {
+        showDock();
+      }
+    };
+    const revealFromBottomEdge = (event: PointerEvent) => {
+      if (!finePointerRef.current || event.pointerType !== "mouse") {
+        return;
+      }
+
+      keyboardFocusRef.current = false;
+
+      if (event.clientY >= window.innerHeight - DOCK_EDGE_REVEAL_DISTANCE) {
+        showDock();
+      } else {
+        scheduleHide();
+      }
+    };
+    const noteKeyboardUse = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.key === "Tab" ||
+        dockRef.current?.contains(document.activeElement)
+      ) {
+        keyboardFocusRef.current = true;
+      }
+    };
+
+    updatePointerMode();
+    finePointer.addEventListener("change", updatePointerMode);
+    document.addEventListener("keydown", noteKeyboardUse, true);
+    document.addEventListener("pointermove", revealFromBottomEdge, {
+      capture: true,
+      passive: true,
+    });
+
+    return () => {
+      clearHideTimer();
+      finePointer.removeEventListener("change", updatePointerMode);
+      document.removeEventListener("keydown", noteKeyboardUse, true);
+      document.removeEventListener("pointermove", revealFromBottomEdge, true);
+    };
+  }, [clearHideTimer, scheduleHide, showDock]);
+
+  const onPointerEnter = useCallback(() => {
+    pointerInsideRef.current = true;
+    showDock();
+  }, [showDock]);
+  const onPointerLeave = useCallback(() => {
+    pointerInsideRef.current = false;
+    scheduleHide();
+  }, [scheduleHide]);
+  const onPointerDown = useCallback(() => {
+    keyboardFocusRef.current = false;
+    showDock();
+  }, [showDock]);
+  const onFocus = useCallback(() => {
+    showDock();
+  }, [showDock]);
+  const onBlur = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      if (!dockRef.current?.contains(document.activeElement)) {
+        scheduleHide();
+      }
+    });
+  }, [scheduleHide]);
+
+  return {
+    dockRef,
+    isVisible,
+    onBlur,
+    onFocus,
+    onPointerDown,
+    onPointerEnter,
+    onPointerLeave,
+  };
 }
 
 function Shortcut({ children }: { children: ReactNode }) {
@@ -179,6 +382,11 @@ export function TarotStudio() {
     createTarotSession
   );
   const reducedMotion = useReducedMotionPreference();
+  const {
+    isMuted: areCardSoundsMuted,
+    play: playCardSound,
+    toggle: toggleCardSounds,
+  } = useCardSounds();
   const tableCards = getTableCards(session);
   const topDeckCard = getTopDeckCard(session);
   const selectedCard = session.cards.find(
@@ -193,6 +401,23 @@ export function TarotStudio() {
   const hasSelectedTableCard = selectedCard?.zone === "table";
   const isInspectorOpen =
     hasSelectedTableCard && !isInspectorCollapsed && !isDeckMoveMode;
+  const isDockPinned =
+    isDeckMenuOpen ||
+    isZoomMenuOpen ||
+    isSpreadMenuOpen ||
+    isArrangeMenuOpen ||
+    isShuffleMenuOpen ||
+    isInspectorOpen ||
+    isDeckMoveMode;
+  const {
+    dockRef,
+    isVisible: isDockVisible,
+    onBlur: handleDockBlur,
+    onFocus: handleDockFocus,
+    onPointerDown: handleDockPointerDown,
+    onPointerEnter: handleDockPointerEnter,
+    onPointerLeave: handleDockPointerLeave,
+  } = useAutoHidingDock(isDockPinned, canvasShellRef);
   const canSendBackward = selectedTableIndex > 0;
   const canBringForward =
     selectedTableIndex >= 0 && selectedTableIndex < tableCards.length - 1;
@@ -301,8 +526,9 @@ export function TarotStudio() {
     }
 
     activeSpreadRef.current = null;
+    playCardSound("draw");
     dispatch({ type: "draw", cardId: topDeckCard.id, position: [0.3, 0] });
-  }, [topDeckCard]);
+  }, [playCardSound, topDeckCard]);
 
   const arrangeCards = useCallback(
     (layout: TableLayout) => {
@@ -311,12 +537,13 @@ export function TarotStudio() {
       }
 
       activeSpreadRef.current = null;
+      playCardSound("arrange");
       dispatch({
         type: "layout",
         placements: createLayout(tableCards, activeCardSet, layout),
       });
     },
-    [activeCardSet, tableCards]
+    [activeCardSet, playCardSound, tableCards]
   );
 
   const dealSpread = useCallback(
@@ -330,6 +557,7 @@ export function TarotStudio() {
       const presentation = getSpreadPresentation(spread, layout);
       activeSpreadRef.current = spread;
       setViewZoom(presentation.zoom);
+      playCardSound("arrange");
 
       dispatch({
         type: "deal-spread",
@@ -337,29 +565,32 @@ export function TarotStudio() {
         deckPosition: presentation.deckPosition,
       });
     },
-    []
+    [playCardSound]
   );
 
   const flipSelected = useCallback(() => {
     if (selectedCard?.zone === "table") {
+      playCardSound("flip");
       dispatch({ type: "flip", cardId: selectedCard.id });
     }
-  }, [selectedCard]);
+  }, [playCardSound, selectedCard]);
 
   const turnSelected = useCallback((degrees: number) => {
     if (selectedCard?.zone === "table") {
       activeSpreadRef.current = null;
+      playCardSound("rotate");
       dispatch({ type: "rotate", cardId: selectedCard.id, degrees });
     }
-  }, [selectedCard]);
+  }, [playCardSound, selectedCard]);
 
   const reorderSelected = useCallback(
     (direction: CardLayerDirection) => {
       if (selectedCard?.zone === "table") {
+        playCardSound("move", { intensity: 0.7 });
         dispatch({ type: "reorder", cardId: selectedCard.id, direction });
       }
     },
-    [selectedCard]
+    [playCardSound, selectedCard]
   );
 
   const handleLayoutChange = useCallback((layout: SceneTableLayout) => {
@@ -385,33 +616,38 @@ export function TarotStudio() {
   const handleDraw = useCallback(
     (cardId: string, position: TablePoint, rotation?: number) => {
       activeSpreadRef.current = null;
+      playCardSound("draw");
       dispatch({ type: "draw", cardId, position, rotation });
     },
-    []
+    [playCardSound]
   );
 
   const handleMoveDeck = useCallback((position: TablePoint) => {
     activeSpreadRef.current = null;
     setIsDeckMoveMode(false);
+    playCardSound("drop");
     dispatch({ type: "move-deck", position });
-  }, []);
+  }, [playCardSound]);
 
   const handleMove = useCallback(
     (cardId: string, position: TablePoint, rotation?: number) => {
       activeSpreadRef.current = null;
+      playCardSound("drop");
       dispatch({ type: "move", cardId, position, rotation });
     },
-    []
+    [playCardSound]
   );
 
   const handleFlip = useCallback((cardId: string) => {
+    playCardSound("flip");
     dispatch({ type: "flip", cardId });
-  }, []);
+  }, [playCardSound]);
 
   const handleRotate = useCallback((cardId: string, degrees: number) => {
     activeSpreadRef.current = null;
+    playCardSound("rotate");
     dispatch({ type: "rotate", cardId, degrees });
-  }, []);
+  }, [playCardSound]);
 
   const handleHover = useCallback((cardId: string | null) => {
     hoveredCardIdRef.current = cardId;
@@ -429,8 +665,9 @@ export function TarotStudio() {
       setViewZoom(1);
     }
 
+    playCardSound("arrange");
     dispatch({ type: "undo" });
-  }, [session.history]);
+  }, [playCardSound, session.history]);
 
   const adjustViewZoom = useCallback((delta: number) => {
     setViewZoom((current) =>
@@ -474,13 +711,14 @@ export function TarotStudio() {
         wheel.accumulatedDelta < 0 ? "forward" : "backward";
       wheel.accumulatedDelta = 0;
       wheel.lastChangeAt = event.timeStamp;
+      playCardSound("move", { intensity: 0.65 });
       dispatch({
         type: "reorder",
         cardId: hoveredCardId,
         direction: layerDirection,
       });
     },
-    []
+    [playCardSound]
   );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -568,6 +806,7 @@ export function TarotStudio() {
     if (nudge && selectedCard?.zone === "table") {
       event.preventDefault();
       activeSpreadRef.current = null;
+      playCardSound("move", { intensity: 0.6 });
       dispatch({
         type: "nudge",
         cardId: selectedCard.id,
@@ -631,10 +870,23 @@ export function TarotStudio() {
           onFlip={handleFlip}
           onRotate={handleRotate}
           onHover={handleHover}
+          onSound={playCardSound}
         />
       </div>
 
-      <nav className="tarot-toolbar" aria-label="Table actions">
+      <nav
+        ref={dockRef}
+        className="tarot-toolbar"
+        aria-label="Table actions"
+        data-dock-state={
+          isDockVisible || isDockPinned ? "visible" : "hidden"
+        }
+        onPointerEnter={handleDockPointerEnter}
+        onPointerLeave={handleDockPointerLeave}
+        onPointerDownCapture={handleDockPointerDown}
+        onFocusCapture={handleDockFocus}
+        onBlurCapture={handleDockBlur}
+      >
         <div className="tarot-deck-menu" ref={deckMenuRef}>
           <button
             ref={deckMenuTriggerRef}
@@ -685,6 +937,7 @@ export function TarotStudio() {
                   setIsDeckMoveMode(false);
                   setIsSceneLayoutReady(false);
                   setActiveCardSetId(nextCardSet.id);
+                  playCardSound("shuffle");
                   dispatch({ type: "new-shuffle", cardSet: nextCardSet });
                   setViewZoom(1);
                   setIsDeckMenuOpen(false);
@@ -990,6 +1243,7 @@ export function TarotStudio() {
                 onClick={() => {
                   activeSpreadRef.current = null;
                   setIsDeckMoveMode(false);
+                  playCardSound("shuffle");
                   dispatch({ type: "new-shuffle", cardSet: activeCardSet });
                   closeShuffleMenu();
                   setViewZoom(1);
@@ -1001,6 +1255,24 @@ export function TarotStudio() {
             </div>
           )}
         </div>
+        <button
+          type="button"
+          className="tarot-toolbar-trigger tarot-sound-toggle"
+          aria-label="Card sounds"
+          aria-pressed={!areCardSoundsMuted}
+          title={areCardSoundsMuted ? "Card sounds off" : "Card sounds on"}
+          onClick={toggleCardSounds}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 10h3.2L13 6.2v11.6L8.2 14H5z" />
+            {areCardSoundsMuted ? (
+              <path d="m16.5 9.2 4.3 5.6m0-5.6-4.3 5.6" />
+            ) : (
+              <path d="M16.5 9.2a4 4 0 0 1 0 5.6M18.8 7a7 7 0 0 1 0 10" />
+            )}
+          </svg>
+          <span>Sound</span>
+        </button>
         <div className="tarot-card-menu">
           <button
             ref={inspectorToggleRef}
@@ -1067,12 +1339,14 @@ export function TarotStudio() {
                   autoComplete="off"
                   value={session.selectedCardId ?? ""}
                   disabled={tableCards.length === 0}
-                  onChange={(event) =>
-                    dispatch({
-                      type: "select",
-                      cardId: event.target.value || null,
-                    })
-                  }
+                  onChange={(event) => {
+                    const cardId = event.target.value || null;
+
+                    if (cardId) {
+                      playCardSound("pickup", { intensity: 0.7 });
+                    }
+                    handleSelect(cardId);
+                  }}
                 >
                   <option value="">Select a drawn card</option>
                   {tableCards.map((card, index) => {

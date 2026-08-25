@@ -17,8 +17,10 @@ import {
   MathUtils,
   Mesh,
   Plane,
+  Raycaster,
   SRGBColorSpace,
   Texture,
+  Vector2,
   Vector3,
 } from "three";
 import type {
@@ -27,6 +29,7 @@ import type {
   TableCard,
   TablePoint,
 } from "@/types";
+import type { CardSoundEvent } from "@/lib/card-sounds";
 import type { SceneTableLayout } from "./table-layout";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
@@ -60,6 +63,7 @@ type DragState = {
   target: Vector3;
   velocity: Vector3;
   lastMoveAt: number;
+  lastInputAt: number;
   moved: boolean;
   tiltX: number;
   tiltY: number;
@@ -77,6 +81,14 @@ type FlipAnimation = {
 type LostPointerCaptureBinding = {
   target: HTMLElement;
   handler: (event: PointerEvent) => void;
+};
+
+type PointerEndFallbackBinding = {
+  target: Document;
+  pointerId: number;
+  pointerMoveHandler: (event: PointerEvent) => void;
+  pointerUpHandler: (event: PointerEvent) => void;
+  pointerCancelHandler: (event: PointerEvent) => void;
 };
 
 function sampleDragVelocity(
@@ -149,6 +161,7 @@ type CardMeshProps = {
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
   onHover: (cardId: string | null) => void;
+  onSound: (event: CardSoundEvent) => void;
 };
 
 function useTextureForCard(url: string): Texture {
@@ -363,6 +376,7 @@ export const CardMesh = memo(function CardMesh({
   onFlip,
   onRotate,
   onHover,
+  onSound,
 }: CardMeshProps) {
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
@@ -376,12 +390,17 @@ export const CardMesh = memo(function CardMesh({
     useRef<ReturnType<typeof setTimeout> | null>(null);
   const lostPointerCaptureRef =
     useRef<LostPointerCaptureBinding | null>(null);
+  const pointerEndFallbackRef =
+    useRef<PointerEndFallbackBinding | null>(null);
   const deckPreviewRef = useRef<TablePoint | null>(null);
   const [hasRevealed, setHasRevealed] = useState(card.faceUp);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
   const invalidate = useThree((state) => state.invalidate);
   const canvas = useThree((state) => state.gl.domElement);
+  const camera = useThree((state) => state.camera);
+  const pointerRaycasterRef = useRef(new Raycaster());
+  const pointerNdcRef = useRef(new Vector2());
   const targetPosition =
     card.zone === "deck" ? deckPosition : layout.toWorld(card.position);
   const targetPositionX = targetPosition[0];
@@ -432,6 +451,46 @@ export const CardMesh = memo(function CardMesh({
     lostPointerCaptureRef.current = null;
   }, []);
 
+  const clearPointerEndFallback = useCallback(() => {
+    const binding = pointerEndFallbackRef.current;
+
+    if (!binding) {
+      return;
+    }
+
+    binding.target.removeEventListener(
+      "pointermove",
+      binding.pointerMoveHandler
+    );
+    binding.target.removeEventListener("pointerup", binding.pointerUpHandler);
+    binding.target.removeEventListener(
+      "pointercancel",
+      binding.pointerCancelHandler
+    );
+    pointerEndFallbackRef.current = null;
+  }, []);
+
+  const getCanvasPointerPoint = useCallback(
+    (event: PointerEvent) => {
+      const bounds = canvas.getBoundingClientRect();
+      const pointer = pointerNdcRef.current;
+
+      pointer.set(
+        ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+        -((event.clientY - bounds.top) / bounds.height) * 2 + 1
+      );
+      pointerRaycasterRef.current.setFromCamera(pointer, camera);
+
+      return (
+        pointerRaycasterRef.current.ray.intersectPlane(
+          DRAG_PLANE,
+          new Vector3()
+        ) ?? dragRef.current?.lastPoint.clone() ?? new Vector3()
+      );
+    },
+    [camera, canvas]
+  );
+
   const setDeckPreview = useCallback(
     (position: TablePoint | null) => {
       const current = deckPreviewRef.current;
@@ -476,12 +535,14 @@ export const CardMesh = memo(function CardMesh({
       pendingTopLayerRef.current = false;
       clearPendingReconciliationTimeout();
       clearLostPointerCapture();
+      clearPointerEndFallback();
       setDeckPreview(null);
       canvas.style.cursor = "grab";
     },
     [
       canvas,
       clearLostPointerCapture,
+      clearPointerEndFallback,
       clearPendingReconciliationTimeout,
       setDeckPreview,
     ]
@@ -578,6 +639,209 @@ export const CardMesh = memo(function CardMesh({
     targetPositionY,
   ]);
 
+  const updateDrag = useCallback(
+    ({
+      pointerId,
+      point,
+      timestamp,
+      shiftKey = false,
+    }: {
+      pointerId: number;
+      point: Vector3;
+      timestamp: number;
+      shiftKey?: boolean;
+    }) => {
+      const drag = dragRef.current;
+      const group = groupRef.current;
+
+      if (!drag || drag.pointerId !== pointerId || !group) {
+        return false;
+      }
+
+      // Both React Three Fiber and the canvas fallback see the same DOM event.
+      // Process it once while still accepting movement that no longer raycasts
+      // against the card after a very fast pointer motion.
+      if (
+        drag.lastInputAt === timestamp &&
+        point.distanceToSquared(drag.lastPoint) <= 0.00000001
+      ) {
+        return true;
+      }
+
+      drag.lastInputAt = timestamp;
+
+      if (drag.mode === "rotate") {
+        const pointerAngle = Math.atan2(
+          point.y - group.position.y,
+          point.x - group.position.x
+        );
+        let angleDelta = pointerAngle - drag.startAngle;
+
+        if (angleDelta > Math.PI) {
+          angleDelta -= Math.PI * 2;
+        } else if (angleDelta < -Math.PI) {
+          angleDelta += Math.PI * 2;
+        }
+
+        const rawRotation =
+          drag.startRotation + MathUtils.radToDeg(angleDelta);
+        const previewRotation = shiftKey
+          ? Math.round(rawRotation / 15) * 15
+          : rawRotation;
+
+        drag.previewRotation = previewRotation;
+        drag.moved =
+          Math.abs(previewRotation - drag.startRotation) > 0.8;
+        drag.lastPoint.copy(point);
+        invalidate();
+        return true;
+      }
+
+      const nextX = point.x - drag.offset.x;
+      const nextY = point.y - drag.offset.y;
+      const [deltaX, deltaY] = sampleDragVelocity(drag, point, timestamp);
+
+      const hadMoved = drag.moved;
+
+      if (point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
+        drag.moved = true;
+      }
+
+      if (!hadMoved && drag.moved) {
+        onSound("move");
+      }
+
+      drag.tiltX = MathUtils.clamp(-deltaY * 0.48, -0.13, 0.13);
+      drag.tiltY = MathUtils.clamp(deltaX * 0.48, -0.13, 0.13);
+      drag.target.set(nextX, nextY, group.position.z);
+      invalidate();
+      return true;
+    },
+    [invalidate, onSound]
+  );
+
+  const finishDragAt = useCallback(
+    ({
+      pointerId,
+      point,
+      timestamp,
+      cancelled = false,
+    }: {
+      pointerId: number;
+      point: Vector3;
+      timestamp: number;
+      cancelled?: boolean;
+    }) => {
+      const drag = dragRef.current;
+      const group = groupRef.current;
+
+      if (!drag || drag.pointerId !== pointerId || !group) {
+        return false;
+      }
+
+      if (!cancelled) {
+        updateDrag({ pointerId, point, timestamp });
+      }
+
+      if (!cancelled) {
+        if (drag.mode === "rotate" && drag.moved) {
+          pendingRotationRef.current = drag.previewRotation;
+          schedulePendingReconciliation();
+          onRotate(card.id, drag.previewRotation - drag.startRotation);
+        } else if (drag.mode !== "rotate" && drag.moved) {
+          const releaseX = point.x - drag.offset.x;
+          const releaseY = point.y - drag.offset.y;
+          drag.target.set(releaseX, releaseY, group.position.z);
+          const idleSeconds = Math.max(
+            0,
+            (timestamp - drag.lastMoveAt) / 1000
+          );
+          const velocityDecay = reducedMotion
+            ? 0
+            : Math.exp(-idleSeconds * 10);
+          const releaseVelocityX = drag.velocity.x * velocityDecay;
+          const releaseVelocityY = drag.velocity.y * velocityDecay;
+          let glideX = releaseVelocityX * RELEASE_GLIDE_SECONDS;
+          let glideY = releaseVelocityY * RELEASE_GLIDE_SECONDS;
+          const glideDistance = Math.hypot(glideX, glideY);
+
+          if (glideDistance > MAX_RELEASE_GLIDE) {
+            const glideScale = MAX_RELEASE_GLIDE / glideDistance;
+            glideX *= glideScale;
+            glideY *= glideScale;
+          }
+
+          const nextPoint = layout.toPoint(
+            releaseX + glideX,
+            releaseY + glideY
+          );
+          const nextWorldPosition = layout.toWorld(nextPoint);
+
+          if (drag.mode === "move-deck") {
+            pendingPositionRef.current = nextWorldPosition;
+            schedulePendingReconciliation();
+            onMoveDeck(nextPoint);
+          } else {
+            const landingRotation = getThrownRotation({
+              rotation: card.rotation,
+              offset: drag.offset,
+              velocityX: releaseVelocityX,
+              velocityY: releaseVelocityY,
+              cardWidth,
+              cardHeight,
+              reducedMotion,
+            });
+
+            pendingPositionRef.current = nextWorldPosition;
+            pendingRotationRef.current = landingRotation;
+            pendingTopLayerRef.current = true;
+            schedulePendingReconciliation();
+
+            if (card.zone === "deck") {
+              onDraw(card.id, nextPoint, landingRotation);
+            } else {
+              onMove(card.id, nextPoint, landingRotation);
+            }
+          }
+        }
+      }
+
+      if (cancelled) {
+        clearPendingRelease();
+        onHover(null);
+      }
+
+      dragRef.current = null;
+
+      if (drag.mode === "move-deck") {
+        setDeckPreview(null);
+      }
+      canvas.style.cursor = "grab";
+      invalidate();
+      return true;
+    },
+    [
+      canvas,
+      card.id,
+      card.rotation,
+      card.zone,
+      cardHeight,
+      cardWidth,
+      clearPendingRelease,
+      invalidate,
+      layout,
+      onDraw,
+      onHover,
+      onMove,
+      onMoveDeck,
+      onRotate,
+      reducedMotion,
+      schedulePendingReconciliation,
+      setDeckPreview,
+      updateDrag,
+    ]
+  );
+
   useFrame((_, delta) => {
     const group = groupRef.current;
     const flippingCard = flipRef.current;
@@ -650,7 +914,7 @@ export const CardMesh = memo(function CardMesh({
         ? 0
         : Math.abs(Math.sin(flippingCard.rotation.y)) * FLIP_LIFT;
     const zTarget =
-      drag && drag.mode !== "move-deck"
+      drag?.moved && drag.mode !== "move-deck"
         ? draggingZ + flipLift
         : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0) + flipLift;
     const positionXTarget = moving
@@ -768,12 +1032,12 @@ export const CardMesh = memo(function CardMesh({
       point.x - group.position.x
     );
 
-    const canCapture = typeof target.setPointerCapture === "function";
     target.setPointerCapture?.(event.pointerId);
-    const pointerTarget = event.nativeEvent.target;
+    canvas.setPointerCapture?.(event.pointerId);
 
     clearLostPointerCapture();
-    if (canCapture && pointerTarget instanceof HTMLElement) {
+    clearPointerEndFallback();
+    if (typeof canvas.setPointerCapture === "function") {
       const handleLostPointerCapture = (lostEvent: PointerEvent) => {
         lostPointerCaptureRef.current = null;
         const activeDrag = dragRef.current;
@@ -782,23 +1046,21 @@ export const CardMesh = memo(function CardMesh({
           return;
         }
 
-        dragRef.current = null;
-        clearPendingRelease();
-        if (activeDrag.mode === "move-deck") {
-          setDeckPreview(null);
-        }
-        onHover(null);
-        canvas.style.cursor = "grab";
-        invalidate();
+        clearPointerEndFallback();
+        finishDragAt({
+          pointerId: lostEvent.pointerId,
+          point: activeDrag.lastPoint.clone(),
+          timestamp: lostEvent.timeStamp,
+        });
       };
 
-      pointerTarget.addEventListener(
+      canvas.addEventListener(
         "lostpointercapture",
         handleLostPointerCapture,
         { once: true }
       );
       lostPointerCaptureRef.current = {
-        target: pointerTarget,
+        target: canvas,
         handler: handleLostPointerCapture,
       };
     }
@@ -816,6 +1078,7 @@ export const CardMesh = memo(function CardMesh({
       target: group.position.clone(),
       velocity: new Vector3(),
       lastMoveAt: event.timeStamp,
+      lastInputAt: event.timeStamp,
       moved: false,
       tiltX: 0,
       tiltY: 0,
@@ -823,9 +1086,67 @@ export const CardMesh = memo(function CardMesh({
       startRotation: card.rotation,
       previewRotation: card.rotation,
     };
+    onSound("pickup");
     if (mode === "move-deck") {
       setDeckPreview([group.position.x, group.position.y]);
     }
+
+    const handlePointerMoveFallback = (nativeEvent: PointerEvent) => {
+      if (nativeEvent.pointerId !== event.pointerId) {
+        return;
+      }
+
+      updateDrag({
+        pointerId: nativeEvent.pointerId,
+        point: getCanvasPointerPoint(nativeEvent),
+        timestamp: nativeEvent.timeStamp,
+        shiftKey: nativeEvent.shiftKey,
+      });
+    };
+    const handlePointerUpFallback = (nativeEvent: PointerEvent) => {
+      if (nativeEvent.pointerId !== event.pointerId) {
+        return;
+      }
+
+      clearLostPointerCapture();
+      clearPointerEndFallback();
+      if (canvas.hasPointerCapture(nativeEvent.pointerId)) {
+        canvas.releasePointerCapture(nativeEvent.pointerId);
+      }
+      finishDragAt({
+        pointerId: nativeEvent.pointerId,
+        point: getCanvasPointerPoint(nativeEvent),
+        timestamp: nativeEvent.timeStamp,
+      });
+    };
+    const handlePointerCancelFallback = (nativeEvent: PointerEvent) => {
+      if (nativeEvent.pointerId !== event.pointerId) {
+        return;
+      }
+
+      clearLostPointerCapture();
+      clearPointerEndFallback();
+      if (canvas.hasPointerCapture(nativeEvent.pointerId)) {
+        canvas.releasePointerCapture(nativeEvent.pointerId);
+      }
+      finishDragAt({
+        pointerId: nativeEvent.pointerId,
+        point: getCanvasPointerPoint(nativeEvent),
+        timestamp: nativeEvent.timeStamp,
+        cancelled: true,
+      });
+    };
+
+    document.addEventListener("pointermove", handlePointerMoveFallback);
+    document.addEventListener("pointerup", handlePointerUpFallback);
+    document.addEventListener("pointercancel", handlePointerCancelFallback);
+    pointerEndFallbackRef.current = {
+      target: document,
+      pointerId: event.pointerId,
+      pointerMoveHandler: handlePointerMoveFallback,
+      pointerUpHandler: handlePointerUpFallback,
+      pointerCancelHandler: handlePointerCancelFallback,
+    };
     canvas.style.cursor = mode === "rotate" ? "crosshair" : "grabbing";
     onSelect(
       mode !== "move-deck" && card.zone === "table" ? card.id : null
@@ -835,11 +1156,6 @@ export const CardMesh = memo(function CardMesh({
 
   const handlePointerMove = (event: ThreeEvent<PointerEvent>) => {
     const drag = dragRef.current;
-    const group = groupRef.current;
-
-    if (!group) {
-      return;
-    }
 
     if (!drag) {
       if (event.nativeEvent.pointerType !== "touch") {
@@ -865,146 +1181,29 @@ export const CardMesh = memo(function CardMesh({
     }
 
     event.stopPropagation();
-    const point = getPointerPoint(event);
-
-    if (drag.mode === "rotate") {
-      const pointerAngle = Math.atan2(
-        point.y - group.position.y,
-        point.x - group.position.x
-      );
-      let angleDelta = pointerAngle - drag.startAngle;
-
-      if (angleDelta > Math.PI) {
-        angleDelta -= Math.PI * 2;
-      } else if (angleDelta < -Math.PI) {
-        angleDelta += Math.PI * 2;
-      }
-
-      const rawRotation =
-        drag.startRotation + MathUtils.radToDeg(angleDelta);
-      const previewRotation = event.nativeEvent.shiftKey
-        ? Math.round(rawRotation / 15) * 15
-        : rawRotation;
-
-      drag.previewRotation = previewRotation;
-      drag.moved =
-        Math.abs(previewRotation - drag.startRotation) > 0.8;
-      drag.lastPoint.copy(point);
-      invalidate();
-      return;
-    }
-
-    const nextX = point.x - drag.offset.x;
-    const nextY = point.y - drag.offset.y;
-    const [deltaX, deltaY] = sampleDragVelocity(
-      drag,
-      point,
-      event.timeStamp
-    );
-
-    if (point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
-      drag.moved = true;
-    }
-
-    drag.tiltX = MathUtils.clamp(-deltaY * 0.48, -0.13, 0.13);
-    drag.tiltY = MathUtils.clamp(deltaX * 0.48, -0.13, 0.13);
-    drag.target.set(nextX, nextY, group.position.z);
-    invalidate();
+    updateDrag({
+      pointerId: event.pointerId,
+      point: getPointerPoint(event),
+      timestamp: event.timeStamp,
+      shiftKey: event.nativeEvent.shiftKey,
+    });
   };
 
   const finishDrag = (event: ThreeEvent<PointerEvent>, cancelled = false) => {
-    const drag = dragRef.current;
-    const group = groupRef.current;
-
-    if (!drag || drag.pointerId !== event.pointerId || !group) {
-      return;
-    }
-
     event.stopPropagation();
     const target = event.target as unknown as PointerCaptureTarget;
     clearLostPointerCapture();
+    clearPointerEndFallback();
     target.releasePointerCapture?.(event.pointerId);
-
-    if (!cancelled) {
-      if (drag.mode === "rotate" && drag.moved) {
-        pendingRotationRef.current = drag.previewRotation;
-        schedulePendingReconciliation();
-        onRotate(
-          card.id,
-          drag.previewRotation - drag.startRotation
-        );
-      } else if (drag.mode !== "rotate" && drag.moved) {
-        const point = getPointerPoint(event);
-        const releaseX = point.x - drag.offset.x;
-        const releaseY = point.y - drag.offset.y;
-        sampleDragVelocity(drag, point, event.timeStamp);
-        drag.target.set(releaseX, releaseY, group.position.z);
-        const idleSeconds = Math.max(
-          0,
-          (event.timeStamp - drag.lastMoveAt) / 1000
-        );
-        const velocityDecay = reducedMotion
-          ? 0
-          : Math.exp(-idleSeconds * 10);
-        const releaseVelocityX = drag.velocity.x * velocityDecay;
-        const releaseVelocityY = drag.velocity.y * velocityDecay;
-        let glideX = releaseVelocityX * RELEASE_GLIDE_SECONDS;
-        let glideY = releaseVelocityY * RELEASE_GLIDE_SECONDS;
-        const glideDistance = Math.hypot(glideX, glideY);
-
-        if (glideDistance > MAX_RELEASE_GLIDE) {
-          const glideScale = MAX_RELEASE_GLIDE / glideDistance;
-          glideX *= glideScale;
-          glideY *= glideScale;
-        }
-
-        const nextPoint = layout.toPoint(
-          releaseX + glideX,
-          releaseY + glideY
-        );
-        const nextWorldPosition = layout.toWorld(nextPoint);
-
-        if (drag.mode === "move-deck") {
-          pendingPositionRef.current = nextWorldPosition;
-          schedulePendingReconciliation();
-          onMoveDeck(nextPoint);
-        } else {
-          const landingRotation = getThrownRotation({
-            rotation: card.rotation,
-            offset: drag.offset,
-            velocityX: releaseVelocityX,
-            velocityY: releaseVelocityY,
-            cardWidth,
-            cardHeight,
-            reducedMotion,
-          });
-
-          pendingPositionRef.current = nextWorldPosition;
-          pendingRotationRef.current = landingRotation;
-          pendingTopLayerRef.current = true;
-          schedulePendingReconciliation();
-
-          if (card.zone === "deck") {
-            onDraw(card.id, nextPoint, landingRotation);
-          } else {
-            onMove(card.id, nextPoint, landingRotation);
-          }
-        }
-      }
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
     }
-
-    if (cancelled) {
-      clearPendingRelease();
-      onHover(null);
-    }
-
-    dragRef.current = null;
-
-    if (drag.mode === "move-deck") {
-      setDeckPreview(null);
-    }
-    canvas.style.cursor = "grab";
-    invalidate();
+    finishDragAt({
+      pointerId: event.pointerId,
+      point: getPointerPoint(event),
+      timestamp: event.timeStamp,
+      cancelled,
+    });
   };
 
   const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
