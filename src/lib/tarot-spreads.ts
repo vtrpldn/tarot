@@ -127,7 +127,10 @@ function getSpreadBounds(cardBounds: SceneBounds[]) {
 
 function getZoomForBounds(bounds: SceneBounds, layout: SceneTableLayout) {
   const horizontalPadding = layout.cardWidth * 0.16;
-  const verticalPadding = layout.cardHeight * 0.3;
+  // Leave enough breathing room for the auto-hiding dock even while it is
+  // visible; otherwise the lowest card can technically fit the canvas while
+  // still reading as clipped behind the controls.
+  const verticalPadding = layout.cardHeight * 0.46;
   const requiredHalfWidth =
     Math.max(Math.abs(bounds.left), Math.abs(bounds.right)) +
     horizontalPadding;

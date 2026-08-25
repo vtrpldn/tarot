@@ -74,7 +74,7 @@ const COLLECTION_ZOOM: Record<TarotCollectionId, number> = {
   all: MIN_VIEW_ZOOM,
   major: 0.48,
   minor: 0.35,
-  court: 0.62,
+  court: 0.48,
 };
 
 function getCollectionColumnCount(
@@ -104,7 +104,7 @@ function createCollectionPlacements(
   const rows = Math.max(1, Math.ceil(cardIds.length / columns));
   const horizontalGap =
     collection === "all" ? 0.37 : collection === "minor" ? 0.46 : 0.62;
-  const verticalGap = collection === "court" ? 0.82 : 0.76;
+  const verticalGap = 0.76;
 
   return new Map(
     cardIds.map((cardId, index) => {
