@@ -29,6 +29,7 @@ import {
 } from "@/lib/tarot-session";
 import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
 import { createSceneTableLayout } from "./table-layout";
+import { TAROT_SCENE_PALETTE } from "./theme";
 
 const BASE_CAMERA_ZOOM = 75;
 const MIN_VIEW_ZOOM = 0.65;
@@ -207,7 +208,11 @@ function DeckStack({
             receiveShadow
           >
             <meshStandardMaterial
-              color={index % 2 ? "#eadcbd" : "#d7c49e"}
+              color={
+                index % 2
+                  ? TAROT_SCENE_PALETTE.cardEdge
+                  : TAROT_SCENE_PALETTE.cardEdgeShadow
+              }
               roughness={0.72}
               metalness={0.025}
             />
@@ -217,7 +222,7 @@ function DeckStack({
       <mesh position={[topOffsetX, topOffsetY, metrics.topSurface + 0.001]}>
         <planeGeometry args={[width - outerInset, height - outerInset]} />
         <meshStandardMaterial
-          color="#162d29"
+          color={TAROT_SCENE_PALETTE.cardField}
           roughness={0.52}
           metalness={0.12}
         />
@@ -225,7 +230,7 @@ function DeckStack({
       <mesh position={[topOffsetX, topOffsetY, metrics.topSurface + 0.003]}>
         <planeGeometry args={[width - ruleInset, height - ruleInset]} />
         <meshStandardMaterial
-          color="#a88042"
+          color={TAROT_SCENE_PALETTE.cardRule}
           roughness={0.46}
           metalness={0.48}
         />
@@ -263,10 +268,10 @@ function TableSurface({
       >
         <planeGeometry args={[visibleWidth, visibleHeight]} />
         <meshStandardMaterial
-          color="#12342e"
+          color={TAROT_SCENE_PALETTE.table}
           roughness={0.94}
           metalness={0.012}
-          emissive="#071d1a"
+          emissive={TAROT_SCENE_PALETTE.tableEmissive}
           emissiveIntensity={0.18}
         />
       </mesh>
@@ -339,17 +344,18 @@ function TarotTable({
         castShadow
         position={[-4, 7, 8]}
         intensity={2.45}
-        color="#ffe8bd"
+        color={TAROT_SCENE_PALETTE.keyLight}
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
         shadow-bias={-0.00035}
-        shadow-radius={4}
+        shadow-radius={8}
+        shadow-normalBias={0.018}
       />
       <pointLight
         position={[4, -2, 5]}
         intensity={4.2}
         distance={14}
-        color="#6e9b91"
+        color={TAROT_SCENE_PALETTE.fillLight}
       />
       <TableSurface
         width={baseViewportWidth}
@@ -412,7 +418,7 @@ export function TarotScene(props: TarotSceneProps) {
     <Canvas
       className="tarot-canvas"
       orthographic
-      shadows
+      shadows="soft"
       dpr={[1, 1.5]}
       frameloop="demand"
       camera={{

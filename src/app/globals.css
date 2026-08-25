@@ -6,15 +6,18 @@
   --font-display: "Iowan Old Style", "Baskerville", "Palatino Linotype",
     "Book Antiqua", Georgia, serif;
   --font-mono: "SFMono-Regular", "Cascadia Mono", "Liberation Mono", monospace;
-  --ink: #f7efd9;
-  --muted-ink: rgba(247, 239, 217, 0.7);
-  --faint-ink: rgba(247, 239, 217, 0.46);
-  --evergreen: #0d2723;
-  --evergreen-deep: #071916;
-  --gold: #d8b866;
-  --gold-bright: #efd794;
-  --panel: rgba(7, 25, 22, 0.74);
-  --panel-edge: rgba(236, 211, 139, 0.3);
+  --ink: #f6efdf;
+  --muted-ink: rgba(246, 239, 223, 0.72);
+  --faint-ink: rgba(246, 239, 223, 0.48);
+  --primary: #281832;
+  --primary-deep: #100918;
+  --primary-raised: #3d254a;
+  --accent: #c9a563;
+  --accent-bright: #ead49b;
+  --panel: rgba(20, 11, 29, 0.76);
+  --panel-edge: rgba(224, 197, 145, 0.28);
+  --control: rgba(45, 26, 56, 0.68);
+  --control-hover: rgba(75, 45, 88, 0.9);
 }
 
 * {
@@ -29,7 +32,7 @@ body {
 body {
   margin: 0;
   color: var(--ink);
-  background: var(--evergreen-deep);
+  background: var(--primary-deep);
   font-family: var(--font-display);
 }
 
@@ -50,10 +53,10 @@ button {
   min-height: 620px;
   overflow: hidden;
   background:
-    radial-gradient(circle at 15% 78%, rgba(181, 137, 70, 0.11), transparent 28rem),
-    radial-gradient(circle at 84% 18%, rgba(118, 92, 133, 0.13), transparent 25rem),
-    radial-gradient(circle at 58% 46%, rgba(80, 125, 105, 0.11), transparent 34rem),
-    linear-gradient(135deg, #061714 0%, #0b2924 44%, #131b29 100%);
+    radial-gradient(circle at 15% 78%, rgba(190, 143, 78, 0.12), transparent 28rem),
+    radial-gradient(circle at 84% 18%, rgba(157, 104, 180, 0.17), transparent 25rem),
+    radial-gradient(circle at 58% 46%, rgba(92, 56, 112, 0.16), transparent 34rem),
+    linear-gradient(135deg, #0e0815 0%, #281733 47%, #171021 100%);
 }
 
 .tarot-canvas-shell {
@@ -108,7 +111,7 @@ button {
 
 .tarot-eyebrow {
   margin: 0 0 0.75rem;
-  color: var(--gold-bright);
+  color: var(--accent-bright);
   font-family: var(--font-mono);
   font-size: 0.64rem;
   font-weight: 500;
@@ -124,9 +127,9 @@ button {
   gap: 0.2rem;
   min-width: 10.4rem;
   padding: 0.54rem 0.68rem;
-  border: 1px solid rgba(236, 211, 139, 0.22);
+  border: 1px solid var(--panel-edge);
   border-radius: 0.22rem;
-  background: rgba(7, 25, 22, 0.6);
+  background: rgba(20, 11, 29, 0.62);
   box-shadow: 0 0.7rem 2rem rgba(0, 0, 0, 0.14);
   backdrop-filter: blur(14px);
 }
@@ -157,7 +160,7 @@ button {
 }
 
 .tarot-set-picker option {
-  color: var(--evergreen-deep);
+  color: var(--primary-deep);
 }
 
 .tarot-inspector {
@@ -165,9 +168,9 @@ button {
   bottom: 6.8rem;
   width: min(20rem, calc(100vw - 2rem));
   padding: 0.76rem 0.82rem 0.8rem;
-  border: 1px solid rgba(236, 211, 139, 0.28);
+  border: 1px solid var(--panel-edge);
   border-radius: 0.22rem;
-  background: rgba(7, 25, 22, 0.66);
+  background: rgba(20, 11, 29, 0.7);
   box-shadow: 0 0.9rem 2.8rem rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(14px);
 }
@@ -227,7 +230,7 @@ button {
 }
 
 .tarot-card-browser option {
-  color: var(--evergreen-deep);
+  color: var(--primary-deep);
 }
 
 .tarot-inspector-actions {
@@ -245,7 +248,7 @@ button {
   padding: 0.42rem 0.7rem;
   border: 1px solid rgba(247, 239, 217, 0.22);
   border-radius: 999px;
-  background: rgba(11, 41, 35, 0.65);
+  background: var(--control);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 0.62rem;
@@ -260,8 +263,8 @@ button {
 .tarot-arrange-actions button:hover:not(:disabled),
 .tarot-zoom-controls button:hover:not(:disabled),
 .tarot-reset-action:hover {
-  border-color: var(--gold-bright);
-  background: rgba(40, 78, 66, 0.88);
+  border-color: var(--accent-bright);
+  background: var(--control-hover);
   color: #fff9e8;
   transform: translateY(-1px);
 }
@@ -275,7 +278,7 @@ button {
 
 .tarot-shortcut {
   margin-left: 0.26rem;
-  color: var(--gold-bright);
+  color: var(--accent-bright);
   font-size: 0.56rem;
 }
 
@@ -287,9 +290,9 @@ button {
   gap: 0.34rem;
   max-width: calc(100vw - 2rem);
   padding: 0.36rem;
-  border: 1px solid rgba(236, 211, 139, 0.2);
+  border: 1px solid var(--panel-edge);
   border-radius: 999px;
-  background: rgba(5, 22, 19, 0.68);
+  background: rgba(16, 9, 24, 0.72);
   box-shadow: 0 0.65rem 2rem rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(16px);
   transform: translateX(-50%);
@@ -311,7 +314,7 @@ button {
   padding: 0.38rem 0.78rem;
   border: 1px solid rgba(247, 239, 217, 0.2);
   border-radius: 999px;
-  background: rgba(15, 49, 42, 0.72);
+  background: var(--control);
   color: var(--ink);
   font-size: 0.82rem;
   line-height: 1.05;
@@ -321,8 +324,8 @@ button {
 }
 
 .tarot-spread-actions button:hover:not(:disabled) {
-  border-color: var(--gold-bright);
-  background: rgba(40, 78, 66, 0.92);
+  border-color: var(--accent-bright);
+  background: var(--control-hover);
   transform: translateY(-1px);
 }
 
@@ -347,9 +350,9 @@ button {
   gap: 0.7rem;
   width: min(64rem, calc(100vw - 2.5rem));
   padding: 0.55rem;
-  border: 1px solid rgba(236, 211, 139, 0.24);
+  border: 1px solid var(--panel-edge);
   border-radius: 0.28rem;
-  background: rgba(5, 22, 19, 0.72);
+  background: rgba(16, 9, 24, 0.78);
   box-shadow: 0 0.8rem 2.8rem rgba(0, 0, 0, 0.26);
   backdrop-filter: blur(18px);
   transform: translateX(-50%);
@@ -368,7 +371,7 @@ button {
   padding: 0.38rem 0.35rem;
   border: 1px solid rgba(247, 239, 217, 0.2);
   border-radius: 999px;
-  background: rgba(11, 41, 35, 0.65);
+  background: var(--control);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 0.62rem;
@@ -409,7 +412,7 @@ button {
 
 button:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--gold-bright);
+  outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }
 

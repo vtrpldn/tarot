@@ -26,6 +26,7 @@ import type {
   TablePoint,
 } from "@/types";
 import type { SceneTableLayout } from "./table-layout";
+import { TAROT_SCENE_PALETTE } from "./theme";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const DRAG_THRESHOLD = 0.045;
@@ -103,9 +104,20 @@ export function CardArtwork({
   const texture = useTextureForCard(url);
 
   return (
-    <mesh position={position} rotation={rotation} renderOrder={2}>
+    <mesh
+      position={position}
+      rotation={rotation}
+      renderOrder={2}
+      receiveShadow
+    >
       <planeGeometry args={[width, height]} />
-      <meshBasicMaterial map={texture} toneMapped={false} />
+      <meshStandardMaterial
+        map={texture}
+        color="#fffaf0"
+        roughness={0.78}
+        metalness={0}
+        toneMapped={false}
+      />
     </mesh>
   );
 }
@@ -144,7 +156,7 @@ function CardFaceLayers({
       >
         <planeGeometry args={[fieldWidth, fieldHeight]} />
         <meshStandardMaterial
-          color="#162d29"
+          color={TAROT_SCENE_PALETTE.cardField}
           roughness={0.52}
           metalness={0.12}
         />
@@ -155,7 +167,7 @@ function CardFaceLayers({
       >
         <planeGeometry args={[ruleWidth, ruleHeight]} />
         <meshStandardMaterial
-          color="#a88042"
+          color={TAROT_SCENE_PALETTE.cardRule}
           roughness={0.46}
           metalness={0.48}
         />
@@ -212,7 +224,6 @@ export function CardMesh({
   const flipRef = useRef<Group>(null);
   const dragRef = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const [hasRevealed, setHasRevealed] = useState(card.faceUp);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
@@ -285,9 +296,7 @@ export function CardMesh({
         : drag?.mode === "rotate"
           ? 0.035
           : 0.006
-      : hovered
-        ? 0.006
-        : 0;
+      : 0;
     const flipLift = reducedMotion
       ? 0
       : Math.abs(Math.sin(flippingCard.rotation.y)) * 0.1;
@@ -591,7 +600,7 @@ export function CardMesh({
           receiveShadow
         >
           <meshStandardMaterial
-            color="#eee1c5"
+            color={TAROT_SCENE_PALETTE.cardEdge}
             roughness={0.62}
             metalness={0.04}
           />
@@ -620,7 +629,6 @@ export function CardMesh({
         onPointerOver={(event) => {
           if (event.nativeEvent.pointerType !== "touch") {
             event.stopPropagation();
-            setHovered(true);
             onHover(card.zone === "table" ? card.id : null);
             const deckMoveReady =
               card.zone === "deck" &&
@@ -636,7 +644,6 @@ export function CardMesh({
           }
         }}
         onPointerOut={() => {
-          setHovered(false);
           onHover(null);
           if (!dragRef.current) {
             canvas.style.cursor = "default";
