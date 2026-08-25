@@ -830,6 +830,7 @@ button {
 }
 
 .tarot-fullscreen-trigger,
+.tarot-mobile-toolbar-spacer,
 .tarot-arrange-popover .tarot-mobile-reset-action {
   display: none;
 }
@@ -1588,6 +1589,13 @@ input:focus-visible {
   .tarot-card-menu {
     grid-row: 2;
     grid-column: 4;
+  }
+
+  .tarot-mobile-toolbar-spacer {
+    display: block;
+    width: 2.75rem;
+    height: 2.75rem;
+    pointer-events: none;
   }
 
   .tarot-mobile-popover {

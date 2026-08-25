@@ -2,12 +2,10 @@
 
 import dynamic from "next/dynamic";
 import {
-  type Dispatch,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
-  type SetStateAction,
   type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
@@ -415,7 +413,7 @@ type DockPopoverOptions = {
   containerRef: RefObject<HTMLDivElement | null>;
   isOpen: boolean;
   popoverRef: RefObject<HTMLElement | null>;
-  setIsOpen: Dispatch<SetStateAction<boolean>>;
+  setIsOpen: (isOpen: boolean) => void;
   triggerRef: RefObject<HTMLButtonElement | null>;
 };
 
@@ -514,6 +512,7 @@ export function TarotStudio() {
   const languageMenuRef = useRef<HTMLDivElement>(null);
   const languageMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const languagePopoverRef = useRef<HTMLElement>(null);
+  const cardMenuRef = useRef<HTMLDivElement>(null);
   const inspectorCollapseRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorPopoverRef = useRef<HTMLElement>(null);
@@ -719,6 +718,10 @@ export function TarotStudio() {
     viewZoom,
   ]);
 
+  const setInspectorOpen = useCallback((isOpen: boolean) => {
+    setIsInspectorCollapsed(!isOpen);
+  }, []);
+
   useDockPopover({
     containerRef: deckMenuRef,
     isOpen: isDeckMenuOpen,
@@ -760,6 +763,13 @@ export function TarotStudio() {
     popoverRef: languagePopoverRef,
     setIsOpen: setIsLanguageMenuOpen,
     triggerRef: languageMenuTriggerRef,
+  });
+  useDockPopover({
+    containerRef: cardMenuRef,
+    isOpen: isInspectorOpen,
+    popoverRef: inspectorPopoverRef,
+    setIsOpen: setInspectorOpen,
+    triggerRef: inspectorToggleRef,
   });
 
   useEffect(() => {
@@ -1740,6 +1750,9 @@ export function TarotStudio() {
             <span>{messages.cancel}</span>
           </button>
         )}
+        {tableCards.length > 0 && !isDeckMoveMode && (
+          <span className="tarot-mobile-toolbar-spacer" aria-hidden="true" />
+        )}
         {tableCards.length === 0 &&
           !isDeckMoveMode && (
             <div className="tarot-spread-menu" ref={spreadMenuRef}>
@@ -2278,7 +2291,7 @@ export function TarotStudio() {
             </MobilePopoverPortal>
           )}
         </div>
-        <div className="tarot-card-menu">
+        <div className="tarot-card-menu" ref={cardMenuRef}>
           <button
             ref={inspectorToggleRef}
             type="button"
