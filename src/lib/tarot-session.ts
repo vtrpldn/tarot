@@ -36,10 +36,14 @@ function cloneCards(cards: TableCard[]): TableCard[] {
   }));
 }
 
+function cloneDeckPosition(position: TablePoint | null): TablePoint | null {
+  return position ? ([...position] as TablePoint) : null;
+}
+
 function snapshot(session: TarotSession): TableSnapshot {
   return {
     cards: cloneCards(session.cards),
-    deckPosition: [...session.deckPosition] as TablePoint,
+    deckPosition: cloneDeckPosition(session.deckPosition),
     selectedCardId: session.selectedCardId,
   };
 }
@@ -53,7 +57,7 @@ function commit(
   return {
     ...session,
     cards,
-    deckPosition: [...deckPosition] as TablePoint,
+    deckPosition: cloneDeckPosition(deckPosition),
     selectedCardId,
     history: [...session.history, snapshot(session)].slice(-HISTORY_LIMIT),
   };
@@ -82,7 +86,7 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
   return {
     cardSetId: cardSet.id,
     cards,
-    deckPosition: [0, 0],
+    deckPosition: null,
     selectedCardId: null,
     history: [],
   };
@@ -184,9 +188,19 @@ export function createLayout(
 
 export type TarotSessionAction =
   | { type: "select"; cardId: string | null }
-  | { type: "draw"; cardId: string; position: TablePoint }
+  | {
+      type: "draw";
+      cardId: string;
+      position: TablePoint;
+      rotation?: number;
+    }
   | { type: "move-deck"; position: TablePoint }
-  | { type: "move"; cardId: string; position: TablePoint }
+  | {
+      type: "move";
+      cardId: string;
+      position: TablePoint;
+      rotation?: number;
+    }
   | { type: "flip"; cardId: string }
   | { type: "rotate"; cardId: string; degrees?: number }
   | {
@@ -224,7 +238,7 @@ export function tarotSessionReducer(
     return {
       ...session,
       cards: cloneCards(previous.cards),
-      deckPosition: [...previous.deckPosition] as TablePoint,
+      deckPosition: cloneDeckPosition(previous.deckPosition),
       selectedCardId: previous.selectedCardId,
       history: session.history.slice(0, -1),
     };
@@ -241,6 +255,7 @@ export function tarotSessionReducer(
     ];
 
     if (
+      session.deckPosition &&
       deckPosition[0] === session.deckPosition[0] &&
       deckPosition[1] === session.deckPosition[1]
     ) {
@@ -318,12 +333,41 @@ export function tarotSessionReducer(
             ...candidate,
             zone: "table" as const,
             position: action.position,
+            rotation: action.rotation ?? candidate.rotation,
             zIndex: nextZIndex(session.cards),
           }
         : candidate
     );
 
     return commit(session, cards, action.cardId);
+  }
+
+  if (action.type === "flip") {
+    const isTopDeckCard =
+      card.zone === "deck" && card.id === getTopDeckCard(session)?.id;
+
+    if (card.zone !== "table" && !isTopDeckCard) {
+      return session;
+    }
+
+    const cards = session.cards.map((candidate) =>
+      candidate.id === action.cardId
+        ? {
+            ...candidate,
+            faceUp: !candidate.faceUp,
+            zIndex:
+              card.zone === "table"
+                ? nextZIndex(session.cards)
+                : candidate.zIndex,
+          }
+        : candidate
+    );
+
+    return commit(
+      session,
+      cards,
+      card.zone === "table" ? action.cardId : null
+    );
   }
 
   if (card.zone !== "table") {
@@ -366,22 +410,9 @@ export function tarotSessionReducer(
     const cards = session.cards.map((candidate) =>
       candidate.id === action.cardId
         ? {
-          ...candidate,
-          position: action.position,
-          zIndex: nextZIndex(session.cards),
-          }
-        : candidate
-    );
-
-    return commit(session, cards, action.cardId);
-  }
-
-  if (action.type === "flip") {
-    const cards = session.cards.map((candidate) =>
-      candidate.id === action.cardId
-        ? {
             ...candidate,
-            faceUp: !candidate.faceUp,
+            position: action.position,
+            rotation: action.rotation ?? candidate.rotation,
             zIndex: nextZIndex(session.cards),
           }
         : candidate

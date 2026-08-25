@@ -343,14 +343,14 @@ export function TarotStudio() {
           reducedMotion={reducedMotion}
           viewZoom={viewZoom}
           onSelect={(cardId) => dispatch({ type: "select", cardId })}
-          onDraw={(cardId, position) =>
-            dispatch({ type: "draw", cardId, position })
+          onDraw={(cardId, position, rotation) =>
+            dispatch({ type: "draw", cardId, position, rotation })
           }
           onMoveDeck={(position) =>
             dispatch({ type: "move-deck", position })
           }
-          onMove={(cardId, position) =>
-            dispatch({ type: "move", cardId, position })
+          onMove={(cardId, position, rotation) =>
+            dispatch({ type: "move", cardId, position, rotation })
           }
           onFlip={(cardId) => dispatch({ type: "flip", cardId })}
           onRotate={(cardId, degrees) =>
@@ -563,6 +563,7 @@ export function TarotStudio() {
             ref={shuffleMenuTriggerRef}
             type="button"
             className="tarot-shuffle-trigger"
+            aria-label="Shuffle"
             aria-controls="shuffle-actions"
             aria-expanded={isShuffleMenuOpen}
             aria-haspopup="dialog"

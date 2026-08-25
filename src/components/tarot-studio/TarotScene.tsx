@@ -36,6 +36,12 @@ import { TAROT_SCENE_PALETTE } from "./theme";
 
 const BASE_CAMERA_ZOOM = 75;
 const TABLE_SURFACE_Z = -0.16;
+const TABLE_CARD_GAP = 0.0015;
+const DECK_STACK_RENDER_ORDER = 10;
+const DECK_CARD_RENDER_ORDER = 20;
+const TABLE_CARD_RENDER_ORDER = 100;
+const CARD_RENDER_ORDER_STEP = 10;
+const DRAG_RENDER_ORDER = 10_000;
 
 type TarotSceneProps = {
   cardSet: CardSetDefinition;
@@ -43,9 +49,17 @@ type TarotSceneProps = {
   reducedMotion: boolean;
   viewZoom: number;
   onSelect: (cardId: string | null) => void;
-  onDraw: (cardId: string, position: TablePoint) => void;
+  onDraw: (
+    cardId: string,
+    position: TablePoint,
+    rotation?: number
+  ) => void;
   onMoveDeck: (position: TablePoint) => void;
-  onMove: (cardId: string, position: TablePoint) => void;
+  onMove: (
+    cardId: string,
+    position: TablePoint,
+    rotation?: number
+  ) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
   onHover: (cardId: string | null) => void;
@@ -190,7 +204,7 @@ function DeckStack({
   const topOffsetY = ((metrics.layerCount - 1) % 2 ? -1 : 1) * 0.01;
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} renderOrder={DECK_STACK_RENDER_ORDER}>
       {Array.from({ length: metrics.layerCount }, (_, index) => {
         const offsetX = (index % 3 - 1) * 0.012;
         const offsetY = (index % 2 ? -1 : 1) * 0.01;
@@ -208,6 +222,7 @@ function DeckStack({
             ]}
             castShadow
             receiveShadow
+            renderOrder={index}
           >
             <meshStandardMaterial
               color={
@@ -217,24 +232,36 @@ function DeckStack({
               }
               roughness={0.72}
               metalness={0.025}
+              depthTest={false}
+              depthWrite={false}
             />
           </RoundedBox>
         );
       })}
-      <mesh position={[topOffsetX, topOffsetY, metrics.topSurface + 0.001]}>
+      <mesh
+        position={[topOffsetX, topOffsetY, metrics.topSurface + 0.001]}
+        renderOrder={metrics.layerCount + 1}
+      >
         <planeGeometry args={[width - outerInset, height - outerInset]} />
         <meshStandardMaterial
           color={TAROT_SCENE_PALETTE.cardField}
           roughness={0.52}
           metalness={0.12}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
-      <mesh position={[topOffsetX, topOffsetY, metrics.topSurface + 0.003]}>
+      <mesh
+        position={[topOffsetX, topOffsetY, metrics.topSurface + 0.003]}
+        renderOrder={metrics.layerCount + 2}
+      >
         <planeGeometry args={[width - ruleInset, height - ruleInset]} />
         <meshStandardMaterial
           color={TAROT_SCENE_PALETTE.cardRule}
           roughness={0.46}
           metalness={0.48}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
       <Suspense fallback={null}>
@@ -243,6 +270,7 @@ function DeckStack({
           position={[topOffsetX, topOffsetY, metrics.topSurface + 0.005]}
           width={width - artInset}
           height={height - artInset}
+          renderOrder={metrics.layerCount + 3}
         />
       </Suspense>
     </group>
@@ -322,9 +350,11 @@ function TarotTable({
   const tableCards = getTableCards(session);
   const topDeckCard = getTopDeckCard(session);
   const deckCount = getRemainingDeckCount(session);
+  const resolvedDeckPosition =
+    session.deckPosition ?? layout.defaultDeckPosition;
   const deckPosition = useMemo(
-    () => layout.toWorld(session.deckPosition),
-    [layout, session.deckPosition]
+    () => layout.toWorld(resolvedDeckPosition),
+    [layout, resolvedDeckPosition]
   );
   const previewDeckPosition = useCallback(
     (position: TablePoint | null) => {
@@ -340,6 +370,15 @@ function TarotTable({
   const tableOrder = new Map(
     tableCards.map((card, index) => [card.id, index])
   );
+  const baseTableCardZ =
+    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + 0.008;
+  const highestTableCardZ =
+    baseTableCardZ +
+    Math.max(0, tableCards.length - 1) * TABLE_CARD_GAP;
+  const draggingZ =
+    Math.max(deckMetrics.topCardCenter, highestTableCardZ) +
+    CARD_THICKNESS +
+    0.035;
 
   return (
     <>
@@ -392,10 +431,16 @@ function TarotTable({
         const restingZ =
           card.zone === "deck"
             ? deckMetrics.topCardCenter
-            : TABLE_SURFACE_Z +
-              CARD_THICKNESS / 2 +
-              0.008 +
-              tableIndex * 0.004;
+            : baseTableCardZ + tableIndex * TABLE_CARD_GAP;
+        const renderOrder =
+          card.zone === "deck"
+            ? DECK_CARD_RENDER_ORDER
+            : TABLE_CARD_RENDER_ORDER +
+              tableIndex * CARD_RENDER_ORDER_STEP;
+        const interactionZ =
+          card.zone === "deck"
+            ? restingZ + CARD_THICKNESS / 2 + 0.04
+            : draggingZ + 0.02 + tableIndex * 0.002;
 
         return (
           <CardMesh
@@ -406,6 +451,10 @@ function TarotTable({
             layout={layout}
             deckPosition={deckPosition}
             restingZ={restingZ}
+            interactionZ={interactionZ}
+            draggingZ={draggingZ}
+            renderOrder={renderOrder}
+            dragRenderOrder={DRAG_RENDER_ORDER}
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}
             onSelect={onSelect}

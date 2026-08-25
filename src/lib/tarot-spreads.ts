@@ -17,16 +17,16 @@ export const popularTarotSpreads: TarotSpread[] = [
     id: "one-card",
     label: "One card",
     shortLabel: "1 card",
-    slots: [{ position: [0.9, 0], rotation: 0 }],
+    slots: [{ position: [0, 0], rotation: 0 }],
   },
   {
     id: "three-card",
     label: "Past · Present · Future",
     shortLabel: "3 cards",
     slots: [
-      { position: [0.75, -0.05], rotation: -6 },
-      { position: [1.55, 0.03], rotation: 0 },
-      { position: [2.35, -0.05], rotation: 6 },
+      { position: [-0.8, -0.05], rotation: -6 },
+      { position: [0, 0.03], rotation: 0 },
+      { position: [0.8, -0.05], rotation: 6 },
     ],
   },
   {

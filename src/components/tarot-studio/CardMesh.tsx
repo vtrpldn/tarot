@@ -37,6 +37,8 @@ const POSITION_SETTLE_LAMBDA = 11;
 const MAX_POINTER_SPEED = 7.5;
 const RELEASE_GLIDE_SECONDS = 0.06;
 const MAX_RELEASE_GLIDE = 0.32;
+const MIN_THROW_SPEED = 0.7;
+const MAX_THROW_ROTATION = 11;
 const FLIP_DURATION_SECONDS = 0.52;
 const FLIP_LIFT = 0.14;
 
@@ -122,13 +124,25 @@ type CardMeshProps = {
   layout: SceneTableLayout;
   deckPosition: TablePoint;
   restingZ: number;
+  interactionZ: number;
+  draggingZ: number;
+  renderOrder: number;
+  dragRenderOrder: number;
   selected: boolean;
   reducedMotion: boolean;
   onSelect: (cardId: string | null) => void;
-  onDraw: (cardId: string, position: TablePoint) => void;
+  onDraw: (
+    cardId: string,
+    position: TablePoint,
+    rotation?: number
+  ) => void;
   onMoveDeck: (position: TablePoint) => void;
   onPreviewDeckPosition: (position: TablePoint | null) => void;
-  onMove: (cardId: string, position: TablePoint) => void;
+  onMove: (
+    cardId: string,
+    position: TablePoint,
+    rotation?: number
+  ) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
   onHover: (cardId: string | null) => void;
@@ -156,12 +170,14 @@ export function CardArtwork({
   rotation,
   width,
   height,
+  renderOrder = 3,
 }: {
   url: string;
   position: [number, number, number];
   rotation?: [number, number, number];
   width: number;
   height: number;
+  renderOrder?: number;
 }) {
   const texture = useTextureForCard(url);
 
@@ -169,7 +185,7 @@ export function CardArtwork({
     <mesh
       position={position}
       rotation={rotation}
-      renderOrder={2}
+      renderOrder={renderOrder}
       castShadow
       receiveShadow
     >
@@ -180,6 +196,8 @@ export function CardArtwork({
         roughness={0.78}
         metalness={0}
         toneMapped={false}
+        depthTest={false}
+        depthWrite={false}
       />
     </mesh>
   );
@@ -215,6 +233,7 @@ function CardFaceLayers({
       <mesh
         position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.001)]}
         rotation={rotation}
+        renderOrder={1}
         receiveShadow
       >
         <planeGeometry args={[fieldWidth, fieldHeight]} />
@@ -222,17 +241,22 @@ function CardFaceLayers({
           color={TAROT_SCENE_PALETTE.cardField}
           roughness={0.52}
           metalness={0.12}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
       <mesh
         position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.003)]}
         rotation={rotation}
+        renderOrder={2}
       >
         <planeGeometry args={[ruleWidth, ruleHeight]} />
         <meshStandardMaterial
           color={TAROT_SCENE_PALETTE.cardRule}
           roughness={0.46}
           metalness={0.48}
+          depthTest={false}
+          depthWrite={false}
         />
       </mesh>
       <Suspense fallback={null}>
@@ -265,6 +289,58 @@ function isNearCardEdge(event: ThreeEvent<PointerEvent>): boolean {
   );
 }
 
+function getThrownRotation({
+  rotation,
+  offset,
+  velocityX,
+  velocityY,
+  cardWidth,
+  cardHeight,
+  reducedMotion,
+}: {
+  rotation: number;
+  offset: Vector3;
+  velocityX: number;
+  velocityY: number;
+  cardWidth: number;
+  cardHeight: number;
+  reducedMotion: boolean;
+}): number {
+  const speed = Math.hypot(velocityX, velocityY);
+
+  if (reducedMotion || speed < MIN_THROW_SPEED) {
+    return rotation;
+  }
+
+  const normalizedOffsetX = MathUtils.clamp(
+    offset.x / (cardWidth / 2),
+    -1,
+    1
+  );
+  const normalizedOffsetY = MathUtils.clamp(
+    offset.y / (cardHeight / 2),
+    -1,
+    1
+  );
+  const normalizedVelocityX = velocityX / MAX_POINTER_SPEED;
+  const normalizedVelocityY = velocityY / MAX_POINTER_SPEED;
+  const torque =
+    normalizedOffsetX * normalizedVelocityY -
+    normalizedOffsetY * normalizedVelocityX;
+  const speedFactor = MathUtils.clamp(
+    (speed - MIN_THROW_SPEED) / (MAX_POINTER_SPEED * 0.55),
+    0,
+    1
+  );
+  const rotationDelta = MathUtils.clamp(
+    torque * 20 * speedFactor,
+    -MAX_THROW_ROTATION,
+    MAX_THROW_ROTATION
+  );
+
+  return rotation + rotationDelta;
+}
+
 export function CardMesh({
   card,
   definition,
@@ -272,6 +348,10 @@ export function CardMesh({
   layout,
   deckPosition,
   restingZ,
+  interactionZ,
+  draggingZ,
+  renderOrder,
+  dragRenderOrder,
   selected,
   reducedMotion,
   onSelect,
@@ -287,6 +367,11 @@ export function CardMesh({
   const flipRef = useRef<Group>(null);
   const dragRef = useRef<DragState | null>(null);
   const flipAnimationRef = useRef<FlipAnimation | null>(null);
+  const pendingPositionRef = useRef<[number, number] | null>(null);
+  const pendingRotationRef = useRef<number | null>(null);
+  const pendingTopLayerRef = useRef(false);
+  const pendingReconciliationTimeoutRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
   const lostPointerCaptureRef =
     useRef<LostPointerCaptureBinding | null>(null);
   const deckPreviewRef = useRef<TablePoint | null>(null);
@@ -302,6 +387,34 @@ export function CardMesh({
   const cardWidth = layout.cardWidth;
   const cardHeight = layout.cardHeight;
   const frontTexture = definition.image.preview;
+
+  const clearPendingReconciliationTimeout = useCallback(() => {
+    if (pendingReconciliationTimeoutRef.current === null) {
+      return;
+    }
+
+    clearTimeout(pendingReconciliationTimeoutRef.current);
+    pendingReconciliationTimeoutRef.current = null;
+  }, []);
+
+  const clearPendingRelease = useCallback(() => {
+    clearPendingReconciliationTimeout();
+    pendingPositionRef.current = null;
+    pendingRotationRef.current = null;
+    pendingTopLayerRef.current = false;
+    invalidate();
+  }, [clearPendingReconciliationTimeout, invalidate]);
+
+  const schedulePendingReconciliation = useCallback(() => {
+    clearPendingReconciliationTimeout();
+    pendingReconciliationTimeoutRef.current = setTimeout(() => {
+      pendingReconciliationTimeoutRef.current = null;
+      pendingPositionRef.current = null;
+      pendingRotationRef.current = null;
+      pendingTopLayerRef.current = false;
+      invalidate();
+    }, 700);
+  }, [clearPendingReconciliationTimeout, invalidate]);
 
   const clearLostPointerCapture = useCallback(() => {
     const binding = lostPointerCaptureRef.current;
@@ -356,11 +469,20 @@ export function CardMesh({
     () => () => {
       dragRef.current = null;
       flipAnimationRef.current = null;
+      pendingPositionRef.current = null;
+      pendingRotationRef.current = null;
+      pendingTopLayerRef.current = false;
+      clearPendingReconciliationTimeout();
       clearLostPointerCapture();
       setDeckPreview(null);
       canvas.style.cursor = "grab";
     },
-    [canvas, clearLostPointerCapture, setDeckPreview]
+    [
+      canvas,
+      clearLostPointerCapture,
+      clearPendingReconciliationTimeout,
+      setDeckPreview,
+    ]
   );
 
   useLayoutEffect(() => {
@@ -418,10 +540,37 @@ export function CardMesh({
   }, [card.faceUp, invalidate, reducedMotion]);
 
   useEffect(() => {
+    const pendingPosition = pendingPositionRef.current;
+    const pendingRotation = pendingRotationRef.current;
+
+    if (
+      pendingPosition &&
+      Math.abs(pendingPosition[0] - targetPositionX) <= 0.0005 &&
+      Math.abs(pendingPosition[1] - targetPositionY) <= 0.0005
+    ) {
+      pendingPositionRef.current = null;
+    }
+
+    if (
+      pendingRotation !== null &&
+      Math.abs(pendingRotation - card.rotation) <= 0.0005
+    ) {
+      pendingRotationRef.current = null;
+    }
+
+    if (
+      pendingPositionRef.current === null &&
+      pendingRotationRef.current === null
+    ) {
+      pendingTopLayerRef.current = false;
+      clearPendingReconciliationTimeout();
+    }
     invalidate();
   }, [
     card.rotation,
+    card.zIndex,
     card.zone,
+    clearPendingReconciliationTimeout,
     invalidate,
     targetPositionX,
     targetPositionY,
@@ -436,23 +585,24 @@ export function CardMesh({
     }
 
     const drag = dragRef.current;
+    const pendingPosition = pendingPositionRef.current;
+    const pendingRotation = pendingRotationRef.current;
+    const rendersOnTop = Boolean(drag) || pendingTopLayerRef.current;
+    const activeRenderOrder = rendersOnTop
+      ? dragRenderOrder
+      : renderOrder;
+    group.renderOrder = activeRenderOrder;
+    flippingCard.renderOrder = activeRenderOrder;
     const moving = drag && drag.mode !== "rotate";
     const rotationDegrees =
       drag?.mode === "rotate"
         ? drag.previewRotation
-        : card.rotation;
+        : pendingRotation ?? card.rotation;
     const rotationTarget = MathUtils.degToRad(rotationDegrees);
     const tiltXTarget =
       drag?.mode === "move" ? drag.tiltX : 0;
     const tiltYTarget =
       drag?.mode === "move" ? drag.tiltY : 0;
-    const lift = drag
-      ? drag?.mode === "move"
-        ? 0.15
-        : drag?.mode === "rotate"
-          ? 0.035
-          : 0.006
-      : 0;
     const flipAnimation = flipAnimationRef.current;
     let flipIsActive = false;
 
@@ -488,9 +638,16 @@ export function CardMesh({
       reducedMotion || !flipIsActive
         ? 0
         : Math.abs(Math.sin(flippingCard.rotation.y)) * FLIP_LIFT;
-    const zTarget = restingZ + lift + flipLift;
-    const positionXTarget = moving ? drag.target.x : targetPositionX;
-    const positionYTarget = moving ? drag.target.y : targetPositionY;
+    const zTarget =
+      drag && drag.mode !== "move-deck"
+        ? draggingZ + flipLift
+        : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0) + flipLift;
+    const positionXTarget = moving
+      ? drag.target.x
+      : pendingPosition?.[0] ?? targetPositionX;
+    const positionYTarget = moving
+      ? drag.target.y
+      : pendingPosition?.[1] ?? targetPositionY;
 
     if (reducedMotion) {
       group.rotation.x = 0;
@@ -603,9 +760,11 @@ export function CardMesh({
         }
 
         dragRef.current = null;
+        clearPendingRelease();
         if (activeDrag.mode === "move-deck") {
           setDeckPreview(null);
         }
+        onHover(null);
         canvas.style.cursor = "grab";
         invalidate();
       };
@@ -641,11 +800,17 @@ export function CardMesh({
       startRotation: card.rotation,
       previewRotation: card.rotation,
     };
+    group.renderOrder = dragRenderOrder;
+    if (flipRef.current) {
+      flipRef.current.renderOrder = dragRenderOrder;
+    }
     if (mode === "move-deck") {
       setDeckPreview([group.position.x, group.position.y]);
     }
     canvas.style.cursor = mode === "rotate" ? "crosshair" : "grabbing";
-    onSelect(mode === "move-deck" ? null : card.id);
+    onSelect(
+      mode !== "move-deck" && card.zone === "table" ? card.id : null
+    );
     invalidate();
   };
 
@@ -704,7 +869,6 @@ export function CardMesh({
       drag.moved =
         Math.abs(previewRotation - drag.startRotation) > 0.8;
       drag.lastPoint.copy(point);
-      group.rotation.z = MathUtils.degToRad(previewRotation);
       invalidate();
       return;
     }
@@ -737,12 +901,14 @@ export function CardMesh({
 
     event.stopPropagation();
     const target = event.target as unknown as PointerCaptureTarget;
-    dragRef.current = null;
     clearLostPointerCapture();
     target.releasePointerCapture?.(event.pointerId);
 
     if (!cancelled) {
       if (drag.mode === "rotate" && drag.moved) {
+        pendingRotationRef.current = drag.previewRotation;
+        pendingTopLayerRef.current = true;
+        schedulePendingReconciliation();
         onRotate(
           card.id,
           drag.previewRotation - drag.startRotation
@@ -760,10 +926,10 @@ export function CardMesh({
         const velocityDecay = reducedMotion
           ? 0
           : Math.exp(-idleSeconds * 10);
-        let glideX =
-          drag.velocity.x * velocityDecay * RELEASE_GLIDE_SECONDS;
-        let glideY =
-          drag.velocity.y * velocityDecay * RELEASE_GLIDE_SECONDS;
+        const releaseVelocityX = drag.velocity.x * velocityDecay;
+        const releaseVelocityY = drag.velocity.y * velocityDecay;
+        let glideX = releaseVelocityX * RELEASE_GLIDE_SECONDS;
+        let glideY = releaseVelocityY * RELEASE_GLIDE_SECONDS;
         const glideDistance = Math.hypot(glideX, glideY);
 
         if (glideDistance > MAX_RELEASE_GLIDE) {
@@ -776,16 +942,43 @@ export function CardMesh({
           releaseX + glideX,
           releaseY + glideY
         );
+        const nextWorldPosition = layout.toWorld(nextPoint);
 
         if (drag.mode === "move-deck") {
+          pendingPositionRef.current = nextWorldPosition;
+          schedulePendingReconciliation();
           onMoveDeck(nextPoint);
-        } else if (card.zone === "deck") {
-          onDraw(card.id, nextPoint);
         } else {
-          onMove(card.id, nextPoint);
+          const landingRotation = getThrownRotation({
+            rotation: card.rotation,
+            offset: drag.offset,
+            velocityX: releaseVelocityX,
+            velocityY: releaseVelocityY,
+            cardWidth,
+            cardHeight,
+            reducedMotion,
+          });
+
+          pendingPositionRef.current = nextWorldPosition;
+          pendingRotationRef.current = landingRotation;
+          pendingTopLayerRef.current = true;
+          schedulePendingReconciliation();
+
+          if (card.zone === "deck") {
+            onDraw(card.id, nextPoint, landingRotation);
+          } else {
+            onMove(card.id, nextPoint, landingRotation);
+          }
         }
       }
     }
+
+    if (cancelled) {
+      clearPendingRelease();
+      onHover(null);
+    }
+
+    dragRef.current = null;
 
     if (drag.mode === "move-deck") {
       setDeckPreview(null);
@@ -797,25 +990,28 @@ export function CardMesh({
   const handleDoubleClick = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
 
-    if (card.zone === "table") {
+    if (card.zone === "table" || card.zone === "deck") {
       onFlip(card.id);
     }
   };
 
   return (
-    <group ref={groupRef}>
-      <group ref={flipRef}>
+    <group ref={groupRef} renderOrder={renderOrder}>
+      <group ref={flipRef} renderOrder={renderOrder}>
         <RoundedBox
           args={[cardWidth, cardHeight, CARD_THICKNESS]}
           radius={0.075}
           smoothness={5}
           castShadow
           receiveShadow
+          renderOrder={0}
         >
           <meshStandardMaterial
             color={TAROT_SCENE_PALETTE.cardEdge}
             roughness={0.62}
             metalness={0.04}
+            depthTest={false}
+            depthWrite={false}
           />
         </RoundedBox>
         {hasRevealed && (
@@ -833,8 +1029,8 @@ export function CardMesh({
         />
       </group>
       <mesh
-        position={[0, 0, CARD_THICKNESS / 2 + 0.04]}
-        renderOrder={10}
+        position={[0, 0, interactionZ - restingZ]}
+        renderOrder={4}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishDrag}
@@ -875,7 +1071,12 @@ export function CardMesh({
         onDoubleClick={handleDoubleClick}
       >
         <planeGeometry args={[cardWidth, cardHeight]} />
-        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        <meshBasicMaterial
+          transparent
+          opacity={0}
+          depthTest={false}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   );
