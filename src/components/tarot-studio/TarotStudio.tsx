@@ -58,6 +58,8 @@ function Shortcut({ children }: { children: ReactNode }) {
 
 export function TarotStudio() {
   const hoveredCardIdRef = useRef<string | null>(null);
+  const shuffleMenuRef = useRef<HTMLDivElement>(null);
+  const shuffleMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const layerWheelRef = useRef({
     accumulatedDelta: 0,
     direction: 0,
@@ -65,6 +67,8 @@ export function TarotStudio() {
   });
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
   const [viewZoom, setViewZoom] = useState(1);
+  const [isShuffleMenuOpen, setIsShuffleMenuOpen] = useState(false);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -90,6 +94,38 @@ export function TarotStudio() {
   const canBringForward =
     selectedTableIndex >= 0 && selectedTableIndex < tableCards.length - 1;
   const deckCount = getRemainingDeckCount(session);
+
+  useEffect(() => {
+    if (!isShuffleMenuOpen) {
+      return;
+    }
+
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!shuffleMenuRef.current?.contains(event.target as Node)) {
+        setIsShuffleMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsShuffleMenuOpen(false);
+        shuffleMenuTriggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isShuffleMenuOpen]);
+
+  useEffect(() => {
+    if (selectedCard?.zone !== "table") {
+      setIsInspectorCollapsed(false);
+    }
+  }, [selectedCard?.zone]);
 
   const drawCard = useCallback(() => {
     if (!topDeckCard) {
@@ -365,67 +401,98 @@ export function TarotStudio() {
         <span>{deckCount} cards in the deck</span>
       </div>
 
-      {selectedCard?.zone === "table" && (
-        <aside className="tarot-inspector" aria-live="polite">
-          <p className="tarot-eyebrow">Selected card</p>
-          <h2>{selectedTitle}</h2>
-          <p>{selectedHint}</p>
-          <div className="tarot-card-browser">
-            <label htmlFor="drawn-card">Browse cards on the table</label>
-            <select
-              id="drawn-card"
-              value={session.selectedCardId ?? ""}
-              disabled={tableCards.length === 0}
-              onChange={(event) =>
-                dispatch({ type: "select", cardId: event.target.value || null })
-              }
-            >
-              <option value="">Select a drawn card</option>
-              {tableCards.map((card, index) => {
-                const definition = activeCardSet.cards.find(
-                  (candidate) => candidate.id === card.cardId
-                );
+      {selectedCard?.zone === "table" &&
+        (isInspectorCollapsed ? (
+          <button
+            type="button"
+            className="tarot-inspector-toggle"
+            aria-label={`Expand selected card controls for ${selectedTitle}`}
+            aria-expanded="false"
+            onClick={() => setIsInspectorCollapsed(false)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="5" y="3.5" width="14" height="17" rx="1.5" />
+              <path d="m12 7 .8 2.1 2.2.1-1.7 1.4.6 2.2-1.9-1.2-1.9 1.2.6-2.2-1.7-1.4 2.2-.1L12 7Z" />
+            </svg>
+          </button>
+        ) : (
+          <aside
+            id="selected-card-inspector"
+            className="tarot-inspector"
+            aria-live="polite"
+          >
+            <div className="tarot-inspector-heading">
+              <p className="tarot-eyebrow">Selected card</p>
+              <button
+                type="button"
+                className="tarot-inspector-collapse"
+                aria-label="Collapse selected card controls"
+                aria-expanded="true"
+                onClick={() => setIsInspectorCollapsed(true)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m7 10 5 5 5-5" />
+                </svg>
+              </button>
+            </div>
+            <h2>{selectedTitle}</h2>
+            <p>{selectedHint}</p>
+            <div className="tarot-card-browser">
+              <label htmlFor="drawn-card">Browse cards on the table</label>
+              <select
+                id="drawn-card"
+                value={session.selectedCardId ?? ""}
+                disabled={tableCards.length === 0}
+                onChange={(event) =>
+                  dispatch({ type: "select", cardId: event.target.value || null })
+                }
+              >
+                <option value="">Select a drawn card</option>
+                {tableCards.map((card, index) => {
+                  const definition = activeCardSet.cards.find(
+                    (candidate) => candidate.id === card.cardId
+                  );
 
-                return (
-                  <option key={card.id} value={card.id}>
-                    {card.faceUp
-                      ? definition?.name ?? `Card ${index + 1}`
-                      : `Face-down card ${index + 1}`}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          <div className="tarot-inspector-actions">
-            <button type="button" onClick={flipSelected}>
-              Flip <Shortcut>F</Shortcut>
-            </button>
-            <button type="button" onClick={() => turnSelected(-15)}>
-              Turn −15° <Shortcut>[</Shortcut>
-            </button>
-            <button type="button" onClick={() => turnSelected(15)}>
-              Turn +15° <Shortcut>]</Shortcut>
-            </button>
-            <button type="button" onClick={() => turnSelected(180)}>
-              Reverse <Shortcut>R</Shortcut>
-            </button>
-            <button
-              type="button"
-              onClick={() => reorderSelected("backward")}
-              disabled={!canSendBackward}
-            >
-              Send back <Shortcut>Pg↓</Shortcut>
-            </button>
-            <button
-              type="button"
-              onClick={() => reorderSelected("forward")}
-              disabled={!canBringForward}
-            >
-              Bring forward <Shortcut>Pg↑</Shortcut>
-            </button>
-          </div>
-        </aside>
-      )}
+                  return (
+                    <option key={card.id} value={card.id}>
+                      {card.faceUp
+                        ? definition?.name ?? `Card ${index + 1}`
+                        : `Face-down card ${index + 1}`}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div className="tarot-inspector-actions">
+              <button type="button" onClick={flipSelected}>
+                Flip <Shortcut>F</Shortcut>
+              </button>
+              <button type="button" onClick={() => turnSelected(-15)}>
+                Turn −15° <Shortcut>[</Shortcut>
+              </button>
+              <button type="button" onClick={() => turnSelected(15)}>
+                Turn +15° <Shortcut>]</Shortcut>
+              </button>
+              <button type="button" onClick={() => turnSelected(180)}>
+                Reverse <Shortcut>R</Shortcut>
+              </button>
+              <button
+                type="button"
+                onClick={() => reorderSelected("backward")}
+                disabled={!canSendBackward}
+              >
+                Send back <Shortcut>Pg↓</Shortcut>
+              </button>
+              <button
+                type="button"
+                onClick={() => reorderSelected("forward")}
+                disabled={!canBringForward}
+              >
+                Bring forward <Shortcut>Pg↑</Shortcut>
+              </button>
+            </div>
+          </aside>
+        ))}
 
       <nav className="tarot-toolbar" aria-label="Table actions">
         <div className="tarot-zoom-controls" aria-label="Table zoom">
@@ -491,15 +558,46 @@ export function TarotStudio() {
             Undo
           </button>
         </div>
-        <button
-          type="button"
-          className="tarot-reset-action"
-          onClick={() => {
-            dispatch({ type: "new-shuffle", cardSet: activeCardSet });
-          }}
-        >
-          New shuffle
-        </button>
+        <div className="tarot-shuffle-menu" ref={shuffleMenuRef}>
+          <button
+            ref={shuffleMenuTriggerRef}
+            type="button"
+            className="tarot-shuffle-trigger"
+            aria-controls="shuffle-actions"
+            aria-expanded={isShuffleMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => setIsShuffleMenuOpen((isOpen) => !isOpen)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h2.7c3.2 0 4 10 7.3 10H20" />
+              <path d="m17 14 3 3-3 3M4 17h2.7c1.2 0 2-.7 2.8-1.7M14.5 7H20m-3-3 3 3-3 3" />
+            </svg>
+            <span>Shuffle</span>
+            <svg className="tarot-shuffle-chevron" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 10 4 4 4-4" />
+            </svg>
+          </button>
+          {isShuffleMenuOpen && (
+            <div
+              id="shuffle-actions"
+              className="tarot-shuffle-popover"
+              role="dialog"
+              aria-label="Shuffle actions"
+            >
+              <p>Deck session</p>
+              <button
+                type="button"
+                onClick={() => {
+                  dispatch({ type: "new-shuffle", cardSet: activeCardSet });
+                  setIsShuffleMenuOpen(false);
+                }}
+              >
+                <span>New shuffle</span>
+                <small>Restart with all 78 cards</small>
+              </button>
+            </div>
+          )}
+        </div>
       </nav>
 
       <p className="tarot-live-status" aria-live="polite">
