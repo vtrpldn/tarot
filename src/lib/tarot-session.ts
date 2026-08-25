@@ -195,6 +195,7 @@ export type TarotSessionAction =
       rotation?: number;
     }
   | { type: "move-deck"; position: TablePoint }
+  | { type: "sync-deck-position"; position: TablePoint }
   | {
       type: "move";
       cardId: string;
@@ -209,7 +210,11 @@ export type TarotSessionAction =
       direction: CardLayerDirection;
     }
   | { type: "nudge"; cardId: string; delta: TablePoint }
-  | { type: "deal-spread"; spread: TarotSpread }
+  | {
+      type: "deal-spread";
+      spread: TarotSpread;
+      deckPosition?: TablePoint;
+    }
   | {
       type: "layout";
       placements: Map<
@@ -265,6 +270,26 @@ export function tarotSessionReducer(
     return commit(session, session.cards, null, deckPosition);
   }
 
+  if (action.type === "sync-deck-position") {
+    const deckPosition: TablePoint = [
+      clampTablePoint(action.position[0]),
+      clampTablePoint(action.position[1]),
+    ];
+
+    if (
+      session.deckPosition &&
+      deckPosition[0] === session.deckPosition[0] &&
+      deckPosition[1] === session.deckPosition[1]
+    ) {
+      return session;
+    }
+
+    return {
+      ...session,
+      deckPosition,
+    };
+  }
+
   if (action.type === "layout") {
     const cards = session.cards.map((card) => {
       const placement = action.placements.get(card.id);
@@ -313,7 +338,12 @@ export function tarotSessionReducer(
       };
     });
 
-    return commit(session, cards, null);
+    return commit(
+      session,
+      cards,
+      null,
+      action.deckPosition ?? session.deckPosition
+    );
   }
 
   const card = session.cards.find((candidate) => candidate.id === action.cardId);

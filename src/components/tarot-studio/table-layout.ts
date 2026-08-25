@@ -1,7 +1,7 @@
 import type { TablePoint } from "@/types";
 import { TABLE_POINT_LIMIT } from "@/types";
 
-export const MIN_VIEW_ZOOM = 0.35;
+export const MIN_VIEW_ZOOM = 0.3;
 export const MAX_VIEW_ZOOM = 1.35;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -10,9 +10,36 @@ const clamp = (value: number, minimum: number, maximum: number) =>
 export type SceneTableLayout = {
   cardWidth: number;
   cardHeight: number;
+  /** The camera's unzoomed world-space bounds. */
+  viewportBounds: SceneBounds;
   defaultDeckPosition: TablePoint;
+  /**
+   * Stable deck locations used when a spread needs to keep the deck out of
+   * the cards' way. The first candidate is also the resting position for a
+   * new deck.
+   */
+  deckPositionCandidates: DeckPositionCandidate[];
   toPoint: (x: number, y: number) => TablePoint;
   toWorld: (point: TablePoint) => [number, number];
+};
+
+export type SceneBounds = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+export type DeckPositionCandidate = {
+  id:
+    | "top-left"
+    | "top-right"
+    | "bottom-left"
+    | "bottom-right"
+    | "left"
+    | "right";
+  position: TablePoint;
+  worldPosition: [number, number];
 };
 
 export function createSceneTableLayout({
@@ -44,43 +71,80 @@ export function createSceneTableLayout({
   const tableRight = viewportWidth / 2 - horizontalPadding;
   const tableTop = viewportHeight / 2 - (isMobile ? 0.7 : 0.75);
   const tableBottom = -viewportHeight / 2 + (isMobile ? 2.15 : 1.35);
+  const viewportBounds: SceneBounds = {
+    left: -viewportWidth / 2,
+    right: viewportWidth / 2,
+    top: viewportHeight / 2,
+    bottom: -viewportHeight / 2,
+  };
   const centerX = (tableLeft + tableRight) / 2;
   const centerY = (tableBottom + tableTop) / 2;
   const halfWidth = Math.max((tableRight - tableLeft) / 2, cardWidth / 2);
   const halfHeight = Math.max((tableTop - tableBottom) / 2, cardHeight / 2);
-  const defaultDeckWorldX = tableRight - cardWidth / 2 - 0.12;
-  const defaultDeckWorldY = tableTop - cardHeight / 2 - 0.95;
-  const defaultDeckPosition: TablePoint = isMobile
-    ? [0, 0]
-    : [
-        clamp(
-          (defaultDeckWorldX - centerX) / halfWidth,
-          -TABLE_POINT_LIMIT,
-          TABLE_POINT_LIMIT
-        ),
-        clamp(
-          (defaultDeckWorldY - centerY) / halfHeight,
-          -TABLE_POINT_LIMIT,
-          TABLE_POINT_LIMIT
-        ),
-      ];
+  const deckSideInset = 0.12;
+  const deckVerticalInset = isMobile ? 0.58 : 0.95;
+  const toPoint = (x: number, y: number): TablePoint => [
+    clamp(
+      (x - centerX) / halfWidth,
+      -TABLE_POINT_LIMIT,
+      TABLE_POINT_LIMIT
+    ),
+    clamp(
+      (y - centerY) / halfHeight,
+      -TABLE_POINT_LIMIT,
+      TABLE_POINT_LIMIT
+    ),
+  ];
+  const createDeckCandidate = (
+    id: DeckPositionCandidate["id"],
+    x: number,
+    y: number
+  ): DeckPositionCandidate => ({
+    id,
+    position: toPoint(x, y),
+    worldPosition: [x, y],
+  });
+  const deckPositionCandidates: DeckPositionCandidate[] = [
+    createDeckCandidate(
+      "top-left",
+      tableLeft + cardWidth / 2 + deckSideInset,
+      tableTop - cardHeight / 2 - deckVerticalInset
+    ),
+    createDeckCandidate(
+      "top-right",
+      tableRight - cardWidth / 2 - deckSideInset,
+      tableTop - cardHeight / 2 - deckVerticalInset
+    ),
+    createDeckCandidate(
+      "bottom-left",
+      tableLeft + cardWidth / 2 + deckSideInset,
+      tableBottom + cardHeight / 2 + deckSideInset
+    ),
+    createDeckCandidate(
+      "bottom-right",
+      tableRight - cardWidth / 2 - deckSideInset,
+      tableBottom + cardHeight / 2 + deckSideInset
+    ),
+    createDeckCandidate(
+      "left",
+      tableLeft + cardWidth / 2 + deckSideInset,
+      centerY
+    ),
+    createDeckCandidate(
+      "right",
+      tableRight - cardWidth / 2 - deckSideInset,
+      centerY
+    ),
+  ];
+  const defaultDeckPosition = deckPositionCandidates[0].position;
 
   return {
     cardWidth,
     cardHeight,
+    viewportBounds,
     defaultDeckPosition,
+    deckPositionCandidates,
     toWorld: ([x, y]) => [centerX + x * halfWidth, centerY + y * halfHeight],
-    toPoint: (x, y) => [
-      clamp(
-        (x - centerX) / halfWidth,
-        -TABLE_POINT_LIMIT,
-        TABLE_POINT_LIMIT
-      ),
-      clamp(
-        (y - centerY) / halfHeight,
-        -TABLE_POINT_LIMIT,
-        TABLE_POINT_LIMIT
-      ),
-    ],
+    toPoint,
   };
 }

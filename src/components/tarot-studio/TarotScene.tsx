@@ -31,6 +31,7 @@ import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
 import {
   createSceneTableLayout,
   MIN_VIEW_ZOOM,
+  type SceneTableLayout,
 } from "./table-layout";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
@@ -48,6 +49,7 @@ type TarotSceneProps = {
   session: TarotSession;
   reducedMotion: boolean;
   viewZoom: number;
+  onLayoutChange: (layout: SceneTableLayout) => void;
   onSelect: (cardId: string | null) => void;
   onDraw: (
     cardId: string,
@@ -320,6 +322,7 @@ function TarotTable({
   onFlip,
   onRotate,
   onHover,
+  onLayoutChange,
 }: TarotSceneProps) {
   const size = useThree((state) => state.size);
   const invalidate = useThree((state) => state.invalidate);
@@ -379,6 +382,10 @@ function TarotTable({
     Math.max(deckMetrics.topCardCenter, highestTableCardZ) +
     CARD_THICKNESS +
     0.035;
+
+  useEffect(() => {
+    onLayoutChange(layout);
+  }, [layout, onLayoutChange]);
 
   return (
     <>

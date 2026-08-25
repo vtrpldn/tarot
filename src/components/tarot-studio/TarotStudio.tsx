@@ -21,9 +21,17 @@ import {
   getTopDeckCard,
   tarotSessionReducer,
 } from "@/lib/tarot-session";
-import { popularTarotSpreads } from "@/lib/tarot-spreads";
+import {
+  getSpreadPresentation,
+  popularTarotSpreads,
+  type TarotSpread,
+} from "@/lib/tarot-spreads";
 import type { CardLayerDirection, TableLayout } from "@/types";
-import { MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./table-layout";
+import {
+  MAX_VIEW_ZOOM,
+  MIN_VIEW_ZOOM,
+  type SceneTableLayout,
+} from "./table-layout";
 
 const WHEEL_LAYER_COOLDOWN = 110;
 const WHEEL_LAYER_THRESHOLD = 36;
@@ -58,6 +66,8 @@ function Shortcut({ children }: { children: ReactNode }) {
 
 export function TarotStudio() {
   const hoveredCardIdRef = useRef<string | null>(null);
+  const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
+  const activeSpreadRef = useRef<TarotSpread | null>(null);
   const shuffleMenuRef = useRef<HTMLDivElement>(null);
   const shuffleMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const layerWheelRef = useRef({
@@ -69,6 +79,7 @@ export function TarotStudio() {
   const [viewZoom, setViewZoom] = useState(1);
   const [isShuffleMenuOpen, setIsShuffleMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
+  const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -132,6 +143,7 @@ export function TarotStudio() {
       return;
     }
 
+    activeSpreadRef.current = null;
     dispatch({ type: "draw", cardId: topDeckCard.id, position: [0.3, 0] });
   }, [topDeckCard]);
 
@@ -141,12 +153,34 @@ export function TarotStudio() {
         return;
       }
 
+      activeSpreadRef.current = null;
       dispatch({
         type: "layout",
         placements: createLayout(tableCards, activeCardSet, layout),
       });
     },
     [activeCardSet, tableCards]
+  );
+
+  const dealSpread = useCallback(
+    (spread: TarotSpread) => {
+      const layout = sceneLayoutRef.current;
+
+      if (!layout) {
+        return;
+      }
+
+      const presentation = getSpreadPresentation(spread, layout);
+      activeSpreadRef.current = spread;
+      setViewZoom(presentation.zoom);
+
+      dispatch({
+        type: "deal-spread",
+        spread,
+        deckPosition: presentation.deckPosition,
+      });
+    },
+    []
   );
 
   const flipSelected = useCallback(() => {
@@ -157,6 +191,7 @@ export function TarotStudio() {
 
   const turnSelected = useCallback((degrees: number) => {
     if (selectedCard?.zone === "table") {
+      activeSpreadRef.current = null;
       dispatch({ type: "rotate", cardId: selectedCard.id, degrees });
     }
   }, [selectedCard]);
@@ -169,6 +204,37 @@ export function TarotStudio() {
     },
     [selectedCard]
   );
+
+  const handleLayoutChange = useCallback((layout: SceneTableLayout) => {
+    sceneLayoutRef.current = layout;
+    setIsSceneLayoutReady(true);
+
+    const spread = activeSpreadRef.current;
+
+    if (spread) {
+      const presentation = getSpreadPresentation(spread, layout);
+      setViewZoom(presentation.zoom);
+      dispatch({
+        type: "sync-deck-position",
+        position: presentation.deckPosition,
+      });
+    }
+  }, []);
+
+  const undoLastAction = useCallback(() => {
+    const previous = session.history[session.history.length - 1];
+
+    if (!previous) {
+      return;
+    }
+
+    if (previous.cards.every((card) => card.zone === "deck")) {
+      activeSpreadRef.current = null;
+      setViewZoom(1);
+    }
+
+    dispatch({ type: "undo" });
+  }, [session.history]);
 
   const adjustViewZoom = useCallback((delta: number) => {
     setViewZoom((current) =>
@@ -300,6 +366,7 @@ export function TarotStudio() {
 
     if (nudge && selectedCard?.zone === "table") {
       event.preventDefault();
+      activeSpreadRef.current = null;
       dispatch({
         type: "nudge",
         cardId: selectedCard.id,
@@ -321,7 +388,7 @@ export function TarotStudio() {
       ? "Face-down card"
       : "Nothing selected";
   const selectedHint = selectedCard?.faceUp
-    ? `${Math.abs(normalizedRotation - 180) < 0.8 ? "Reversed · " : normalizedRotation > 0.8 ? `Rotation ${Math.round(normalizedRotation)}° · ` : ""}${selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"} · Layer ${selectedTableIndex + 1} of ${tableCards.length}`
+    ? `${Math.abs(normalizedRotation - 180) < 0.8 ? "Reversed · " : normalizedRotation > 0.8 ? `Rotation ${Math.round(normalizedRotation)}° · ` : ""}${activeCardSet.kind === "lenormand" ? "Lenormand" : selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"} · Layer ${selectedTableIndex + 1} of ${tableCards.length}`
     : selectedCard
       ? `Face down · Layer ${selectedTableIndex + 1} of ${tableCards.length}. Scroll over it to restack.`
       : "Draw a card or tap one on the table.";
@@ -342,37 +409,42 @@ export function TarotStudio() {
           session={session}
           reducedMotion={reducedMotion}
           viewZoom={viewZoom}
+          onLayoutChange={handleLayoutChange}
           onSelect={(cardId) => dispatch({ type: "select", cardId })}
-          onDraw={(cardId, position, rotation) =>
-            dispatch({ type: "draw", cardId, position, rotation })
-          }
-          onMoveDeck={(position) =>
-            dispatch({ type: "move-deck", position })
-          }
-          onMove={(cardId, position, rotation) =>
-            dispatch({ type: "move", cardId, position, rotation })
-          }
+          onDraw={(cardId, position, rotation) => {
+            activeSpreadRef.current = null;
+            dispatch({ type: "draw", cardId, position, rotation });
+          }}
+          onMoveDeck={(position) => {
+            activeSpreadRef.current = null;
+            dispatch({ type: "move-deck", position });
+          }}
+          onMove={(cardId, position, rotation) => {
+            activeSpreadRef.current = null;
+            dispatch({ type: "move", cardId, position, rotation });
+          }}
           onFlip={(cardId) => dispatch({ type: "flip", cardId })}
-          onRotate={(cardId, degrees) =>
-            dispatch({ type: "rotate", cardId, degrees })
-          }
+          onRotate={(cardId, degrees) => {
+            activeSpreadRef.current = null;
+            dispatch({ type: "rotate", cardId, degrees });
+          }}
           onHover={(cardId) => {
             hoveredCardIdRef.current = cardId;
           }}
         />
       </div>
 
-      {tableCards.length === 0 && (
+      {activeCardSet.kind === "tarot" && tableCards.length === 0 && (
         <section className="tarot-spread-actions" aria-label="Popular tarot spreads">
           <span>Spreads</span>
           {popularTarotSpreads.map((spread) => (
             <button
               key={spread.id}
               type="button"
-              onClick={() => {
-                dispatch({ type: "deal-spread", spread });
-              }}
-              disabled={deckCount < spread.slots.length}
+              onClick={() => dealSpread(spread)}
+              disabled={
+                !isSceneLayoutReady || deckCount < spread.slots.length
+              }
             >
               {spread.label}
               <small>{spread.shortLabel}</small>
@@ -388,8 +460,11 @@ export function TarotStudio() {
           value={activeCardSetId}
           onChange={(event) => {
             const nextCardSet = getCardSet(event.target.value);
+            activeSpreadRef.current = null;
+            setIsSceneLayoutReady(false);
             setActiveCardSetId(nextCardSet.id);
             dispatch({ type: "new-shuffle", cardSet: nextCardSet });
+            setViewZoom(1);
           }}
         >
           {cardSets.map((cardSet) => (
@@ -552,7 +627,7 @@ export function TarotStudio() {
           </button>
           <button
             type="button"
-            onClick={() => dispatch({ type: "undo" })}
+            onClick={undoLastAction}
             disabled={!session.history.length}
           >
             Undo
@@ -589,12 +664,14 @@ export function TarotStudio() {
               <button
                 type="button"
                 onClick={() => {
+                  activeSpreadRef.current = null;
                   dispatch({ type: "new-shuffle", cardSet: activeCardSet });
                   setIsShuffleMenuOpen(false);
+                  setViewZoom(1);
                 }}
               >
                 <span>New shuffle</span>
-                <small>Restart with all 78 cards</small>
+                <small>Restart with all {activeCardSet.cards.length} cards</small>
               </button>
             </div>
           )}

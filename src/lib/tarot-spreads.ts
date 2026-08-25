@@ -1,4 +1,10 @@
 import type { TablePoint } from "@/types";
+import {
+  MAX_VIEW_ZOOM,
+  MIN_VIEW_ZOOM,
+  type SceneBounds,
+  type SceneTableLayout,
+} from "@/components/tarot-studio/table-layout";
 
 export type TarotSpreadSlot = {
   position: TablePoint;
@@ -11,6 +17,195 @@ export type TarotSpread = {
   shortLabel: string;
   slots: TarotSpreadSlot[];
 };
+
+export type SpreadPresentation = {
+  deckPosition: TablePoint;
+  zoom: number;
+};
+
+type SpreadCandidate = SpreadPresentation & {
+  overlap: number;
+};
+
+const MEANINGFUL_ZOOM_GAIN = 0.04;
+
+const clamp = (value: number, minimum: number, maximum: number) =>
+  Math.min(Math.max(value, minimum), maximum);
+
+const emptyBounds = (): SceneBounds => ({
+  left: Number.POSITIVE_INFINITY,
+  right: Number.NEGATIVE_INFINITY,
+  top: Number.NEGATIVE_INFINITY,
+  bottom: Number.POSITIVE_INFINITY,
+});
+
+const includeBounds = (bounds: SceneBounds, next: SceneBounds): SceneBounds => ({
+  left: Math.min(bounds.left, next.left),
+  right: Math.max(bounds.right, next.right),
+  top: Math.max(bounds.top, next.top),
+  bottom: Math.min(bounds.bottom, next.bottom),
+});
+
+const overlapArea = (first: SceneBounds, second: SceneBounds) =>
+  Math.max(
+    0,
+    Math.min(first.right, second.right) - Math.max(first.left, second.left)
+  ) *
+  Math.max(
+    0,
+    Math.min(first.top, second.top) - Math.max(first.bottom, second.bottom)
+  );
+
+/**
+ * Returns the world-space axis-aligned bounds of a card after its table
+ * rotation. It intentionally uses the final footprint, not an unrotated
+ * approximation, so a fanned spread cannot be clipped at its corners.
+ */
+export function getRotatedCardBounds(
+  position: [number, number],
+  rotation: number,
+  cardWidth: number,
+  cardHeight: number
+): SceneBounds {
+  const radians = (rotation * Math.PI) / 180;
+  const cosine = Math.abs(Math.cos(radians));
+  const sine = Math.abs(Math.sin(radians));
+  const halfWidth = (cosine * cardWidth + sine * cardHeight) / 2;
+  const halfHeight = (sine * cardWidth + cosine * cardHeight) / 2;
+
+  return {
+    left: position[0] - halfWidth,
+    right: position[0] + halfWidth,
+    top: position[1] + halfHeight,
+    bottom: position[1] - halfHeight,
+  };
+}
+
+function getSpreadCardBounds(
+  spread: TarotSpread,
+  layout: SceneTableLayout
+) {
+  return spread.slots.map((slot) => {
+    const worldPosition = layout.toWorld(slot.position);
+
+    return getRotatedCardBounds(
+      worldPosition,
+      slot.rotation,
+      layout.cardWidth,
+      layout.cardHeight
+    );
+  });
+}
+
+function getSpreadBounds(cardBounds: SceneBounds[]) {
+  return cardBounds.reduce(includeBounds, emptyBounds());
+}
+
+function getZoomForBounds(bounds: SceneBounds, layout: SceneTableLayout) {
+  const horizontalPadding = layout.cardWidth * 0.16;
+  const verticalPadding = layout.cardHeight * 0.3;
+  const requiredHalfWidth =
+    Math.max(Math.abs(bounds.left), Math.abs(bounds.right)) +
+    horizontalPadding;
+  const requiredHalfHeight =
+    Math.max(Math.abs(bounds.top), Math.abs(bounds.bottom)) +
+    verticalPadding;
+  const viewportHalfWidth =
+    (layout.viewportBounds.right - layout.viewportBounds.left) / 2;
+  const viewportHalfHeight =
+    (layout.viewportBounds.top - layout.viewportBounds.bottom) / 2;
+  const fittingZoom = Math.min(
+    viewportHalfWidth / Math.max(requiredHalfWidth, Number.EPSILON),
+    viewportHalfHeight / Math.max(requiredHalfHeight, Number.EPSILON)
+  );
+
+  return clamp(Math.min(1, fittingZoom), MIN_VIEW_ZOOM, MAX_VIEW_ZOOM);
+}
+
+/**
+ * Chooses an edge position for the deck and the view zoom needed to show a
+ * dealt spread. Overlap is weighted first; among clear placements, the one
+ * requiring the least zoom-out wins. It is pure so the session can apply the
+ * returned deck position and the UI can animate to the returned zoom.
+ */
+export function getSpreadPresentation(
+  spread: TarotSpread,
+  layout: SceneTableLayout
+): SpreadPresentation {
+  if (spread.slots.length === 0) {
+    return {
+      deckPosition: [...layout.defaultDeckPosition] as TablePoint,
+      zoom: clamp(1, MIN_VIEW_ZOOM, MAX_VIEW_ZOOM),
+    };
+  }
+
+  const spreadCardBounds = getSpreadCardBounds(spread, layout);
+  const spreadBounds = getSpreadBounds(spreadCardBounds);
+  const spreadCenterX = (spreadBounds.left + spreadBounds.right) / 2;
+  const spreadCenterY = (spreadBounds.top + spreadBounds.bottom) / 2;
+  const spreadGap = Math.min(layout.cardWidth, layout.cardHeight) * 0.18;
+  const spreadEdgePositions: TablePoint[] = [
+    layout.toPoint(
+      spreadCenterX,
+      spreadBounds.top + layout.cardHeight / 2 + spreadGap
+    ),
+    layout.toPoint(
+      spreadBounds.left - layout.cardWidth / 2 - spreadGap,
+      spreadCenterY
+    ),
+    layout.toPoint(
+      spreadBounds.right + layout.cardWidth / 2 + spreadGap,
+      spreadCenterY
+    ),
+    layout.toPoint(
+      spreadCenterX,
+      spreadBounds.bottom - layout.cardHeight / 2 - spreadGap
+    ),
+  ];
+  const deckCandidates = [
+    ...spreadEdgePositions.map((position) => ({
+      position,
+      worldPosition: layout.toWorld(position),
+    })),
+    ...layout.deckPositionCandidates,
+  ];
+  const candidates: SpreadCandidate[] = deckCandidates.map(
+    (candidate) => {
+      const deckBounds = getRotatedCardBounds(
+        candidate.worldPosition,
+        0,
+        layout.cardWidth,
+        layout.cardHeight
+      );
+      const bounds = includeBounds(spreadBounds, deckBounds);
+
+      return {
+        deckPosition: candidate.position,
+        zoom: getZoomForBounds(bounds, layout),
+        overlap: spreadCardBounds.reduce(
+          (total, cardBounds) => total + overlapArea(cardBounds, deckBounds),
+          0
+        ),
+      };
+    }
+  );
+  const bestCandidate = candidates.reduce((best, candidate) => {
+    const overlapDifference = candidate.overlap - best.overlap;
+
+    if (Math.abs(overlapDifference) > 0.0001) {
+      return overlapDifference < 0 ? candidate : best;
+    }
+
+    return candidate.zoom > best.zoom + MEANINGFUL_ZOOM_GAIN
+      ? candidate
+      : best;
+  });
+
+  return {
+    deckPosition: [...bestCandidate.deckPosition] as TablePoint,
+    zoom: bestCandidate.zoom,
+  };
+}
 
 export const popularTarotSpreads: TarotSpread[] = [
   {

@@ -186,8 +186,6 @@ export function CardArtwork({
       position={position}
       rotation={rotation}
       renderOrder={renderOrder}
-      castShadow
-      receiveShadow
     >
       <planeGeometry args={[width, height]} />
       <meshStandardMaterial
@@ -234,7 +232,6 @@ function CardFaceLayers({
         position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.001)]}
         rotation={rotation}
         renderOrder={1}
-        receiveShadow
       >
         <planeGeometry args={[fieldWidth, fieldHeight]} />
         <meshStandardMaterial
@@ -365,6 +362,7 @@ export function CardMesh({
 }: CardMeshProps) {
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
+  const slabRef = useRef<Mesh>(null);
   const dragRef = useRef<DragState | null>(null);
   const flipAnimationRef = useRef<FlipAnimation | null>(null);
   const pendingPositionRef = useRef<[number, number] | null>(null);
@@ -579,6 +577,7 @@ export function CardMesh({
   useFrame((_, delta) => {
     const group = groupRef.current;
     const flippingCard = flipRef.current;
+    const slab = slabRef.current;
 
     if (!group || !flippingCard) {
       return;
@@ -632,6 +631,13 @@ export function CardMesh({
         flippingCard.rotation.set(0, flipAnimation.to, 0);
         flipAnimationRef.current = null;
       }
+    }
+
+    // Face layers use painter ordering rather than physical depth. Keeping
+    // them out of the shadow pass prevents another card's shadow from reading
+    // as transparency, while the slab still gives placed cards a stable shadow.
+    if (slab) {
+      slab.castShadow = !flipIsActive;
     }
 
     const flipLift =
@@ -999,6 +1005,7 @@ export function CardMesh({
     <group ref={groupRef} renderOrder={renderOrder}>
       <group ref={flipRef} renderOrder={renderOrder}>
         <RoundedBox
+          ref={slabRef}
           args={[cardWidth, cardHeight, CARD_THICKNESS]}
           radius={0.075}
           smoothness={5}
