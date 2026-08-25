@@ -81,6 +81,7 @@ export type TarotSession = {
   deckPosition: TablePoint | null;
   selectedCardId: string | null;
   history: TableSnapshot[];
+  redo: TableSnapshot[];
 };
 
 export type TableLayout = "fan" | "grid" | "stack" | "sort";

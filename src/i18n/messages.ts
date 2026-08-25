@@ -1,4 +1,5 @@
 import type { AppLocale } from "./locale";
+import type { CardSpreadId } from "@/lib/tarot-spreads";
 
 type CardCategory = "lenormand" | "major" | "minor";
 
@@ -35,11 +36,14 @@ type Messages = {
   layouts: Readonly<Record<"fan" | "grid" | "stack" | "sort", [string, string]>>;
   moveDeck: [string, string];
   undo: [string, string];
-  shuffle: string;
-  shuffleActions: string;
-  deckSession: string;
-  newShuffle: string;
-  restartWithAll: (count: number) => string;
+  redo: [string, string];
+  resetTable: string;
+  resetTableDescription: (count: number) => string;
+  tarotCollection: string;
+  tarotCollectionActions: string;
+  tarotCollections: Readonly<
+    Record<"all" | "major" | "minor" | "court", [string, string]>
+  >;
   cardSounds: string;
   cardSoundsOn: string;
   cardSoundsOff: string;
@@ -71,15 +75,15 @@ type Messages = {
   reverse: string;
   sendBack: string;
   bringForward: string;
+  moveUp: string;
+  moveDown: string;
   symbolism: (title: string) => string;
   symbolismTitle: string;
   openingNotes: string;
   sources: string;
   emptyDeck: string;
   liveStatus: (deck: Count, table: Count) => string;
-  spreadLabels: Readonly<
-    Record<"one-card" | "three-card" | "horseshoe" | "celtic-cross", [string, string]>
-  >;
+  spreadLabels: Readonly<Record<CardSpreadId, [string, string]>>;
 };
 
 const cardNoun = (count: number) => (count === 1 ? "card" : "cards");
@@ -93,7 +97,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "EN",
     loadingTable: "Opening the table…",
     tableDescription:
-      "Interactive card table. Drag the top card to draw it, drag table cards to arrange them, use the card controls to flip, rotate, or change layers, and use Arrange to move the whole deck without keyboard modifiers.",
+      "Interactive card table. Drag the top card to draw it and drag table cards to arrange them. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
     tableActions: "Table actions",
     deckTrigger: (deckLabel, deck) =>
       `Choose deck. ${deckLabel}, ${deck.count} ${deck.noun} remaining`,
@@ -108,9 +112,9 @@ const messages: Record<AppLocale, Messages> = {
     cancelDeckMove: "Cancel deck move mode",
     movingDeck: "Moving deck",
     cancel: "Cancel",
-    chooseSpread: "Choose a tarot spread",
+    chooseSpread: "Choose a spread",
     spreads: "Spreads",
-    popularSpreads: "Popular tarot spreads",
+    popularSpreads: "Popular spreads",
     chooseASpread: "Choose a spread",
     arrangeAndUndo: "Arrange cards and undo",
     arrange: "Arrange",
@@ -123,11 +127,17 @@ const messages: Record<AppLocale, Messages> = {
     },
     moveDeck: ["Move deck", "Then drag the pile"],
     undo: ["Undo", "Last table move"],
-    shuffle: "Shuffle",
-    shuffleActions: "Shuffle actions",
-    deckSession: "Deck session",
-    newShuffle: "New shuffle",
-    restartWithAll: (count) => `Restart with all ${count} cards`,
+    redo: ["Redo", "Reapply last table move"],
+    resetTable: "Reset table",
+    resetTableDescription: (count) => `Return all ${count} cards to the deck`,
+    tarotCollection: "Tarot collection",
+    tarotCollectionActions: "Tarot collection actions",
+    tarotCollections: {
+      all: ["All cards", "78 cards"],
+      major: ["Major Arcana", "22 cards"],
+      minor: ["Minor Arcana", "56 cards"],
+      court: ["Court cards", "16 cards"],
+    },
     cardSounds: "Card sounds",
     cardSoundsOn: "Card sounds on",
     cardSoundsOff: "Card sounds off",
@@ -169,11 +179,13 @@ const messages: Record<AppLocale, Messages> = {
     reverse: "Reverse",
     sendBack: "Send back",
     bringForward: "Bring forward",
+    moveUp: "Move up",
+    moveDown: "Move down",
     symbolism: (title) => `Symbolism and correspondences for ${title}`,
     symbolismTitle: "Symbolism & correspondences",
     openingNotes: "Opening the card notes…",
     sources: "Sources",
-    emptyDeck: "The deck is empty. Start a new shuffle to begin again.",
+    emptyDeck: "The deck is empty. Reset the table to begin again.",
     liveStatus: (deck, table) =>
       `${deck.count} ${deck.noun} ${deck.count === 1 ? "remains" : "remain"} in the deck. ${tableStatus(table)}`,
     spreadLabels: {
@@ -181,6 +193,10 @@ const messages: Record<AppLocale, Messages> = {
       "three-card": ["Past · Present · Future", "3 cards"],
       horseshoe: ["Horseshoe", "7 cards"],
       "celtic-cross": ["Celtic Cross", "10 cards"],
+      "lenormand-three-card": ["Three-card line", "3 cards"],
+      "lenormand-five-card": ["Five-card line", "5 cards"],
+      "lenormand-portrait": ["Portrait", "9 cards"],
+      "lenormand-grand-tableau": ["Grand Tableau", "36 cards"],
     },
   },
   "pt-BR": {
@@ -188,7 +204,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "PT",
     loadingTable: "Abrindo a mesa…",
     tableDescription:
-      "Mesa de cartas interativa. Arraste a carta do topo para tirá-la, arraste as cartas na mesa para organizá-las, use os controles da carta para virar, girar ou mudar camadas, e use Organizar para mover o baralho inteiro sem modificadores de teclado.",
+      "Mesa de cartas interativa. Arraste a carta do topo para tirá-la e arraste as cartas na mesa para organizá-las. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
     tableActions: "Ações da mesa",
     deckTrigger: (deckLabel, deck) =>
       `Escolher baralho. ${deckLabel}, restam ${deck.count} ${deck.noun}`,
@@ -203,9 +219,9 @@ const messages: Record<AppLocale, Messages> = {
     cancelDeckMove: "Cancelar modo de mover baralho",
     movingDeck: "Movendo baralho",
     cancel: "Cancelar",
-    chooseSpread: "Escolher uma abertura de tarot",
+    chooseSpread: "Escolher uma abertura",
     spreads: "Aberturas",
-    popularSpreads: "Aberturas de tarot populares",
+    popularSpreads: "Aberturas populares",
     chooseASpread: "Escolha uma abertura",
     arrangeAndUndo: "Organizar cartas e desfazer",
     arrange: "Organizar",
@@ -218,11 +234,17 @@ const messages: Record<AppLocale, Messages> = {
     },
     moveDeck: ["Mover baralho", "Arraste a pilha"],
     undo: ["Desfazer", "Último movimento"],
-    shuffle: "Embaralhar",
-    shuffleActions: "Ações de embaralhar",
-    deckSession: "Sessão do baralho",
-    newShuffle: "Novo embaralhamento",
-    restartWithAll: (count) => `Recomeçar com todas as ${count} cartas`,
+    redo: ["Refazer", "Reaplicar o último movimento"],
+    resetTable: "Redefinir mesa",
+    resetTableDescription: (count) => `Devolver todas as ${count} cartas ao baralho`,
+    tarotCollection: "Coleção de tarot",
+    tarotCollectionActions: "Ações da coleção de tarot",
+    tarotCollections: {
+      all: ["Todas as cartas", "78 cartas"],
+      major: ["Arcanos Maiores", "22 cartas"],
+      minor: ["Arcanos Menores", "56 cartas"],
+      court: ["Cartas da corte", "16 cartas"],
+    },
     cardSounds: "Sons das cartas",
     cardSoundsOn: "Sons das cartas ativados",
     cardSoundsOff: "Sons das cartas desativados",
@@ -264,11 +286,13 @@ const messages: Record<AppLocale, Messages> = {
     reverse: "Inverter",
     sendBack: "Enviar para trás",
     bringForward: "Trazer para frente",
+    moveUp: "Mover para cima",
+    moveDown: "Mover para baixo",
     symbolism: (title) => `Simbolismo e correspondências de ${title}`,
     symbolismTitle: "Simbolismo e correspondências",
     openingNotes: "Abrindo as notas da carta…",
     sources: "Fontes",
-    emptyDeck: "O baralho está vazio. Inicie um novo embaralhamento para recomeçar.",
+    emptyDeck: "O baralho está vazio. Redefina a mesa para recomeçar.",
     liveStatus: (deck, table) =>
       `Restam ${deck.count} ${deck.noun} no baralho. ${table.count} ${table.noun} ${table.count === 1 ? "está" : "estão"} na mesa.`,
     spreadLabels: {
@@ -276,6 +300,10 @@ const messages: Record<AppLocale, Messages> = {
       "three-card": ["Passado · Presente · Futuro", "3 cartas"],
       horseshoe: ["Ferradura", "7 cartas"],
       "celtic-cross": ["Cruz Celta", "10 cartas"],
+      "lenormand-three-card": ["Linha de três cartas", "3 cartas"],
+      "lenormand-five-card": ["Linha de cinco cartas", "5 cartas"],
+      "lenormand-portrait": ["Retrato", "9 cartas"],
+      "lenormand-grand-tableau": ["Grande Tableau", "36 cartas"],
     },
   },
 };

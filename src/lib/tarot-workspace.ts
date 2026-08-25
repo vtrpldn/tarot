@@ -106,6 +106,7 @@ function restoreSession(
       : null,
     selectedCardId: session.selectedCardId,
     history: [],
+    redo: [],
   };
 }
 
@@ -157,6 +158,7 @@ export function saveTarotWorkspace(workspace: TarotWorkspace): void {
       session: {
         ...workspace.session,
         history: [],
+        redo: [],
       },
       viewZoom: workspace.viewZoom,
     };

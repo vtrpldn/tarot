@@ -50,13 +50,18 @@ const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
 const DECK_LAYER_REGISTRATION = [
-  [-0.0065, 0.0035],
-  [0.006, 0.0025],
-  [-0.0035, -0.004],
-  [0.008, -0.0015],
-  [-0.005, 0.0013],
-  [0.003, -0.0045],
-  [-0.0007, 0.0042],
+  [-0.009, 0.005],
+  [0.006, 0.003],
+  [-0.005, -0.006],
+  [0.009, -0.002],
+  [-0.007, 0.002],
+  [0.004, -0.006],
+  [-0.002, 0.006],
+  [0.007, -0.004],
+  [-0.006, -0.001],
+  [0.003, 0.005],
+  [-0.004, -0.004],
+  [0.005, 0.001],
 ] as const;
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
@@ -365,6 +370,12 @@ type TarotSceneProps = {
   session: TarotSession;
   reducedMotion: boolean;
   viewZoom: number;
+  /**
+   * The camera centre in scene world units. This intentionally stays
+   * independent from `viewZoom`, so callers can map a space-drag delta to
+   * world coordinates without rescaling the table or cards.
+   */
+  viewPan?: TablePoint;
   deckMoveMode: boolean;
   onLayoutChange: (layout: SceneTableLayout) => void;
   onSelect: (cardId: string | null) => void;
@@ -418,17 +429,35 @@ function AnimatedCameraZoom({
   return null;
 }
 
+function CameraPan({ value }: { value?: TablePoint }) {
+  const camera = useThree((state) => state.camera) as OrthographicCamera;
+  const invalidate = useThree((state) => state.invalidate);
+  const [x, y] = value ?? [0, 0];
+
+  useEffect(() => {
+    if (camera.position.x === x && camera.position.y === y) {
+      return;
+    }
+
+    camera.position.set(x, y, camera.position.z);
+    camera.updateMatrixWorld();
+    invalidate();
+  }, [camera, invalidate, x, y]);
+
+  return null;
+}
+
 function getDeckMetrics(count: number) {
   const layerCount =
     count > 0
       ? Math.min(
           DECK_LAYER_REGISTRATION.length,
-          Math.max(1, Math.ceil(count / 11))
+          Math.max(1, Math.ceil(count / 7))
         )
       : 0;
-  const layerThickness = 0.012;
-  const layerStep = 0.016;
-  const firstCenter = TABLE_SURFACE_Z + 0.006 + layerThickness / 2;
+  const layerThickness = 0.018;
+  const layerStep = 0.019;
+  const firstCenter = TABLE_SURFACE_Z + 0.008 + layerThickness / 2;
   const topSurface = layerCount
     ? firstCenter + (layerCount - 1) * layerStep + layerThickness / 2
     : TABLE_SURFACE_Z + 0.007;
@@ -449,14 +478,14 @@ function getDeckLayerOffset(
   width: number,
   height: number
 ): TablePoint {
-  const registration = DECK_LAYER_REGISTRATION[index];
-  const distanceFromTop = layerCount - index;
+  const registration =
+    DECK_LAYER_REGISTRATION[index % DECK_LAYER_REGISTRATION.length];
+  const depth =
+    layerCount <= 1 ? 0 : (layerCount - 1 - index) / (layerCount - 1);
 
   return [
-    registration[0] * width * 0.25 -
-      distanceFromTop * width * 0.0035,
-    registration[1] * height * 0.25 +
-      distanceFromTop * height * 0.0025,
+    (-depth * 0.014 + registration[0] * depth * 0.32) * width,
+    (-depth * 0.01 + registration[1] * depth * 0.32) * height,
   ];
 }
 
@@ -1001,6 +1030,7 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         value={props.viewZoom}
         reducedMotion={props.reducedMotion}
       />
+      <CameraPan value={props.viewPan} />
       <TarotTable {...props} />
     </Canvas>
   );
