@@ -132,6 +132,8 @@ export function createSceneTableLayout({
     top: viewportHeight / 2,
     bottom: -viewportHeight / 2,
   };
+  const viewportCenterY =
+    (viewportBounds.top + viewportBounds.bottom) / 2;
   const centerX = (tableLeft + tableRight) / 2;
   const centerY = (tableBottom + tableTop) / 2;
   const halfWidth = Math.max((tableRight - tableLeft) / 2, cardWidth / 2);
@@ -189,6 +191,11 @@ export function createSceneTableLayout({
   });
   const deckPositionCandidates: DeckPositionCandidate[] = [
     createDeckCandidate(
+      "left",
+      tableLeft + deckWidth / 2 + deckSideInset,
+      viewportCenterY
+    ),
+    createDeckCandidate(
       "top-left",
       tableLeft + deckWidth / 2 + deckSideInset,
       tableTop - deckHeight / 2 - deckVerticalInset
@@ -209,14 +216,9 @@ export function createSceneTableLayout({
       tableBottom + deckHeight / 2 + deckSideInset
     ),
     createDeckCandidate(
-      "left",
-      tableLeft + deckWidth / 2 + deckSideInset,
-      centerY
-    ),
-    createDeckCandidate(
       "right",
       tableRight - deckWidth / 2 - deckSideInset,
-      centerY
+      viewportCenterY
     ),
   ];
   const defaultDeckPosition = deckPositionCandidates[0].position;
