@@ -687,6 +687,7 @@ function DeckStack({
               }
               roughness={index % 2 ? 0.88 : 0.84}
               paperSeed={getPaperSeed(`${backUrl}:${index}`)}
+              depthWrite={false}
             />
           </RoundedBox>
         );
@@ -703,6 +704,7 @@ function DeckStack({
             height={height - frameInset}
             renderOrder={metrics.layerCount + 1}
             paperSeed={getPaperSeed(`${backUrl}:passive`)}
+            depthWrite={false}
           />
         </Suspense>
       )}

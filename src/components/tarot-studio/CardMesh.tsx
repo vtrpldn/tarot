@@ -203,6 +203,7 @@ export function CardArtwork({
   height,
   renderOrder = 3,
   paperSeed = 0,
+  depthWrite = true,
 }: {
   url: string;
   crop?: CardArtworkCrop;
@@ -212,6 +213,7 @@ export function CardArtwork({
   height: number;
   renderOrder?: number;
   paperSeed?: number;
+  depthWrite?: boolean;
 }) {
   const texture = useTextureForCard(url);
   const geometry = useMemo(() => {
@@ -251,6 +253,7 @@ export function CardArtwork({
         roughness={0.9}
         paperSeed={paperSeed}
         toneMapped={false}
+        depthWrite={depthWrite}
       />
     </mesh>
   );
@@ -263,6 +266,7 @@ function CardFaceLayers({
   cardHeight,
   reverse = false,
   paperSeed,
+  depthWrite = true,
 }: {
   artworkUrl: string;
   artworkCrop?: CardArtworkCrop;
@@ -270,6 +274,7 @@ function CardFaceLayers({
   cardHeight: number;
   reverse?: boolean;
   paperSeed: number;
+  depthWrite?: boolean;
 }) {
   const direction = reverse ? -1 : 1;
   const rotation: [number, number, number] | undefined = reverse
@@ -290,6 +295,7 @@ function CardFaceLayers({
         height={artworkHeight}
         renderOrder={1}
         paperSeed={paperSeed}
+        depthWrite={depthWrite}
       />
     </Suspense>
   );
@@ -1357,6 +1363,7 @@ export const CardMesh = memo(function CardMesh({
             color={TAROT_SCENE_PALETTE.cardPaper}
             roughness={0.94}
             paperSeed={paperSeed}
+            depthWrite={card.zone !== "deck"}
           />
         </mesh>
         {hasRevealed && (
@@ -1366,6 +1373,7 @@ export const CardMesh = memo(function CardMesh({
             cardWidth={cardWidth}
             cardHeight={cardHeight}
             paperSeed={paperSeed}
+            depthWrite={card.zone !== "deck"}
           />
         )}
         <CardFaceLayers
@@ -1374,6 +1382,7 @@ export const CardMesh = memo(function CardMesh({
           cardWidth={cardWidth}
           cardHeight={cardHeight}
           paperSeed={paperSeed + 0.417}
+          depthWrite={card.zone !== "deck"}
           reverse
         />
       </group>
