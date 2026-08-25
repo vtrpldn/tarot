@@ -29,7 +29,7 @@ import type {
   TableCard,
   TablePoint,
 } from "@/types";
-import type { CardSoundEvent } from "@/lib/card-sounds";
+import type { CardSoundPlayer } from "@/lib/card-sounds";
 import type { SceneTableLayout } from "./table-layout";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
@@ -161,7 +161,7 @@ type CardMeshProps = {
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
   onHover: (cardId: string | null) => void;
-  onSound: (event: CardSoundEvent) => void;
+  onSound: CardSoundPlayer;
 };
 
 function useTextureForCard(url: string): Texture {
@@ -692,6 +692,18 @@ export const CardMesh = memo(function CardMesh({
         drag.previewRotation = previewRotation;
         drag.moved =
           Math.abs(previewRotation - drag.startRotation) > 0.8;
+
+        if (drag.moved) {
+          onSound("rotate", {
+            intensity: MathUtils.clamp(
+              0.32 +
+                Math.abs(previewRotation - drag.startRotation) / 120,
+              0.32,
+              0.75
+            ),
+          });
+        }
+
         drag.lastPoint.copy(point);
         invalidate();
         return true;
@@ -701,14 +713,20 @@ export const CardMesh = memo(function CardMesh({
       const nextY = point.y - drag.offset.y;
       const [deltaX, deltaY] = sampleDragVelocity(drag, point, timestamp);
 
-      const hadMoved = drag.moved;
-
       if (point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
         drag.moved = true;
       }
 
-      if (!hadMoved && drag.moved) {
-        onSound("move");
+      if (drag.moved) {
+        const dragSpeed = Math.hypot(drag.velocity.x, drag.velocity.y);
+
+        onSound("move", {
+          intensity: MathUtils.clamp(
+            0.35 + (dragSpeed / MAX_POINTER_SPEED) * 0.55,
+            0.35,
+            0.9
+          ),
+        });
       }
 
       drag.tiltX = MathUtils.clamp(-deltaY * 0.48, -0.13, 0.13);

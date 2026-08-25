@@ -28,7 +28,7 @@ import {
   getTableCards,
   getTopDeckCard,
 } from "@/lib/tarot-session";
-import type { CardSoundEvent } from "@/lib/card-sounds";
+import type { CardSoundPlayer } from "@/lib/card-sounds";
 import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
 import {
   createSceneTableLayout,
@@ -82,7 +82,7 @@ type TarotSceneProps = {
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
   onHover: (cardId: string | null) => void;
-  onSound: (event: CardSoundEvent) => void;
+  onSound: CardSoundPlayer;
 };
 
 function AnimatedCameraZoom({

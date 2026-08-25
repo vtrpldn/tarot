@@ -31,12 +31,17 @@ export type CardSoundPlayOptions = {
   intensity?: number;
 };
 
+export type CardSoundPlayer = (
+  event: CardSoundEvent,
+  options?: CardSoundPlayOptions
+) => void;
+
 export type CardSoundEngine = {
   /**
    * Plays an effect. Call from a pointer, click, or keyboard event handler to
    * satisfy browser autoplay rules and lazily create the AudioContext.
    */
-  play: (event: CardSoundEvent, options?: CardSoundPlayOptions) => void;
+  play: CardSoundPlayer;
   /** Prepares audio after a user gesture without playing an effect. */
   prime: () => void;
   getMuted: () => boolean;
@@ -46,17 +51,26 @@ export type CardSoundEngine = {
   dispose: () => void;
 };
 
-type Tone = {
+type PaperStroke = {
+  attack?: number;
   delay?: number;
   duration: number;
-  endFrequency?: number;
-  frequency: number;
-  type: OscillatorType;
+  endHighpass?: number;
+  endLowpass?: number;
+  highpass: number;
+  lowpass: number;
   volume: number;
 };
 
+type ActivePaperStroke = {
+  cleanup: () => void;
+  source: AudioBufferSourceNode;
+};
+
 const DEFAULT_STORAGE_KEY = "tarot.card-sounds-muted";
-const DEFAULT_VOLUME = 0.42;
+const DEFAULT_VOLUME = 0.32;
+const PAPER_NOISE_SECONDS = 0.72;
+const MAX_ACTIVE_MOVE_STROKES = 8;
 const THROTTLE_MS: Record<CardSoundEvent, number> = {
   pickup: 75,
   move: 70,
@@ -105,81 +119,300 @@ function persistMuted(storageKey: string, muted: boolean) {
   }
 }
 
-function getTones(event: CardSoundEvent): Tone[] {
-  const shimmer = 1 + (Math.random() - 0.5) * 0.06;
+const PAPER_STROKES: Record<CardSoundEvent, readonly PaperStroke[]> = {
+  pickup: [
+    {
+      duration: 0.052,
+      endHighpass: 1_500,
+      endLowpass: 6_500,
+      highpass: 1_050,
+      lowpass: 5_400,
+      volume: 0.055,
+    },
+    {
+      delay: 0.026,
+      duration: 0.018,
+      endHighpass: 1_700,
+      endLowpass: 5_600,
+      highpass: 2_200,
+      lowpass: 7_200,
+      volume: 0.025,
+    },
+  ],
+  move: [
+    {
+      duration: 0.085,
+      endHighpass: 1_050,
+      endLowpass: 6_200,
+      highpass: 720,
+      lowpass: 4_800,
+      volume: 0.045,
+    },
+  ],
+  drop: [
+    {
+      attack: 0.002,
+      duration: 0.028,
+      endHighpass: 350,
+      endLowpass: 1_800,
+      highpass: 550,
+      lowpass: 2_600,
+      volume: 0.05,
+    },
+    {
+      attack: 0.002,
+      delay: 0.018,
+      duration: 0.06,
+      endHighpass: 45,
+      endLowpass: 700,
+      highpass: 80,
+      lowpass: 1_200,
+      volume: 0.075,
+    },
+    {
+      delay: 0.034,
+      duration: 0.045,
+      endHighpass: 600,
+      endLowpass: 2_400,
+      highpass: 900,
+      lowpass: 3_500,
+      volume: 0.035,
+    },
+  ],
+  flip: [
+    {
+      duration: 0.105,
+      endHighpass: 1_650,
+      endLowpass: 3_600,
+      highpass: 800,
+      lowpass: 6_500,
+      volume: 0.055,
+    },
+    {
+      delay: 0.058,
+      duration: 0.055,
+      endHighpass: 850,
+      endLowpass: 4_200,
+      highpass: 1_800,
+      lowpass: 7_000,
+      volume: 0.035,
+    },
+  ],
+  rotate: [
+    {
+      duration: 0.06,
+      endHighpass: 900,
+      endLowpass: 4_200,
+      highpass: 1_400,
+      lowpass: 5_900,
+      volume: 0.034,
+    },
+  ],
+  shuffle: [
+    {
+      duration: 0.048,
+      endHighpass: 1_300,
+      endLowpass: 4_000,
+      highpass: 650,
+      lowpass: 6_200,
+      volume: 0.038,
+    },
+    {
+      delay: 0.04,
+      duration: 0.05,
+      endHighpass: 700,
+      endLowpass: 5_800,
+      highpass: 1_350,
+      lowpass: 4_100,
+      volume: 0.036,
+    },
+    {
+      delay: 0.082,
+      duration: 0.052,
+      endHighpass: 1_450,
+      endLowpass: 3_900,
+      highpass: 720,
+      lowpass: 6_400,
+      volume: 0.04,
+    },
+    {
+      delay: 0.126,
+      duration: 0.045,
+      endHighpass: 680,
+      endLowpass: 4_800,
+      highpass: 1_250,
+      lowpass: 3_700,
+      volume: 0.034,
+    },
+  ],
+  arrange: [
+    {
+      duration: 0.068,
+      endHighpass: 950,
+      endLowpass: 5_600,
+      highpass: 620,
+      lowpass: 4_300,
+      volume: 0.038,
+    },
+    {
+      delay: 0.055,
+      duration: 0.072,
+      endHighpass: 650,
+      endLowpass: 4_100,
+      highpass: 1_000,
+      lowpass: 5_700,
+      volume: 0.036,
+    },
+  ],
+  draw: [
+    {
+      duration: 0.135,
+      endHighpass: 1_450,
+      endLowpass: 6_500,
+      highpass: 650,
+      lowpass: 4_200,
+      volume: 0.06,
+    },
+    {
+      delay: 0.006,
+      duration: 0.022,
+      endHighpass: 1_500,
+      endLowpass: 5_700,
+      highpass: 2_000,
+      lowpass: 7_200,
+      volume: 0.03,
+    },
+    {
+      delay: 0.102,
+      duration: 0.04,
+      endHighpass: 950,
+      endLowpass: 4_200,
+      highpass: 1_600,
+      lowpass: 6_000,
+      volume: 0.025,
+    },
+  ],
+};
 
-  switch (event) {
-    case "pickup":
-      return [
-        { duration: 0.045, endFrequency: 530 * shimmer, frequency: 390 * shimmer, type: "sine", volume: 0.07 },
-        { delay: 0.022, duration: 0.04, endFrequency: 710 * shimmer, frequency: 620 * shimmer, type: "triangle", volume: 0.035 },
-      ];
-    case "move":
-      return [
-        { duration: 0.028, endFrequency: 245 * shimmer, frequency: 210 * shimmer, type: "sine", volume: 0.025 },
-      ];
-    case "drop":
-      return [
-        { duration: 0.065, endFrequency: 132 * shimmer, frequency: 228 * shimmer, type: "sine", volume: 0.09 },
-        { delay: 0.008, duration: 0.032, endFrequency: 310 * shimmer, frequency: 360 * shimmer, type: "triangle", volume: 0.026 },
-      ];
-    case "flip":
-      return [
-        { duration: 0.09, endFrequency: 660 * shimmer, frequency: 345 * shimmer, type: "triangle", volume: 0.062 },
-        { delay: 0.065, duration: 0.035, endFrequency: 445 * shimmer, frequency: 495 * shimmer, type: "sine", volume: 0.026 },
-      ];
-    case "rotate":
-      return [
-        { duration: 0.05, endFrequency: 275 * shimmer, frequency: 390 * shimmer, type: "sine", volume: 0.042 },
-      ];
-    case "shuffle":
-      return [
-        { duration: 0.045, endFrequency: 240 * shimmer, frequency: 330 * shimmer, type: "triangle", volume: 0.038 },
-        { delay: 0.052, duration: 0.045, endFrequency: 310 * shimmer, frequency: 220 * shimmer, type: "triangle", volume: 0.036 },
-        { delay: 0.106, duration: 0.055, endFrequency: 195 * shimmer, frequency: 290 * shimmer, type: "sine", volume: 0.045 },
-      ];
-    case "arrange":
-      return [
-        { duration: 0.05, endFrequency: 285 * shimmer, frequency: 370 * shimmer, type: "sine", volume: 0.035 },
-        { delay: 0.045, duration: 0.05, endFrequency: 365 * shimmer, frequency: 295 * shimmer, type: "triangle", volume: 0.038 },
-      ];
-    case "draw":
-      return [
-        { duration: 0.055, endFrequency: 515 * shimmer, frequency: 325 * shimmer, type: "sine", volume: 0.06 },
-        { delay: 0.042, duration: 0.065, endFrequency: 625 * shimmer, frequency: 470 * shimmer, type: "triangle", volume: 0.046 },
-      ];
-  }
+function jitter(value: number, amount = 0.12) {
+  return value * (1 + (Math.random() * 2 - 1) * amount);
 }
 
-function playTone(
-  context: AudioContext,
-  tone: Tone,
-  volume: number
-) {
-  const startAt = context.currentTime + (tone.delay ?? 0);
-  const stopAt = startAt + tone.duration;
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  const peak = Math.max(0.0001, tone.volume * volume);
+function createPaperNoise(context: AudioContext) {
+  const length = Math.ceil(context.sampleRate * PAPER_NOISE_SECONDS);
+  const buffer = context.createBuffer(1, length, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  let smoothedNoise = 0;
+  let clusterSamples = 0;
+  let clusterLevel = 1;
 
-  oscillator.type = tone.type;
-  oscillator.frequency.setValueAtTime(tone.frequency, startAt);
-  oscillator.frequency.exponentialRampToValueAtTime(
-    Math.max(1, tone.endFrequency ?? tone.frequency),
+  for (let index = 0; index < length; index += 1) {
+    if (clusterSamples <= 0) {
+      clusterSamples = Math.round(
+        context.sampleRate * (0.001 + Math.random() * 0.007)
+      );
+      clusterLevel = 0.42 + Math.random() * 0.58;
+    }
+
+    const whiteNoise = Math.random() * 2 - 1;
+    smoothedNoise = smoothedNoise * 0.82 + whiteNoise * 0.18;
+    const fiberClick = Math.random() < 0.0025 ? whiteNoise * 0.75 : 0;
+    channel[index] = clamp(
+      (whiteNoise * 0.58 + smoothedNoise * 0.42) * clusterLevel + fiberClick,
+      -1,
+      1
+    );
+    clusterSamples -= 1;
+  }
+
+  return buffer;
+}
+
+function playPaperStroke({
+  activeStrokes,
+  context,
+  noise,
+  output,
+  stroke,
+  intensity,
+}: {
+  activeStrokes: Set<ActivePaperStroke>;
+  context: AudioContext;
+  noise: AudioBuffer;
+  output: AudioNode;
+  stroke: PaperStroke;
+  intensity: number;
+}) {
+  const delay = Math.max(0, jitter(stroke.delay ?? 0, 0.08));
+  const duration = Math.max(0.012, jitter(stroke.duration));
+  const startAt = context.currentTime + delay;
+  const stopAt = startAt + duration;
+  const attackAt = Math.min(
+    stopAt - 0.004,
+    startAt + Math.max(0.001, stroke.attack ?? duration * 0.08)
+  );
+  const source = context.createBufferSource();
+  const highpass = context.createBiquadFilter();
+  const lowpass = context.createBiquadFilter();
+  const gain = context.createGain();
+  const peak = Math.max(0.0001, jitter(stroke.volume) * intensity);
+  let cleanedUp = false;
+
+  source.buffer = noise;
+  source.loop = true;
+  source.playbackRate.value = jitter(1, 0.14);
+  highpass.type = "highpass";
+  highpass.Q.value = 0.55;
+  highpass.frequency.setValueAtTime(jitter(stroke.highpass), startAt);
+  highpass.frequency.exponentialRampToValueAtTime(
+    Math.max(20, jitter(stroke.endHighpass ?? stroke.highpass)),
+    stopAt
+  );
+  lowpass.type = "lowpass";
+  lowpass.Q.value = 0.7;
+  lowpass.frequency.setValueAtTime(jitter(stroke.lowpass), startAt);
+  lowpass.frequency.exponentialRampToValueAtTime(
+    Math.max(40, jitter(stroke.endLowpass ?? stroke.lowpass)),
     stopAt
   );
   gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(peak, startAt + 0.008);
-  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+  gain.gain.linearRampToValueAtTime(peak, attackAt);
 
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.onended = () => {
-    oscillator.disconnect();
-    gain.disconnect();
+  if (duration >= 0.055) {
+    const notchAt = startAt + duration * 0.52;
+    gain.gain.linearRampToValueAtTime(peak * 0.48, notchAt);
+    gain.gain.linearRampToValueAtTime(
+      peak * 0.82,
+      Math.min(stopAt - 0.006, notchAt + duration * 0.13)
+    );
+  }
+
+  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+  source.connect(highpass);
+  highpass.connect(lowpass);
+  lowpass.connect(gain);
+  gain.connect(output);
+
+  const activeStroke: ActivePaperStroke = {
+    source,
+    cleanup: () => {
+      if (cleanedUp) {
+        return;
+      }
+
+      cleanedUp = true;
+      activeStrokes.delete(activeStroke);
+      source.disconnect();
+      highpass.disconnect();
+      lowpass.disconnect();
+      gain.disconnect();
+    },
   };
-  oscillator.start(startAt);
-  oscillator.stop(stopAt + 0.015);
+
+  activeStrokes.add(activeStroke);
+  source.onended = activeStroke.cleanup;
+  source.start(startAt, Math.random() * noise.duration);
+  source.stop(stopAt + 0.012);
 }
 
 /**
@@ -193,10 +426,13 @@ export function createCardSoundEngine(
   const volume = clamp(options.volume ?? DEFAULT_VOLUME, 0, 1);
   let muted = readMuted(storageKey, options.muted ?? false);
   let context: AudioContext | null = null;
+  let paperNoise: AudioBuffer | null = null;
+  let output: GainNode | null = null;
   let disposed = false;
+  const activeStrokes = new Set<ActivePaperStroke>();
   const lastPlayedAt = new Map<CardSoundEvent, number>();
 
-  const ensureContext = () => {
+  const ensureAudioGraph = () => {
     if (disposed || typeof window === "undefined") {
       return null;
     }
@@ -212,11 +448,25 @@ export function createCardSoundEngine(
       context = new Constructor();
     }
 
-    if (context.state === "suspended") {
+    if (context.state === "closed") {
+      return null;
+    }
+
+    if (context.state !== "running") {
       void context.resume().catch(() => undefined);
     }
 
-    return context;
+    if (!paperNoise) {
+      paperNoise = createPaperNoise(context);
+    }
+
+    if (!output) {
+      output = context.createGain();
+      output.gain.value = volume;
+      output.connect(context.destination);
+    }
+
+    return { context, noise: paperNoise, output };
   };
 
   return {
@@ -232,21 +482,31 @@ export function createCardSoundEngine(
         return;
       }
 
-      const audioContext = ensureContext();
+      const audioGraph = ensureAudioGraph();
 
-      if (!audioContext) {
+      if (
+        !audioGraph ||
+        (event === "move" && activeStrokes.size >= MAX_ACTIVE_MOVE_STROKES)
+      ) {
         return;
       }
 
       lastPlayedAt.set(event, playedAt);
       const intensity = clamp(playOptions.intensity ?? 1, 0.25, 1);
 
-      getTones(event).forEach((tone) => {
-        playTone(audioContext, tone, volume * intensity);
+      PAPER_STROKES[event].forEach((stroke) => {
+        playPaperStroke({
+          activeStrokes,
+          context: audioGraph.context,
+          intensity,
+          noise: audioGraph.noise,
+          output: audioGraph.output,
+          stroke,
+        });
       });
     },
     prime() {
-      ensureContext();
+      ensureAudioGraph();
     },
     getMuted() {
       return muted;
@@ -263,6 +523,19 @@ export function createCardSoundEngine(
     dispose() {
       disposed = true;
       lastPlayedAt.clear();
+      activeStrokes.forEach((stroke) => {
+        try {
+          stroke.source.stop();
+        } catch {
+          // A source that already ended is safe to clean up directly.
+        }
+
+        stroke.cleanup();
+      });
+      activeStrokes.clear();
+      output?.disconnect();
+      output = null;
+      paperNoise = null;
 
       if (context) {
         void context.close().catch(() => undefined);
