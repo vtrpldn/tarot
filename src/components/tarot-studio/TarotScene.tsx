@@ -5,6 +5,7 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -28,7 +29,7 @@ import {
   getTopDeckCard,
 } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
-import { CARD_THICKNESS, CardMesh } from "./CardMesh";
+import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
 import {
   createSceneTableLayout,
   MIN_VIEW_ZOOM,
@@ -151,11 +152,29 @@ function getDeckMetrics(count: number) {
   };
 }
 
+function getDeckLayerOffset(
+  index: number,
+  layerCount: number,
+  width: number,
+  height: number
+): TablePoint {
+  const registration = DECK_LAYER_REGISTRATION[index];
+  const distanceFromTop = layerCount - index;
+
+  return [
+    registration[0] * width * 0.25 -
+      distanceFromTop * width * 0.0035,
+    registration[1] * height * 0.25 +
+      distanceFromTop * height * 0.0025,
+  ];
+}
+
 function DeckStack({
   count,
   position,
   width,
   height,
+  backUrl,
   reducedMotion,
   previewPositionRef,
 }: {
@@ -163,6 +182,7 @@ function DeckStack({
   position: TablePoint;
   width: number;
   height: number;
+  backUrl: string;
   reducedMotion: boolean;
   previewPositionRef: MutableRefObject<TablePoint | null>;
 }) {
@@ -228,17 +248,25 @@ function DeckStack({
     return null;
   }
 
+  const outerInset = Math.min(0.2, width * 0.08);
+  const ruleInset = Math.min(0.32, width * 0.13);
+  const artInset = Math.min(0.42, width * 0.17);
+  const [topOffsetX, topOffsetY] = getDeckLayerOffset(
+    metrics.layerCount - 1,
+    metrics.layerCount,
+    width,
+    height
+  );
+
   return (
     <group ref={groupRef} renderOrder={DECK_STACK_RENDER_ORDER}>
       {Array.from({ length: metrics.layerCount }, (_, index) => {
-        const registration = DECK_LAYER_REGISTRATION[index];
-        const distanceFromTop = metrics.layerCount - index;
-        const offsetX =
-          registration[0] * width * 0.25 -
-          distanceFromTop * width * 0.0035;
-        const offsetY =
-          registration[1] * height * 0.25 +
-          distanceFromTop * height * 0.0025;
+        const [offsetX, offsetY] = getDeckLayerOffset(
+          index,
+          metrics.layerCount,
+          width,
+          height
+        );
 
         return (
           <RoundedBox
@@ -265,6 +293,43 @@ function DeckStack({
           </RoundedBox>
         );
       })}
+      {/* This passive face becomes the next card back while the live top card
+          is lifted, without adding another pointer target to the deck. */}
+      <mesh
+        position={[topOffsetX, topOffsetY, metrics.topSurface + 0.001]}
+        renderOrder={metrics.layerCount + 1}
+      >
+        <planeGeometry args={[width - outerInset, height - outerInset]} />
+        <meshStandardMaterial
+          color={TAROT_SCENE_PALETTE.cardField}
+          roughness={0.52}
+          metalness={0.12}
+          depthTest={false}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh
+        position={[topOffsetX, topOffsetY, metrics.topSurface + 0.003]}
+        renderOrder={metrics.layerCount + 2}
+      >
+        <planeGeometry args={[width - ruleInset, height - ruleInset]} />
+        <meshStandardMaterial
+          color={TAROT_SCENE_PALETTE.cardRule}
+          roughness={0.46}
+          metalness={0.48}
+          depthTest={false}
+          depthWrite={false}
+        />
+      </mesh>
+      <Suspense fallback={null}>
+        <CardArtwork
+          url={backUrl}
+          position={[topOffsetX, topOffsetY, metrics.topSurface + 0.005]}
+          width={width - artInset}
+          height={height - artInset}
+          renderOrder={metrics.layerCount + 3}
+        />
+      </Suspense>
     </group>
   );
 }
@@ -495,6 +560,7 @@ function TarotTable({
         position={deckPosition}
         width={layout.cardWidth}
         height={layout.cardHeight}
+        backUrl={cardSet.back.preview}
         reducedMotion={reducedMotion}
         previewPositionRef={deckPreviewPositionRef}
       />
