@@ -1007,7 +1007,7 @@ export const CardMesh = memo(function CardMesh({
     // them out of the shadow pass prevents another card's shadow from reading
     // as transparency, while the slab still gives placed cards a stable shadow.
     if (slab) {
-      slab.castShadow = !flipIsActive;
+      slab.castShadow = card.zone !== "deck" && !flipIsActive;
     }
 
     const positionXTarget = moving
@@ -1355,7 +1355,7 @@ export const CardMesh = memo(function CardMesh({
         <mesh
           ref={slabRef}
           geometry={slabGeometry}
-          castShadow
+          castShadow={card.zone !== "deck"}
           receiveShadow
           renderOrder={0}
         >

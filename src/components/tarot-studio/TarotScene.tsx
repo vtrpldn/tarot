@@ -676,7 +676,7 @@ function DeckStack({
               metrics.firstCenter + index * metrics.layerStep,
             ]}
             renderOrder={index}
-            castShadow
+            castShadow={false}
             receiveShadow
           >
             <CardPaperMaterial
