@@ -717,14 +717,14 @@ export const CardMesh = memo(function CardMesh({
         drag.moved = true;
       }
 
-      if (drag.moved) {
+      if (drag.moved && Math.hypot(deltaX, deltaY) > 0.003) {
         const dragSpeed = Math.hypot(drag.velocity.x, drag.velocity.y);
 
         onSound("move", {
           intensity: MathUtils.clamp(
-            0.35 + (dragSpeed / MAX_POINTER_SPEED) * 0.55,
-            0.35,
-            0.9
+            0.25 + (dragSpeed / MAX_POINTER_SPEED) * 0.28,
+            0.25,
+            0.53
           ),
         });
       }

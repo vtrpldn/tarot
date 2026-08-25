@@ -57,6 +57,7 @@ type PaperStroke = {
   duration: number;
   endHighpass?: number;
   endLowpass?: number;
+  grainPulse?: boolean;
   highpass: number;
   lowpass: number;
   volume: number;
@@ -73,7 +74,7 @@ const PAPER_NOISE_SECONDS = 0.72;
 const MAX_ACTIVE_MOVE_STROKES = 8;
 const THROTTLE_MS: Record<CardSoundEvent, number> = {
   pickup: 75,
-  move: 70,
+  move: 120,
   drop: 45,
   flip: 100,
   rotate: 65,
@@ -141,12 +142,14 @@ const PAPER_STROKES: Record<CardSoundEvent, readonly PaperStroke[]> = {
   ],
   move: [
     {
-      duration: 0.085,
-      endHighpass: 1_050,
-      endLowpass: 6_200,
-      highpass: 720,
-      lowpass: 4_800,
-      volume: 0.045,
+      attack: 0.018,
+      duration: 0.16,
+      endHighpass: 320,
+      endLowpass: 2_200,
+      grainPulse: false,
+      highpass: 240,
+      lowpass: 2_600,
+      volume: 0.022,
     },
   ],
   drop: [
@@ -378,7 +381,7 @@ function playPaperStroke({
   gain.gain.setValueAtTime(0.0001, startAt);
   gain.gain.linearRampToValueAtTime(peak, attackAt);
 
-  if (duration >= 0.055) {
+  if (stroke.grainPulse !== false && duration >= 0.055) {
     const notchAt = startAt + duration * 0.52;
     gain.gain.linearRampToValueAtTime(peak * 0.48, notchAt);
     gain.gain.linearRampToValueAtTime(
