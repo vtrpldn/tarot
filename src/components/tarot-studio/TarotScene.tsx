@@ -20,6 +20,7 @@ import {
   SRGBColorSpace,
 } from "three";
 import type {
+  CardArtworkCrop,
   CardSetDefinition,
   TablePoint,
   TarotSession,
@@ -412,6 +413,7 @@ function DeckStack({
   width,
   height,
   backUrl,
+  artworkCrop,
   reducedMotion,
   previewPositionRef,
 }: {
@@ -421,6 +423,7 @@ function DeckStack({
   width: number;
   height: number;
   backUrl: string;
+  artworkCrop?: CardArtworkCrop;
   reducedMotion: boolean;
   previewPositionRef: MutableRefObject<TablePoint | null>;
 }) {
@@ -538,6 +541,7 @@ function DeckStack({
               card is lifted, without adding another pointer target. */}
           <CardArtwork
             url={backUrl}
+            crop={artworkCrop}
             position={[topOffsetX, topOffsetY, metrics.topSurface + 0.002]}
             width={width - frameInset}
             height={height - frameInset}
@@ -798,6 +802,7 @@ function TarotTable({
         width={layout.cardWidth}
         height={layout.cardHeight}
         backUrl={cardSet.back.preview}
+        artworkCrop={cardSet.artworkCrop}
         reducedMotion={reducedMotion}
         previewPositionRef={deckPreviewPositionRef}
       />

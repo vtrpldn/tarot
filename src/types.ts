@@ -11,6 +11,14 @@ export type CardArtwork = {
   source: string;
 };
 
+export type CardArtworkCrop = {
+  /** Fraction of the source texture hidden from each edge. */
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
 export type CardDefinition = {
   id: string;
   name: string;
@@ -28,6 +36,7 @@ export type CardSetDefinition = {
   shortLabel: string;
   description: string;
   cardAspectRatio: number;
+  artworkCrop?: CardArtworkCrop;
   back: CardArtwork;
   cards: CardDefinition[];
 };

@@ -1,9 +1,31 @@
 import type {
   CardArtwork,
+  CardArtworkCrop,
   CardDefinition,
   CardSetDefinition,
   TarotSuit,
 } from "@/types";
+
+const getCroppedAspectRatio = (
+  sourceAspectRatio: number,
+  crop: CardArtworkCrop
+) =>
+  sourceAspectRatio *
+  ((1 - crop.left - crop.right) / (1 - crop.top - crop.bottom));
+
+const marseilleArtworkCrop = {
+  left: 24 / 792,
+  right: 24 / 792,
+  top: 44 / 1464,
+  bottom: 26 / 1464,
+} satisfies CardArtworkCrop;
+
+const lenormandArtworkCrop = {
+  left: 48 / 918,
+  right: 33 / 918,
+  top: 49 / 1494,
+  bottom: 49 / 1494,
+} satisfies CardArtworkCrop;
 
 const artwork = (filename: string): CardArtwork => {
   const optimizedFilename = filename.replace(/\.png$/i, ".webp");
@@ -202,7 +224,8 @@ export const tarotDeMarseille: CardSetDefinition = {
   shortLabel: "Tarot de Marseille",
   description:
     "Jean Dodal's complete 78-card Tarot de Marseille, printed in Lyon circa 1701–1715.",
-  cardAspectRatio: 33 / 61,
+  cardAspectRatio: getCroppedAspectRatio(33 / 61, marseilleArtworkCrop),
+  artworkCrop: marseilleArtworkCrop,
   back: marseilleArtwork("back"),
   cards: tarotDeMarseilleCards,
 };
@@ -253,7 +276,8 @@ export const classicLenormand: CardSetDefinition = {
   shortLabel: "Stralsund Lenormand",
   description:
     "A complete 36-card Stralsund deck from Spielkartenfabrik Altenburg, circa 1890.",
-  cardAspectRatio: 51 / 83,
+  cardAspectRatio: getCroppedAspectRatio(51 / 83, lenormandArtworkCrop),
+  artworkCrop: lenormandArtworkCrop,
   back: lenormandArtwork("back"),
   cards: classicLenormandCards.map(([id, name], order) => ({
     id,

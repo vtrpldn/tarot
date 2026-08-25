@@ -19,6 +19,7 @@ import {
   MathUtils,
   Mesh,
   Plane,
+  PlaneGeometry,
   Raycaster,
   Shape,
   SRGBColorSpace,
@@ -27,6 +28,7 @@ import {
   Vector3,
 } from "three";
 import type {
+  CardArtworkCrop,
   CardDefinition,
   CardSetDefinition,
   TableCard,
@@ -186,6 +188,7 @@ function useTextureForCard(url: string): Texture {
 
 export function CardArtwork({
   url,
+  crop,
   position,
   rotation,
   width,
@@ -193,6 +196,7 @@ export function CardArtwork({
   renderOrder = 3,
 }: {
   url: string;
+  crop?: CardArtworkCrop;
   position: [number, number, number];
   rotation?: [number, number, number];
   width: number;
@@ -200,14 +204,36 @@ export function CardArtwork({
   renderOrder?: number;
 }) {
   const texture = useTextureForCard(url);
+  const geometry = useMemo(() => {
+    const nextGeometry = new PlaneGeometry(width, height);
+
+    if (crop) {
+      const uvs = nextGeometry.attributes.uv;
+      const visibleWidth = 1 - crop.left - crop.right;
+      const visibleHeight = 1 - crop.top - crop.bottom;
+
+      for (let index = 0; index < uvs.count; index += 1) {
+        uvs.setXY(
+          index,
+          crop.left + uvs.getX(index) * visibleWidth,
+          crop.bottom + uvs.getY(index) * visibleHeight
+        );
+      }
+      uvs.needsUpdate = true;
+    }
+
+    return nextGeometry;
+  }, [crop, height, width]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
 
   return (
     <mesh
+      geometry={geometry}
       position={position}
       rotation={rotation}
       renderOrder={renderOrder}
     >
-      <planeGeometry args={[width, height]} />
       <meshStandardMaterial
         map={texture}
         color="#fffdf7"
@@ -223,11 +249,13 @@ export function CardArtwork({
 
 function CardFaceLayers({
   artworkUrl,
+  artworkCrop,
   cardWidth,
   cardHeight,
   reverse = false,
 }: {
   artworkUrl: string;
+  artworkCrop?: CardArtworkCrop;
   cardWidth: number;
   cardHeight: number;
   reverse?: boolean;
@@ -244,6 +272,7 @@ function CardFaceLayers({
     <Suspense fallback={null}>
       <CardArtwork
         url={artworkUrl}
+        crop={artworkCrop}
         position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.002)]}
         rotation={rotation}
         width={artworkWidth}
@@ -1280,12 +1309,14 @@ export const CardMesh = memo(function CardMesh({
         {hasRevealed && (
           <CardFaceLayers
             artworkUrl={frontTexture}
+            artworkCrop={cardSet.artworkCrop}
             cardWidth={cardWidth}
             cardHeight={cardHeight}
           />
         )}
         <CardFaceLayers
           artworkUrl={cardSet.back.preview}
+          artworkCrop={cardSet.artworkCrop}
           cardWidth={cardWidth}
           cardHeight={cardHeight}
           reverse
