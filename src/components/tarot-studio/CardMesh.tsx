@@ -203,6 +203,7 @@ export function CardArtwork({
   height,
   renderOrder = 3,
   paperSeed = 0,
+  depthTest = true,
   depthWrite = true,
 }: {
   url: string;
@@ -213,6 +214,7 @@ export function CardArtwork({
   height: number;
   renderOrder?: number;
   paperSeed?: number;
+  depthTest?: boolean;
   depthWrite?: boolean;
 }) {
   const texture = useTextureForCard(url);
@@ -253,6 +255,7 @@ export function CardArtwork({
         roughness={0.9}
         paperSeed={paperSeed}
         toneMapped={false}
+        depthTest={depthTest}
         depthWrite={depthWrite}
       />
     </mesh>
@@ -266,6 +269,7 @@ function CardFaceLayers({
   cardHeight,
   reverse = false,
   paperSeed,
+  depthTest = true,
   depthWrite = true,
 }: {
   artworkUrl: string;
@@ -274,6 +278,7 @@ function CardFaceLayers({
   cardHeight: number;
   reverse?: boolean;
   paperSeed: number;
+  depthTest?: boolean;
   depthWrite?: boolean;
 }) {
   const direction = reverse ? -1 : 1;
@@ -295,6 +300,7 @@ function CardFaceLayers({
         height={artworkHeight}
         renderOrder={1}
         paperSeed={paperSeed}
+        depthTest={depthTest}
         depthWrite={depthWrite}
       />
     </Suspense>
@@ -1007,7 +1013,7 @@ export const CardMesh = memo(function CardMesh({
     // them out of the shadow pass prevents another card's shadow from reading
     // as transparency, while the slab still gives placed cards a stable shadow.
     if (slab) {
-      slab.castShadow = card.zone !== "deck" && !flipIsActive;
+      slab.castShadow = !flipIsActive;
     }
 
     const positionXTarget = moving
@@ -1355,7 +1361,7 @@ export const CardMesh = memo(function CardMesh({
         <mesh
           ref={slabRef}
           geometry={slabGeometry}
-          castShadow={card.zone !== "deck"}
+          castShadow
           receiveShadow
           renderOrder={0}
         >
@@ -1363,7 +1369,7 @@ export const CardMesh = memo(function CardMesh({
             color={TAROT_SCENE_PALETTE.cardPaper}
             roughness={0.94}
             paperSeed={paperSeed}
-            depthWrite={card.zone !== "deck"}
+            depthTest={card.zone !== "deck"}
           />
         </mesh>
         {hasRevealed && (
@@ -1373,7 +1379,7 @@ export const CardMesh = memo(function CardMesh({
             cardWidth={cardWidth}
             cardHeight={cardHeight}
             paperSeed={paperSeed}
-            depthWrite={card.zone !== "deck"}
+            depthTest={card.zone !== "deck"}
           />
         )}
         <CardFaceLayers
@@ -1382,7 +1388,7 @@ export const CardMesh = memo(function CardMesh({
           cardWidth={cardWidth}
           cardHeight={cardHeight}
           paperSeed={paperSeed + 0.417}
-          depthWrite={card.zone !== "deck"}
+          depthTest={card.zone !== "deck"}
           reverse
         />
       </group>

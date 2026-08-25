@@ -9,6 +9,7 @@ import type {
 } from "@/types";
 import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
 import type { CardSpread } from "@/lib/tarot-spreads";
+import { getCardStackOffset } from "@/lib/card-stack-layout";
 
 const HISTORY_LIMIT = 24;
 
@@ -149,16 +150,14 @@ export function createLayout(
       : cards;
 
   if (layout === "stack") {
-    const stackIntervals = Math.max(1, orderedCards.length - 1);
-    const horizontalStep = Math.min(0.008, 0.08 / stackIntervals);
-    const verticalStep = Math.min(0.01, 0.1 / stackIntervals);
-
     orderedCards.forEach((card, index) => {
+      const [offsetX, offsetY] = getCardStackOffset(
+        index,
+        orderedCards.length
+      );
+
       placements.set(card.id, {
-        position: [
-          0.3 + index * horizontalStep,
-          index * verticalStep,
-        ],
+        position: [0.3 + offsetX, offsetY],
         rotation: alignedRotation(card),
         zIndex: index + 1,
       });

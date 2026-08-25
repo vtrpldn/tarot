@@ -59,6 +59,7 @@ import {
 } from "@/lib/tarot-workspace";
 import type { CardLayerDirection, TableLayout, TablePoint } from "@/types";
 import {
+  clampViewPan,
   MAX_VIEW_ZOOM,
   MIN_VIEW_ZOOM,
   type SceneTableLayout,
@@ -439,6 +440,7 @@ export function TarotStudio() {
   const canvasShellRef = useRef<HTMLDivElement>(null);
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
+  const viewZoomRef = useRef(1);
   const activeArrangementRef = useRef<ActiveAutomaticArrangement | null>(null);
   const spacePressedRef = useRef(false);
   const panGestureRef = useRef<{
@@ -484,6 +486,28 @@ export function TarotStudio() {
   );
   const [isReadingLoading, setIsReadingLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("en");
+
+  useEffect(() => {
+    viewZoomRef.current = viewZoom;
+    const layout = sceneLayoutRef.current;
+
+    if (!layout) {
+      return;
+    }
+
+    setViewPan((current) => {
+      const next = clampViewPan(
+        current,
+        layout.viewportBounds,
+        viewZoom
+      );
+
+      return next[0] === current[0] && next[1] === current[1]
+        ? current
+        : next;
+    });
+  }, [viewZoom]);
+
   const messages = getMessages(locale);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
@@ -793,6 +817,17 @@ export function TarotStudio() {
   const handleLayoutChange = useCallback((layout: SceneTableLayout) => {
     sceneLayoutRef.current = layout;
     setIsSceneLayoutReady(true);
+    setViewPan((current) => {
+      const next = clampViewPan(
+        current,
+        layout.viewportBounds,
+        viewZoomRef.current
+      );
+
+      return next[0] === current[0] && next[1] === current[1]
+        ? current
+        : next;
+    });
 
     const arrangement = activeArrangementRef.current;
 
@@ -1161,10 +1196,16 @@ export function TarotStudio() {
       const deltaX = event.clientX - gesture.startX;
       const deltaY = event.clientY - gesture.startY;
 
-      setViewPan([
-        gesture.startPan[0] - deltaX * unitsPerPixel,
-        gesture.startPan[1] + deltaY * unitsPerPixel,
-      ]);
+      setViewPan(
+        clampViewPan(
+          [
+            gesture.startPan[0] - deltaX * unitsPerPixel,
+            gesture.startPan[1] + deltaY * unitsPerPixel,
+          ],
+          layout.viewportBounds,
+          viewZoom
+        )
+      );
     },
     [viewZoom]
   );
@@ -2037,12 +2078,6 @@ export function TarotStudio() {
                         <p className="tarot-tradition-note">
                           {selectedReading.traditionNote}
                         </p>
-                      )}
-                      {selectedReading.perspective && (
-                        <div className="tarot-card-perspective">
-                          <span>{selectedReading.perspective.label}</span>
-                          <p>{selectedReading.perspective.text}</p>
-                        </div>
                       )}
                       <div className="tarot-card-sources">
                         <span>{messages.sources}</span>
