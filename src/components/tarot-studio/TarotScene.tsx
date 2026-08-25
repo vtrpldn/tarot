@@ -53,6 +53,7 @@ import {
   type ExternalCardDrag,
 } from "./CardMesh";
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
+import { TableClothMaterial } from "./TableClothMaterial";
 import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
@@ -1324,9 +1325,21 @@ function PhysicalDeck({
         renderOrder={DECK_CARD_RENDER_ORDER}
       >
         <CardPaperMaterial
+          attach="material-0"
           color="#e8dcc5"
           roughness={0.94}
           paperSeed={getPaperSeed(`${backUrl}:deck`)}
+          cardSize={[width, height]}
+          edgePatina={0.12}
+          depthTest
+        />
+        <CardPaperMaterial
+          attach="material-1"
+          color="#c9b796"
+          roughness={0.88}
+          paperSeed={getPaperSeed(`${backUrl}:deck-edge`)}
+          cardSize={[width, height]}
+          edgePatina={0.34}
           depthTest
         />
       </instancedMesh>
@@ -1342,6 +1355,8 @@ function PhysicalDeck({
           color="#fffdf7"
           roughness={0.9}
           paperSeed={getPaperSeed(`${backUrl}:back`)}
+          cardSize={[Math.max(0.16, width - frameInset), Math.max(0.26, height - frameInset)]}
+          edgePatina={0.035}
           toneMapped={false}
           depthTest
         />
@@ -1439,12 +1454,9 @@ function TableSurface({
         onPointerDown={() => onSelect(null)}
       >
         <planeGeometry args={[visibleWidth, visibleHeight]} />
-        <meshStandardMaterial
+        <TableClothMaterial
           color={palette.table}
-          roughness={0.94}
-          metalness={0.012}
-          emissive={palette.table}
-          emissiveIntensity={0.46}
+          emissive={palette.tableEmissive}
         />
       </mesh>
       <group position={[0, 0, TABLE_SURFACE_Z + 0.002]} renderOrder={1}>

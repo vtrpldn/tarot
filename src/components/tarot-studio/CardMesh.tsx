@@ -39,7 +39,11 @@ import type {
 } from "@/types";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import type { SceneTableLayout } from "./table-layout";
-import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
+import {
+  type CardPaperMotion,
+  CardPaperMaterial,
+  getPaperSeed,
+} from "./CardPaperMaterial";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
@@ -222,6 +226,7 @@ export function CardArtwork({
   paperSeed = 0,
   depthTest = true,
   depthWrite = true,
+  motionRef,
 }: {
   url: string;
   crop?: CardArtworkCrop;
@@ -233,10 +238,11 @@ export function CardArtwork({
   paperSeed?: number;
   depthTest?: boolean;
   depthWrite?: boolean;
+  motionRef?: MutableRefObject<CardPaperMotion>;
 }) {
   const texture = useTextureForCard(url);
   const geometry = useMemo(() => {
-    const nextGeometry = new PlaneGeometry(width, height);
+    const nextGeometry = new PlaneGeometry(width, height, 12, 18);
 
     if (crop) {
       const uvs = nextGeometry.attributes.uv;
@@ -271,6 +277,9 @@ export function CardArtwork({
         color="#fffdf7"
         roughness={0.9}
         paperSeed={paperSeed}
+        cardSize={[width, height]}
+        edgePatina={0.035}
+        motionRef={motionRef}
         toneMapped={false}
         depthTest={depthTest}
         depthWrite={depthWrite}
@@ -288,6 +297,7 @@ function CardFaceLayers({
   paperSeed,
   depthTest = true,
   depthWrite = true,
+  motionRef,
 }: {
   artworkUrl: string;
   artworkCrop?: CardArtworkCrop;
@@ -297,6 +307,7 @@ function CardFaceLayers({
   paperSeed: number;
   depthTest?: boolean;
   depthWrite?: boolean;
+  motionRef?: MutableRefObject<CardPaperMotion>;
 }) {
   const direction = reverse ? -1 : 1;
   const rotation: [number, number, number] | undefined = reverse
@@ -319,6 +330,7 @@ function CardFaceLayers({
         paperSeed={paperSeed}
         depthTest={depthTest}
         depthWrite={depthWrite}
+        motionRef={motionRef}
       />
     </Suspense>
   );
@@ -514,6 +526,7 @@ export const CardMesh = memo(function CardMesh({
   const cardHeight = layout.cardHeight;
   const frontTexture = definition.image.preview;
   const paperSeed = useMemo(() => getPaperSeed(card.id), [card.id]);
+  const paperMotionRef = useRef<CardPaperMotion>({ curlX: 0, curlY: 0 });
   const slabColor =
     card.zone === "deck"
       ? paperSeed > 0.66
@@ -1040,6 +1053,7 @@ export const CardMesh = memo(function CardMesh({
     let flipIsActive = false;
     let flipScaleX = 1;
     let flipScaleY = 1;
+    let flipSqueeze = 0;
 
     if (reducedMotion) {
       flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
@@ -1056,6 +1070,7 @@ export const CardMesh = memo(function CardMesh({
           : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
       const squeeze = Math.sin(Math.PI * easedProgress);
+      flipSqueeze = squeeze;
 
       flipScaleX = Math.max(
         0.018,
@@ -1128,6 +1143,23 @@ export const CardMesh = memo(function CardMesh({
     const nextScale = reducedMotion
       ? scaleTarget
       : MathUtils.damp(group.scale.x, scaleTarget, 17, delta);
+    const curlXTarget = reducedMotion
+      ? 0
+      : moving
+        ? tiltYTarget * 0.036
+        : flipSqueeze * (card.faceUp ? 0.006 : -0.006);
+    const curlYTarget = reducedMotion
+      ? 0
+      : moving
+        ? -tiltXTarget * 0.03
+        : -flipSqueeze * 0.0035;
+    const paperMotion = paperMotionRef.current;
+    const nextCurlX = reducedMotion
+      ? 0
+      : MathUtils.damp(paperMotion.curlX, curlXTarget, 15, delta);
+    const nextCurlY = reducedMotion
+      ? 0
+      : MathUtils.damp(paperMotion.curlY, curlYTarget, 15, delta);
     const isLiftedDrag =
       (drag?.moved && drag.mode === "move") || Boolean(externalDrag);
     const expandsToCardThickness =
@@ -1190,6 +1222,8 @@ export const CardMesh = memo(function CardMesh({
       group.position.z = zTarget;
       group.scale.set(scaleTarget, scaleTarget, 1);
       flippingCard.scale.set(flipScaleX, flipScaleY, depthScaleTarget);
+      paperMotion.curlX = 0;
+      paperMotion.curlY = 0;
       if (drag?.mode === "move-deck") {
         setDeckPreview([
           positionXTarget - deckOffset[0],
@@ -1215,7 +1249,9 @@ export const CardMesh = memo(function CardMesh({
       Math.abs(nextY - positionYTarget) > 0.0008 ||
       Math.abs(nextZ - zTarget) > 0.0008 ||
       Math.abs(nextScale - scaleTarget) > 0.0008 ||
-      Math.abs(nextDepthScale - depthScaleTarget) > 0.0008;
+      Math.abs(nextDepthScale - depthScaleTarget) > 0.0008 ||
+      Math.abs(nextCurlX - curlXTarget) > 0.00008 ||
+      Math.abs(nextCurlY - curlYTarget) > 0.00008;
 
     group.rotation.x = nextTiltX;
     group.rotation.y = nextTiltY;
@@ -1225,6 +1261,8 @@ export const CardMesh = memo(function CardMesh({
     group.position.z = nextZ;
     group.scale.set(nextScale, nextScale, 1);
     flippingCard.scale.set(flipScaleX, flipScaleY, nextDepthScale);
+    paperMotion.curlX = nextCurlX;
+    paperMotion.curlY = nextCurlY;
 
     if (drag?.mode === "move-deck") {
       setDeckPreview([
@@ -1469,9 +1507,23 @@ export const CardMesh = memo(function CardMesh({
           renderOrder={0}
         >
           <CardPaperMaterial
+            attach="material-0"
             color={slabColor}
             roughness={0.94}
             paperSeed={paperSeed}
+            cardSize={[cardWidth, cardHeight]}
+            edgePatina={0.12}
+            motionRef={paperMotionRef}
+            depthTest
+          />
+          <CardPaperMaterial
+            attach="material-1"
+            color="#cdbd9e"
+            roughness={0.88}
+            paperSeed={paperSeed + 0.213}
+            cardSize={[cardWidth, cardHeight]}
+            edgePatina={0.3}
+            motionRef={paperMotionRef}
             depthTest
           />
         </mesh>
@@ -1482,6 +1534,7 @@ export const CardMesh = memo(function CardMesh({
             cardWidth={cardWidth}
             cardHeight={cardHeight}
             paperSeed={paperSeed}
+            motionRef={paperMotionRef}
             depthTest
           />
         )}
@@ -1491,6 +1544,7 @@ export const CardMesh = memo(function CardMesh({
           cardWidth={cardWidth}
           cardHeight={cardHeight}
           paperSeed={paperSeed + 0.417}
+          motionRef={paperMotionRef}
           depthTest
           reverse
         />
