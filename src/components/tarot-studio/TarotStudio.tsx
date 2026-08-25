@@ -99,6 +99,23 @@ function useDockPopover({
     const closeOnOutsidePress = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) {
         setIsOpen(false);
+
+        const target = event.target;
+
+        if (target instanceof HTMLElement) {
+          const tableRegion = target.closest<HTMLElement>(
+            ".tarot-canvas-shell"
+          );
+          const isFocusableControl = target.closest(
+            "button, select, input, textarea, a[href], [tabindex]"
+          );
+
+          if (tableRegion) {
+            window.requestAnimationFrame(() => tableRegion.focus());
+          } else if (!isFocusableControl) {
+            window.requestAnimationFrame(() => triggerRef.current?.focus());
+          }
+        }
       }
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
