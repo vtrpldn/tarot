@@ -182,7 +182,9 @@ function useMobileViewport() {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const mediaQuery = window.matchMedia(
+      "(max-width: 767px), ((pointer: coarse) and (max-height: 767px))"
+    );
     const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
 
     updateViewport();

@@ -1293,7 +1293,7 @@ input:focus-visible {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 767px), (pointer: coarse) and (max-height: 767px) {
   .tarot-toolbar-sigil {
     display: none;
   }
@@ -1613,7 +1613,7 @@ input:focus-visible {
 
 }
 
-@media (max-height: 660px) and (min-width: 720px) {
+@media (max-height: 660px) and (min-width: 720px) and (hover: hover) and (pointer: fine) {
   .tarot-inspector {
     width: min(18rem, calc(100vw - 1.5rem));
     max-height: calc(100dvh - 6.5rem);
