@@ -866,10 +866,10 @@ export const CardMesh = memo(function CardMesh({
             glideY *= glideScale;
           }
 
-          const nextPoint = layout.toPoint(
-            releaseX + glideX,
-            releaseY + glideY
-          );
+          const nextPoint =
+            drag.mode === "move-deck"
+              ? layout.toDeckPoint(releaseX + glideX, releaseY + glideY)
+              : layout.toPoint(releaseX + glideX, releaseY + glideY);
           const nextWorldPosition = layout.toWorld(nextPoint);
 
           if (drag.mode === "move-deck") {
