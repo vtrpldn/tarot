@@ -476,6 +476,7 @@ export const CardMesh = memo(function CardMesh({
     useRef<PointerEndFallbackBinding | null>(null);
   const deckPreviewRef = useRef<TablePoint | null>(null);
   const [hasRevealed, setHasRevealed] = useState(card.faceUp);
+  const [hasActiveDrag, setHasActiveDrag] = useState(false);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
   const invalidate = useThree((state) => state.invalidate);
@@ -802,8 +803,11 @@ export const CardMesh = memo(function CardMesh({
       const nextY = point.y - drag.offset.y;
       const [deltaX, deltaY] = sampleDragVelocity(drag, point, timestamp);
 
-      if (point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
+      if (!drag.moved && point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
         drag.moved = true;
+        if (drag.mode === "move") {
+          setHasActiveDrag(true);
+        }
       }
 
       if (drag.moved && Math.hypot(deltaX, deltaY) > 0.003) {
@@ -919,6 +923,7 @@ export const CardMesh = memo(function CardMesh({
       }
 
       dragRef.current = null;
+      setHasActiveDrag(false);
 
       if (drag.mode === "move-deck") {
         setDeckPreview(null);
@@ -1013,7 +1018,8 @@ export const CardMesh = memo(function CardMesh({
     // them out of the shadow pass prevents another card's shadow from reading
     // as transparency, while the slab still gives placed cards a stable shadow.
     if (slab) {
-      slab.castShadow = !flipIsActive;
+      slab.castShadow =
+        !flipIsActive && (card.zone !== "deck" || hasActiveDrag);
     }
 
     const positionXTarget = moving
@@ -1053,9 +1059,10 @@ export const CardMesh = memo(function CardMesh({
     const nextScale = reducedMotion
       ? scaleTarget
       : MathUtils.damp(group.scale.x, scaleTarget, 17, delta);
-    let flipLift = 0;
+    const isLiftedDrag = drag?.moved && drag.mode === "move";
+    let projectedSurfaceLift = 0;
 
-    if (flipIsActive) {
+    if (flipIsActive || isLiftedDrag) {
       const parentRotation = parentRotationRef.current.set(
         nextTiltX,
         nextTiltY,
@@ -1075,10 +1082,11 @@ export const CardMesh = memo(function CardMesh({
           Math.abs(rotationElements[6]) * (cardHeight / 2) +
           Math.abs(rotationElements[10]) * CARD_VISIBLE_HALF_DEPTH);
 
-      // Keep the lowest visible corner on or above the surface throughout the
-      // turn. A fixed cosmetic lift lets most of a wide card pass through the
-      // table when the card approaches edge-on.
-      flipLift =
+      // Keep the lowest visible corner on or above the surface throughout a
+      // flip or a tilted drag. Without this lift, a fast pointer delta can
+      // tip a card through the table or an overlapping card before depth
+      // testing gets a chance to draw it on top.
+      projectedSurfaceLift =
         Math.max(0, projectedHalfDepth - CARD_VISIBLE_HALF_DEPTH) +
         FLIP_SURFACE_CLEARANCE;
     }
@@ -1087,7 +1095,7 @@ export const CardMesh = memo(function CardMesh({
       drag?.moved && drag.mode !== "move-deck"
         ? draggingZ
         : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0);
-    const zTarget = zBase + flipLift;
+    const zTarget = zBase + projectedSurfaceLift;
 
     if (reducedMotion) {
       group.rotation.x = 0;
@@ -1103,7 +1111,7 @@ export const CardMesh = memo(function CardMesh({
       return;
     }
 
-    const nextZ = flipIsActive
+    const nextZ = flipIsActive || isLiftedDrag
       ? Math.max(
           MathUtils.damp(group.position.z, zTarget, 18, delta),
           zTarget
@@ -1361,7 +1369,7 @@ export const CardMesh = memo(function CardMesh({
         <mesh
           ref={slabRef}
           geometry={slabGeometry}
-          castShadow
+          castShadow={card.zone !== "deck" || hasActiveDrag}
           receiveShadow
           renderOrder={0}
         >
@@ -1369,7 +1377,7 @@ export const CardMesh = memo(function CardMesh({
             color={TAROT_SCENE_PALETTE.cardPaper}
             roughness={0.94}
             paperSeed={paperSeed}
-            depthTest={card.zone !== "deck"}
+            depthTest={card.zone !== "deck" || hasActiveDrag}
           />
         </mesh>
         {hasRevealed && (
@@ -1379,7 +1387,7 @@ export const CardMesh = memo(function CardMesh({
             cardWidth={cardWidth}
             cardHeight={cardHeight}
             paperSeed={paperSeed}
-            depthTest={card.zone !== "deck"}
+            depthTest={card.zone !== "deck" || hasActiveDrag}
           />
         )}
         <CardFaceLayers
@@ -1388,7 +1396,7 @@ export const CardMesh = memo(function CardMesh({
           cardWidth={cardWidth}
           cardHeight={cardHeight}
           paperSeed={paperSeed + 0.417}
-          depthTest={card.zone !== "deck"}
+          depthTest={card.zone !== "deck" || hasActiveDrag}
           reverse
         />
       </group>

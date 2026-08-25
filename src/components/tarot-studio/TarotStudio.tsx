@@ -64,6 +64,15 @@ import {
   MIN_VIEW_ZOOM,
   type SceneTableLayout,
 } from "./table-layout";
+import {
+  DEFAULT_SCENE_SETTINGS,
+  MAX_SCENE_LIGHT_INTENSITY,
+  MIN_SCENE_LIGHT_INTENSITY,
+  resolveSceneSettings,
+  SCENE_THEME_IDS,
+  type SceneSettings,
+  type SceneThemeId,
+} from "./theme";
 
 const WHEEL_LAYER_COOLDOWN = 110;
 const WHEEL_LAYER_THRESHOLD = 36;
@@ -392,7 +401,7 @@ function useDockPopover({
     const focusTimer = window.requestAnimationFrame(() => {
       containerRef.current
         ?.querySelector<HTMLElement>(
-          "[role='dialog'] [role='radio'][aria-checked='true'], [role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled)"
+          "[role='dialog'] [role='radio'][aria-checked='true'], [role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled), [role='dialog'] input:not(:disabled)"
         )
         ?.focus();
     });
@@ -457,6 +466,8 @@ export function TarotStudio() {
   const spreadMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const arrangeMenuRef = useRef<HTMLDivElement>(null);
   const arrangeMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const configMenuRef = useRef<HTMLDivElement>(null);
+  const configMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const languageMenuRef = useRef<HTMLDivElement>(null);
   const languageMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const inspectorCollapseRef = useRef<HTMLButtonElement>(null);
@@ -476,6 +487,7 @@ export function TarotStudio() {
   const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
   const [isSpreadMenuOpen, setIsSpreadMenuOpen] = useState(false);
   const [isArrangeMenuOpen, setIsArrangeMenuOpen] = useState(false);
+  const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const [isDeckMoveMode, setIsDeckMoveMode] = useState(false);
@@ -486,6 +498,9 @@ export function TarotStudio() {
   );
   const [isReadingLoading, setIsReadingLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("en");
+  const [sceneSettings, setSceneSettings] = useState<SceneSettings>(() => ({
+    ...DEFAULT_SCENE_SETTINGS,
+  }));
 
   useEffect(() => {
     viewZoomRef.current = viewZoom;
@@ -509,6 +524,11 @@ export function TarotStudio() {
   }, [viewZoom]);
 
   const messages = getMessages(locale);
+  const sceneThemeLabels: Record<SceneThemeId, string> = {
+    constellation: messages.backgroundConstellation,
+    "solar-temple": messages.backgroundSolarTemple,
+    "moonlit-grove": messages.backgroundMoonlitGrove,
+  };
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -543,6 +563,7 @@ export function TarotStudio() {
     isZoomMenuOpen ||
     isSpreadMenuOpen ||
     isArrangeMenuOpen ||
+    isConfigMenuOpen ||
     isLanguageMenuOpen ||
     isInspectorOpen ||
     isDeckMoveMode;
@@ -581,6 +602,7 @@ export function TarotStudio() {
       setViewZoom(
         Math.min(MAX_VIEW_ZOOM, Math.max(MIN_VIEW_ZOOM, workspace.viewZoom))
       );
+      setSceneSettings(resolveSceneSettings(workspace.sceneSettings));
       setIsInspectorCollapsed(true);
       dispatch({ type: "restore", session: workspace.session });
     }
@@ -597,6 +619,7 @@ export function TarotStudio() {
       saveTarotWorkspace({
         activeCardSetId,
         isInspectorCollapsed,
+        sceneSettings,
         session,
         viewZoom,
       });
@@ -607,6 +630,7 @@ export function TarotStudio() {
     activeCardSetId,
     isInspectorCollapsed,
     isWorkspaceReady,
+    sceneSettings,
     session,
     viewZoom,
   ]);
@@ -634,6 +658,12 @@ export function TarotStudio() {
     isOpen: isArrangeMenuOpen,
     setIsOpen: setIsArrangeMenuOpen,
     triggerRef: arrangeMenuTriggerRef,
+  });
+  useDockPopover({
+    containerRef: configMenuRef,
+    isOpen: isConfigMenuOpen,
+    setIsOpen: setIsConfigMenuOpen,
+    triggerRef: configMenuTriggerRef,
   });
   useDockPopover({
     containerRef: languageMenuRef,
@@ -955,6 +985,66 @@ export function TarotStudio() {
       updateLocale(LANGUAGE_OPTIONS[nextIndex], false);
     },
     [updateLocale]
+  );
+
+  const updateSceneTheme = useCallback(
+    (themeId: SceneThemeId, restoreFocus = false) => {
+      setSceneSettings((current) =>
+        resolveSceneSettings({ ...current, themeId })
+      );
+
+      if (restoreFocus) {
+        window.requestAnimationFrame(() =>
+          configMenuRef.current
+            ?.querySelector<HTMLButtonElement>(
+              `[data-scene-theme-option="${themeId}"]`
+            )
+            ?.focus()
+        );
+      }
+    },
+    []
+  );
+
+  const handleSceneThemeRadioKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, currentTheme: SceneThemeId) => {
+      const currentIndex = SCENE_THEME_IDS.indexOf(currentTheme);
+      let nextIndex: number;
+
+      switch (event.key) {
+        case "ArrowLeft":
+        case "ArrowUp":
+          nextIndex =
+            (currentIndex - 1 + SCENE_THEME_IDS.length) %
+            SCENE_THEME_IDS.length;
+          break;
+        case "ArrowRight":
+        case "ArrowDown":
+          nextIndex = (currentIndex + 1) % SCENE_THEME_IDS.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = SCENE_THEME_IDS.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      updateSceneTheme(SCENE_THEME_IDS[nextIndex], true);
+    },
+    [updateSceneTheme]
+  );
+
+  const updateSceneRange = useCallback(
+    (key: "lightIntensity" | "shadowDepth", value: number) => {
+      setSceneSettings((current) =>
+        resolveSceneSettings({ ...current, [key]: value })
+      );
+    },
+    []
   );
 
   const undoLastAction = useCallback(() => {
@@ -1397,7 +1487,10 @@ export function TarotStudio() {
 
   if (!isWorkspaceReady) {
     return (
-      <main className="tarot-app tarot-app--restoring">
+      <main
+        className="tarot-app tarot-app--restoring"
+        data-scene-theme={sceneSettings.themeId}
+      >
         <div className="tarot-grain" aria-hidden="true" />
         <div className="tarot-workspace-loading" role="status">
           {messages.loadingTable}
@@ -1407,7 +1500,7 @@ export function TarotStudio() {
   }
 
   return (
-    <main className="tarot-app">
+    <main className="tarot-app" data-scene-theme={sceneSettings.themeId}>
       <div className="tarot-grain" aria-hidden="true" />
       <div
         ref={canvasShellRef}
@@ -1427,6 +1520,7 @@ export function TarotStudio() {
           cardSet={activeCardSet}
           session={session}
           reducedMotion={reducedMotion}
+          sceneSettings={sceneSettings}
           viewZoom={viewZoom}
           viewPan={viewPan}
           deckMoveMode={isDeckMoveMode}
@@ -1475,6 +1569,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
               setIsLanguageMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
@@ -1536,66 +1631,6 @@ export function TarotStudio() {
             </div>
           )}
         </div>
-        <div className="tarot-zoom-menu" ref={zoomMenuRef}>
-          <button
-            ref={zoomMenuTriggerRef}
-            type="button"
-            className="tarot-toolbar-trigger tarot-zoom-trigger"
-            aria-label={messages.tableZoom(Math.round(viewZoom * 100))}
-            aria-controls="zoom-actions"
-            aria-expanded={isZoomMenuOpen}
-            aria-haspopup="dialog"
-            onClick={() => {
-              const willOpen = !isZoomMenuOpen;
-              setIsDeckMenuOpen(false);
-              setIsSpreadMenuOpen(false);
-              setIsArrangeMenuOpen(false);
-              setIsLanguageMenuOpen(false);
-              setIsInspectorCollapsed(true);
-              setIsZoomMenuOpen(willOpen);
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="10.5" cy="10.5" r="5.5" />
-              <path d="m14.5 14.5 5 5M8 10.5h5M10.5 8v5" />
-            </svg>
-            <span>{messages.zoom}</span>
-            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m8 10 4 4 4-4" />
-            </svg>
-          </button>
-          <div
-            id="zoom-actions"
-            className={`tarot-zoom-controls${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
-            role={isZoomMenuOpen ? "dialog" : undefined}
-            aria-label={messages.zoom}
-          >
-            <button
-              type="button"
-              aria-label={messages.zoomOut}
-              onClick={() => adjustViewZoom(-0.1)}
-              disabled={viewZoom <= MIN_VIEW_ZOOM}
-            >
-              −
-            </button>
-            <button
-              type="button"
-              aria-label={messages.resetZoom}
-              title={messages.resetZoom}
-              onClick={() => setViewZoom(1)}
-            >
-              {Math.round(viewZoom * 100)}%
-            </button>
-            <button
-              type="button"
-              aria-label={messages.zoomIn}
-              onClick={() => adjustViewZoom(0.1)}
-              disabled={viewZoom >= MAX_VIEW_ZOOM}
-            >
-              +
-            </button>
-          </div>
-        </div>
         {isDeckMoveMode && (
           <button
             type="button"
@@ -1631,6 +1666,7 @@ export function TarotStudio() {
                   setIsDeckMenuOpen(false);
                   setIsZoomMenuOpen(false);
                   setIsArrangeMenuOpen(false);
+                  setIsConfigMenuOpen(false);
                   setIsLanguageMenuOpen(false);
                   setIsSpreadMenuOpen(willOpen);
                 }}
@@ -1692,6 +1728,7 @@ export function TarotStudio() {
               setIsDeckMenuOpen(false);
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
+              setIsConfigMenuOpen(false);
               setIsLanguageMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
@@ -1755,6 +1792,7 @@ export function TarotStudio() {
                     setIsDeckMenuOpen(false);
                     setIsZoomMenuOpen(false);
                     setIsSpreadMenuOpen(false);
+                    setIsConfigMenuOpen(false);
                     setIsLanguageMenuOpen(false);
                     setIsDeckMoveMode(true);
                     setIsArrangeMenuOpen(false);
@@ -1833,6 +1871,7 @@ export function TarotStudio() {
             setIsZoomMenuOpen(false);
             setIsSpreadMenuOpen(false);
             setIsArrangeMenuOpen(false);
+            setIsConfigMenuOpen(false);
             setIsLanguageMenuOpen(false);
             resetTable();
           }}
@@ -1843,24 +1882,220 @@ export function TarotStudio() {
           </svg>
           <span>{messages.resetTable}</span>
         </button>
-        <button
-          type="button"
-          className="tarot-toolbar-trigger tarot-sound-toggle"
-          aria-label={messages.cardSounds}
-          aria-pressed={!areCardSoundsMuted}
-          title={areCardSoundsMuted ? messages.cardSoundsOff : messages.cardSoundsOn}
-          onClick={toggleCardSounds}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 10h3.2L13 6.2v11.6L8.2 14H5z" />
-            {areCardSoundsMuted ? (
-              <path d="m16.5 9.2 4.3 5.6m0-5.6-4.3 5.6" />
-            ) : (
-              <path d="M16.5 9.2a4 4 0 0 1 0 5.6M18.8 7a7 7 0 0 1 0 10" />
-            )}
-          </svg>
-          <span>{messages.cardSounds}</span>
-        </button>
+        <div className="tarot-zoom-menu" ref={zoomMenuRef}>
+          <button
+            ref={zoomMenuTriggerRef}
+            type="button"
+            className="tarot-toolbar-trigger tarot-zoom-trigger"
+            aria-label={messages.tableZoom(Math.round(viewZoom * 100))}
+            aria-controls="zoom-actions"
+            aria-expanded={isZoomMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              const willOpen = !isZoomMenuOpen;
+              setIsDeckMenuOpen(false);
+              setIsSpreadMenuOpen(false);
+              setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
+              setIsLanguageMenuOpen(false);
+              setIsInspectorCollapsed(true);
+              setIsZoomMenuOpen(willOpen);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="5.5" />
+              <path d="m14.5 14.5 5 5M8 10.5h5M10.5 8v5" />
+            </svg>
+            <span>{messages.zoom}</span>
+            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 10 4 4 4-4" />
+            </svg>
+          </button>
+          <div
+            id="zoom-actions"
+            className={`tarot-zoom-controls${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
+            role={isZoomMenuOpen ? "dialog" : undefined}
+            aria-label={messages.zoom}
+          >
+            <button
+              type="button"
+              aria-label={messages.zoomOut}
+              onClick={() => adjustViewZoom(-0.1)}
+              disabled={viewZoom <= MIN_VIEW_ZOOM}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              aria-label={messages.resetZoom}
+              title={messages.resetZoom}
+              onClick={() => setViewZoom(1)}
+            >
+              {Math.round(viewZoom * 100)}%
+            </button>
+            <button
+              type="button"
+              aria-label={messages.zoomIn}
+              onClick={() => adjustViewZoom(0.1)}
+              disabled={viewZoom >= MAX_VIEW_ZOOM}
+            >
+              +
+            </button>
+          </div>
+        </div>
+        <div className="tarot-config-menu" ref={configMenuRef}>
+          <button
+            ref={configMenuTriggerRef}
+            type="button"
+            className="tarot-toolbar-trigger tarot-config-trigger"
+            aria-label={messages.configureTable}
+            aria-controls="config-actions"
+            aria-expanded={isConfigMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              const willOpen = !isConfigMenuOpen;
+
+              setIsDeckMenuOpen(false);
+              setIsZoomMenuOpen(false);
+              setIsSpreadMenuOpen(false);
+              setIsArrangeMenuOpen(false);
+              setIsLanguageMenuOpen(false);
+              setIsInspectorCollapsed(true);
+              setIsConfigMenuOpen(willOpen);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" />
+            </svg>
+            <span>{messages.config}</span>
+            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 10 4 4 4-4" />
+            </svg>
+          </button>
+          {isConfigMenuOpen && (
+            <section
+              id="config-actions"
+              className="tarot-config-popover"
+              role="dialog"
+              aria-label={messages.configureTable}
+            >
+              <h2 className="tarot-config-heading">{messages.configureTable}</h2>
+              <div className="tarot-config-section">
+                <h3 className="tarot-config-section-title">
+                  {messages.background}
+                </h3>
+                <div
+                  className="tarot-config-choice-grid"
+                  role="radiogroup"
+                  aria-label={messages.backgroundOptions}
+                >
+                  {SCENE_THEME_IDS.map((themeId) => (
+                    <button
+                      key={themeId}
+                      type="button"
+                      className="tarot-config-choice"
+                      role="radio"
+                      aria-checked={sceneSettings.themeId === themeId}
+                      data-scene-theme={themeId}
+                      data-scene-theme-option={themeId}
+                      tabIndex={sceneSettings.themeId === themeId ? 0 : -1}
+                      onKeyDown={(event) =>
+                        handleSceneThemeRadioKeyDown(event, themeId)
+                      }
+                      onClick={() => updateSceneTheme(themeId)}
+                    >
+                      <span>{sceneThemeLabels[themeId]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="tarot-config-section">
+                <h3 className="tarot-config-section-title">
+                  {messages.lighting}
+                </h3>
+                <div className="tarot-config-range-row">
+                  <label htmlFor="scene-light-intensity">
+                    {messages.lightIntensity}
+                  </label>
+                  <output
+                    className="tarot-config-range-value"
+                    htmlFor="scene-light-intensity"
+                  >
+                    {messages.lightIntensityValue(sceneSettings.lightIntensity)}
+                  </output>
+                  <input
+                    id="scene-light-intensity"
+                    className="tarot-config-range"
+                    type="range"
+                    min={MIN_SCENE_LIGHT_INTENSITY}
+                    max={MAX_SCENE_LIGHT_INTENSITY}
+                    step="0.05"
+                    value={sceneSettings.lightIntensity}
+                    aria-valuetext={messages.lightIntensityValue(
+                      sceneSettings.lightIntensity
+                    )}
+                    onChange={(event) =>
+                      updateSceneRange(
+                        "lightIntensity",
+                        event.currentTarget.valueAsNumber
+                      )
+                    }
+                  />
+                </div>
+                <div className="tarot-config-range-row">
+                  <label htmlFor="scene-shadow-depth">
+                    {messages.shadowDepth}
+                  </label>
+                  <output
+                    className="tarot-config-range-value"
+                    htmlFor="scene-shadow-depth"
+                  >
+                    {messages.shadowDepthValue(sceneSettings.shadowDepth)}
+                  </output>
+                  <input
+                    id="scene-shadow-depth"
+                    className="tarot-config-range"
+                    type="range"
+                    min={MIN_SCENE_LIGHT_INTENSITY}
+                    max={MAX_SCENE_LIGHT_INTENSITY}
+                    step="0.05"
+                    value={sceneSettings.shadowDepth}
+                    aria-valuetext={messages.shadowDepthValue(
+                      sceneSettings.shadowDepth
+                    )}
+                    onChange={(event) =>
+                      updateSceneRange(
+                        "shadowDepth",
+                        event.currentTarget.valueAsNumber
+                      )
+                    }
+                  />
+                </div>
+              </div>
+              <div className="tarot-config-section">
+                <h3 className="tarot-config-section-title">
+                  {messages.cardSounds}
+                </h3>
+                <button
+                  type="button"
+                  className="tarot-config-sound"
+                  role="switch"
+                  aria-checked={!areCardSoundsMuted}
+                  onClick={toggleCardSounds}
+                >
+                  <span>
+                    <span>
+                      {areCardSoundsMuted
+                        ? messages.cardSoundsOff
+                        : messages.cardSoundsOn}
+                    </span>
+                    <small>{messages.cardSoundsDescription}</small>
+                  </span>
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
         <div className="tarot-language-menu" ref={languageMenuRef}>
           <button
             ref={languageMenuTriggerRef}
@@ -1877,6 +2112,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
               }
@@ -1944,6 +2180,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
               setIsLanguageMenuOpen(false);
               if (isInspectorOpen) {
                 collapseInspector();
