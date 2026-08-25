@@ -45,7 +45,13 @@ import {
   type SceneBounds,
   type SceneTableLayout,
 } from "./table-layout";
-import { TAROT_SCENE_PALETTE } from "./theme";
+import {
+  getSceneTheme,
+  MAX_SCENE_LIGHT_INTENSITY,
+  MIN_SCENE_LIGHT_INTENSITY,
+  type ScenePalette,
+  type SceneSettings,
+} from "./theme";
 
 const BASE_CAMERA_ZOOM = 75;
 const TABLE_SURFACE_Z = -0.16;
@@ -58,6 +64,7 @@ const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
 const MAX_DECK_VISUAL_LAYERS = 12;
+const MAX_DECK_STACK_HEIGHT = 0.21;
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
   [-0.29, 0.18, 0.011],
@@ -254,6 +261,7 @@ function createDriftingAstrologicalMarks(): DriftingAstrologicalMark[] {
 }
 
 function AstrologicalMark({
+  color,
   kind,
   position,
   rotation,
@@ -261,6 +269,7 @@ function AstrologicalMark({
   opacity,
   markRef,
 }: {
+  color: string;
   kind: AstrologicalMarkKind;
   position: [number, number, number];
   rotation: number;
@@ -386,7 +395,7 @@ function AstrologicalMark({
         <Line
           key={index}
           points={points}
-          color={TAROT_SCENE_PALETTE.celestialGold}
+          color={color}
           lineWidth={0.7}
           transparent
           opacity={opacity}
@@ -398,10 +407,12 @@ function AstrologicalMark({
 }
 
 function DriftingAstrologicalField({
+  color,
   width,
   height,
   reducedMotion,
 }: {
+  color: string;
   width: number;
   height: number;
   reducedMotion: boolean;
@@ -456,6 +467,7 @@ function DriftingAstrologicalField({
   return marks.map((mark, index) => (
     <AstrologicalMark
       key={`${mark.kind}:${index}`}
+      color={color}
       kind={mark.kind}
       position={[mark.x * width, mark.y * height, 0.001]}
       rotation={mark.rotation}
@@ -472,6 +484,7 @@ type TarotSceneProps = {
   cardSet: CardSetDefinition;
   session: TarotSession;
   reducedMotion: boolean;
+  sceneSettings: SceneSettings;
   viewZoom: number;
   /**
    * The camera centre in scene world units. This intentionally stays
@@ -568,20 +581,23 @@ function CameraPan({
   return null;
 }
 
-function getDeckMetrics(count: number) {
-  const layerCount =
-    count > 0
-      ? Math.min(
-          MAX_DECK_VISUAL_LAYERS,
-          Math.max(1, Math.ceil(count / 7))
-        )
+function getDeckMetrics(lowerCardCount: number, deckCapacity: number) {
+  const layerCount = Math.min(
+    MAX_DECK_VISUAL_LAYERS,
+    Math.max(0, lowerCardCount)
+  );
+  const drawableCardCount = Math.max(1, deckCapacity - 1);
+  const stackHeight =
+    layerCount > 0
+      ? (Math.min(lowerCardCount, drawableCardCount) / drawableCardCount) *
+        MAX_DECK_STACK_HEIGHT
       : 0;
-  const layerThickness = 0.018;
-  const layerStep = 0.019;
+  const layerThickness = layerCount ? stackHeight / layerCount : 0;
+  const layerStep = layerThickness;
   const firstCenter =
     DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + layerThickness / 2;
   const topSurface = layerCount
-    ? firstCenter + (layerCount - 1) * layerStep + layerThickness / 2
+    ? DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + stackHeight
     : DECK_MAT_SURFACE_Z;
 
   return {
@@ -589,6 +605,8 @@ function getDeckMetrics(count: number) {
     layerCount,
     layerStep,
     layerThickness,
+    stackHeight,
+    stackHeightRatio: stackHeight / MAX_DECK_STACK_HEIGHT,
     topSurface,
     topCardCenter:
       topSurface + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE,
@@ -598,18 +616,38 @@ function getDeckMetrics(count: number) {
 function getDeckLayerOffset(
   index: number,
   layerCount: number,
+  stackHeightRatio: number,
   layout: SceneTableLayout
 ): TablePoint {
-  const visualCount = layerCount + 1;
-  const [layerX, layerY] = getCardStackOffset(index, visualCount);
-  const [topX, topY] = getCardStackOffset(layerCount, visualCount);
+  if (layerCount <= 1 || stackHeightRatio <= 0) {
+    return [0, 0];
+  }
+
+  const depth = index / (layerCount - 1);
+  const [topX, topY] = getCardStackOffset(
+    MAX_DECK_VISUAL_LAYERS,
+    MAX_DECK_VISUAL_LAYERS + 1
+  );
   const origin = layout.toWorld([0, 0]);
-  const layer = layout.toWorld([layerX - topX, layerY - topY]);
+  const layer = layout.toWorld([
+    (depth - 1) * topX * stackHeightRatio,
+    (depth - 1) * topY * stackHeightRatio,
+  ]);
 
   return [layer[0] - origin[0], layer[1] - origin[1]];
 }
 
-function DeckMat({ width, height }: { width: number; height: number }) {
+function DeckMat({
+  palette,
+  width,
+  height,
+  position,
+}: {
+  palette: ScenePalette;
+  width: number;
+  height: number;
+  position: TablePoint;
+}) {
   const matWidth = width + DECK_MAT_WIDTH_PADDING;
   const matHeight = height + DECK_MAT_HEIGHT_PADDING;
   const shape = useMemo(
@@ -632,11 +670,11 @@ function DeckMat({ width, height }: { width: number; height: number }) {
   const surfaceZ = DECK_MAT_SURFACE_Z;
 
   return (
-    <group renderOrder={0}>
+    <group position={[position[0], position[1], 0]} renderOrder={0}>
       <mesh position={[0, 0, surfaceZ]} receiveShadow>
         <shapeGeometry args={[shape, 12]} />
         <meshStandardMaterial
-          color={TAROT_SCENE_PALETTE.deckMat}
+          color={palette.deckMat}
           roughness={1}
           metalness={0}
         />
@@ -644,7 +682,7 @@ function DeckMat({ width, height }: { width: number; height: number }) {
       <Line
         points={outline}
         position={[0, 0, surfaceZ + 0.001]}
-        color={TAROT_SCENE_PALETTE.deckMatEdge}
+        color={palette.deckMatEdge}
         lineWidth={0.7}
         transparent
         opacity={0.5}
@@ -653,7 +691,7 @@ function DeckMat({ width, height }: { width: number; height: number }) {
       <group position={[0, -matHeight * 0.43, surfaceZ + 0.0015]}>
         <Line
           points={createArcPoints(0.085, 0, Math.PI * 2)}
-          color={TAROT_SCENE_PALETTE.celestialGold}
+          color={palette.celestialGold}
           lineWidth={0.65}
           transparent
           opacity={0.42}
@@ -662,7 +700,7 @@ function DeckMat({ width, height }: { width: number; height: number }) {
         <mesh>
           <circleGeometry args={[0.018, 12]} />
           <meshBasicMaterial
-            color={TAROT_SCENE_PALETTE.celestialGold}
+            color={palette.celestialGold}
             transparent
             opacity={0.42}
             depthWrite={false}
@@ -675,6 +713,8 @@ function DeckMat({ width, height }: { width: number; height: number }) {
 
 function DeckStack({
   count,
+  deckCapacity,
+  palette,
   showMat,
   position,
   layout,
@@ -686,6 +726,8 @@ function DeckStack({
   previewPositionRef,
 }: {
   count: number;
+  deckCapacity: number;
+  palette: ScenePalette;
   showMat: boolean;
   position: TablePoint;
   layout: SceneTableLayout;
@@ -699,7 +741,7 @@ function DeckStack({
   const groupRef = useRef<Group>(null);
   const hasPositionedRef = useRef(false);
   const invalidate = useThree((state) => state.invalidate);
-  const metrics = getDeckMetrics(count);
+  const metrics = getDeckMetrics(count, deckCapacity);
 
   useLayoutEffect(() => {
     const group = groupRef.current;
@@ -718,7 +760,7 @@ function DeckStack({
     }
 
     invalidate();
-  }, [invalidate, metrics.layerCount, position]);
+  }, [invalidate, metrics.layerCount, metrics.stackHeight, position]);
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -759,23 +801,73 @@ function DeckStack({
   }
 
   const frameInset = Math.min(0.34, width * 0.105);
-  const [topOffsetX, topOffsetY] = metrics.layerCount
-    ? getDeckLayerOffset(
-        metrics.layerCount - 1,
-        metrics.layerCount,
-        layout
-      )
-    : [0, 0];
+  const layerOffsets = Array.from({ length: metrics.layerCount }, (_, index) =>
+    getDeckLayerOffset(
+      index,
+      metrics.layerCount,
+      metrics.stackHeightRatio,
+      layout
+    )
+  );
+  const footprintOffsets = [[0, 0] as TablePoint, ...layerOffsets];
+  const minimumOffsetX = Math.min(
+    ...footprintOffsets.map(([offsetX]) => offsetX)
+  );
+  const maximumOffsetX = Math.max(
+    ...footprintOffsets.map(([offsetX]) => offsetX)
+  );
+  const minimumOffsetY = Math.min(
+    ...footprintOffsets.map(([, offsetY]) => offsetY)
+  );
+  const maximumOffsetY = Math.max(
+    ...footprintOffsets.map(([, offsetY]) => offsetY)
+  );
+  const matPosition: TablePoint = [
+    (minimumOffsetX + maximumOffsetX) / 2,
+    (minimumOffsetY + maximumOffsetY) / 2,
+  ];
+  const matWidth = width + maximumOffsetX - minimumOffsetX;
+  const matHeight = height + maximumOffsetY - minimumOffsetY;
+  const [topOffsetX, topOffsetY] =
+    layerOffsets[metrics.layerCount - 1] ?? [0, 0];
+  const shadowCasterBottom =
+    DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE;
+  const shadowCasterTop =
+    metrics.topCardCenter + CARD_THICKNESS / 2;
+  const shadowCasterHeight = shadowCasterTop - shadowCasterBottom;
 
   return (
     <group ref={groupRef} renderOrder={DECK_STACK_RENDER_ORDER}>
-      {showMat && <DeckMat width={width} height={height} />}
+      {showMat && (
+        <DeckMat
+          palette={palette}
+          width={matWidth}
+          height={matHeight}
+          position={matPosition}
+        />
+      )}
+      {showMat && (
+        <RoundedBox
+          args={[matWidth, matHeight, shadowCasterHeight]}
+          radius={0.045}
+          smoothness={3}
+          position={[
+            matPosition[0],
+            matPosition[1],
+            shadowCasterBottom + shadowCasterHeight / 2,
+          ]}
+          castShadow
+          receiveShadow={false}
+        >
+          <meshBasicMaterial
+            colorWrite={false}
+            depthTest={false}
+            depthWrite={false}
+          />
+        </RoundedBox>
+      )}
       {Array.from({ length: metrics.layerCount }, (_, index) => {
-        const [offsetX, offsetY] = getDeckLayerOffset(
-          index,
-          metrics.layerCount,
-          layout
-        );
+        const [offsetX, offsetY] = layerOffsets[index];
 
         return (
           <RoundedBox
@@ -789,14 +881,14 @@ function DeckStack({
               metrics.firstCenter + index * metrics.layerStep,
             ]}
             renderOrder={index}
-            castShadow
-            receiveShadow
+            castShadow={false}
+            receiveShadow={false}
           >
             <CardPaperMaterial
               color={
                 index % 2
-                  ? TAROT_SCENE_PALETTE.cardPaper
-                  : TAROT_SCENE_PALETTE.cardPaperShadow
+                  ? palette.cardPaper
+                  : palette.cardPaperShadow
               }
               roughness={index % 2 ? 0.88 : 0.84}
               paperSeed={getPaperSeed(`${backUrl}:${index}`)}
@@ -826,12 +918,14 @@ function DeckStack({
 }
 
 function TableSurface({
+  palette,
   width,
   height,
   dragBounds,
   reducedMotion,
   onSelect,
 }: {
+  palette: ScenePalette;
   width: number;
   height: number;
   dragBounds: SceneBounds;
@@ -857,17 +951,17 @@ function TableSurface({
       >
         <planeGeometry args={[visibleWidth, visibleHeight]} />
         <meshStandardMaterial
-          color={TAROT_SCENE_PALETTE.table}
+          color={palette.table}
           roughness={0.94}
           metalness={0.012}
-          emissive={TAROT_SCENE_PALETTE.tableEmissive}
+          emissive={palette.tableEmissive}
           emissiveIntensity={0.24}
         />
       </mesh>
       <group position={[0, 0, TABLE_SURFACE_Z + 0.002]} renderOrder={1}>
         <Line
           points={dragOutline}
-          color={TAROT_SCENE_PALETTE.dragBoundary}
+          color={palette.dragBoundary}
           lineWidth={0.7}
           transparent
           opacity={0.2}
@@ -885,7 +979,7 @@ function TableSurface({
             ]}
           />
           <meshBasicMaterial
-            color={TAROT_SCENE_PALETTE.celestialGold}
+            color={palette.celestialGold}
             transparent
             opacity={0.11}
             depthWrite={false}
@@ -903,7 +997,7 @@ function TableSurface({
             ]}
           />
           <meshBasicMaterial
-            color={TAROT_SCENE_PALETTE.fillLight}
+            color={palette.fillLight}
             transparent
             opacity={0.085}
             depthWrite={false}
@@ -920,8 +1014,8 @@ function TableSurface({
             <meshBasicMaterial
               color={
                 index % 2
-                  ? TAROT_SCENE_PALETTE.fillLight
-                  : TAROT_SCENE_PALETTE.celestialGold
+                  ? palette.fillLight
+                  : palette.celestialGold
               }
               transparent
               opacity={index % 3 === 0 ? 0.2 : 0.13}
@@ -930,6 +1024,7 @@ function TableSurface({
           </mesh>
         ))}
         <DriftingAstrologicalField
+          color={palette.celestialGold}
           width={visibleWidth}
           height={visibleHeight}
           reducedMotion={reducedMotion}
@@ -943,6 +1038,7 @@ function TarotTable({
   cardSet,
   session,
   reducedMotion,
+  sceneSettings,
   viewZoom,
   viewPan,
   deckMoveMode,
@@ -961,6 +1057,21 @@ function TarotTable({
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
+  const palette = getSceneTheme(sceneSettings.themeId).palette;
+  const shadowFillMultiplier = MathUtils.mapLinear(
+    sceneSettings.shadowDepth,
+    MIN_SCENE_LIGHT_INTENSITY,
+    MAX_SCENE_LIGHT_INTENSITY,
+    1.18,
+    0.82
+  );
+  const shadowRadius = MathUtils.mapLinear(
+    sceneSettings.shadowDepth,
+    MIN_SCENE_LIGHT_INTENSITY,
+    MAX_SCENE_LIGHT_INTENSITY,
+    11,
+    5
+  );
   const layout = useMemo(
     () =>
       createSceneTableLayout({
@@ -1015,7 +1126,10 @@ function TarotTable({
     },
     [invalidate]
   );
-  const deckMetrics = getDeckMetrics(Math.max(0, deckCount - 1));
+  const deckMetrics = getDeckMetrics(
+    Math.max(0, deckCount - 1),
+    cardSet.cards.length
+  );
   const visibleCards = topDeckCard
     ? [topDeckCard, ...tableCards]
     : tableCards;
@@ -1059,30 +1173,37 @@ function TarotTable({
         viewportBounds={layout.viewportBounds}
         targetZoom={viewZoom}
       />
-      <ambientLight intensity={0.44} />
+      <ambientLight
+        intensity={
+          0.44 * sceneSettings.lightIntensity * shadowFillMultiplier
+        }
+      />
       <pointLight
         castShadow
         position={[0, 0, 7.5]}
-        intensity={86}
+        intensity={86 * sceneSettings.lightIntensity}
         distance={24}
         decay={2}
-        color={TAROT_SCENE_PALETTE.keyLight}
+        color={palette.keyLight}
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
         shadow-bias={-0.00035}
-        shadow-radius={8}
+        shadow-radius={shadowRadius}
         shadow-normalBias={0.001}
         shadow-camera-near={0.2}
         shadow-camera-far={18}
       />
       <pointLight
         position={[0, 0, 4.5]}
-        intensity={8}
+        intensity={
+          8 * sceneSettings.lightIntensity * shadowFillMultiplier
+        }
         distance={16}
         decay={2}
-        color={TAROT_SCENE_PALETTE.fillLight}
+        color={palette.fillLight}
       />
       <TableSurface
+        palette={palette}
         width={baseViewportWidth}
         height={baseViewportHeight}
         dragBounds={layout.dragBounds}
@@ -1091,6 +1212,8 @@ function TarotTable({
       />
       <DeckStack
         count={Math.max(0, deckCount - 1)}
+        deckCapacity={cardSet.cards.length}
+        palette={palette}
         showMat={deckCount > 0}
         position={deckPosition}
         layout={layout}

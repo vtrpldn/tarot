@@ -5,6 +5,10 @@ import type {
   TarotSession,
 } from "@/types";
 import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
+import {
+  resolveSceneSettings,
+  type SceneSettings,
+} from "@/components/tarot-studio/theme";
 
 export const TAROT_WORKSPACE_STORAGE_KEY = "tarot-table:workspace:v1";
 
@@ -13,11 +17,14 @@ const WORKSPACE_VERSION = 1;
 export type TarotWorkspace = {
   activeCardSetId: string;
   isInspectorCollapsed: boolean;
+  sceneSettings: SceneSettings;
   session: TarotSession;
   viewZoom: number;
 };
 
-type StoredWorkspace = TarotWorkspace & {
+type StoredWorkspace = Omit<TarotWorkspace, "sceneSettings"> & {
+  /** Absent in version-one workspaces; it then resolves to the default scene. */
+  sceneSettings?: SceneSettings;
   version: typeof WORKSPACE_VERSION;
 };
 
@@ -148,6 +155,7 @@ export function loadTarotWorkspace(
       ? {
           activeCardSetId: cardSet.id,
           isInspectorCollapsed: stored.isInspectorCollapsed,
+          sceneSettings: resolveSceneSettings(stored.sceneSettings),
           session,
           viewZoom: stored.viewZoom,
         }
@@ -163,6 +171,7 @@ export function saveTarotWorkspace(workspace: TarotWorkspace): void {
       version: WORKSPACE_VERSION,
       activeCardSetId: workspace.activeCardSetId,
       isInspectorCollapsed: workspace.isInspectorCollapsed,
+      sceneSettings: resolveSceneSettings(workspace.sceneSettings),
       session: {
         ...workspace.session,
         history: [],

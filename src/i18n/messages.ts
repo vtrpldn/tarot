@@ -47,6 +47,21 @@ type Messages = {
   cardSounds: string;
   cardSoundsOn: string;
   cardSoundsOff: string;
+  cardSoundsDescription: string;
+  config: string;
+  configureTable: string;
+  configOptions: string;
+  appearance: string;
+  background: string;
+  backgroundOptions: string;
+  backgroundConstellation: string;
+  backgroundSolarTemple: string;
+  backgroundMoonlitGrove: string;
+  lighting: string;
+  lightIntensity: string;
+  lightIntensityValue: (value: number) => string;
+  shadowDepth: string;
+  shadowDepthValue: (value: number) => string;
   language: string;
   chooseLanguage: string;
   languageOptions: string;
@@ -141,6 +156,21 @@ const messages: Record<AppLocale, Messages> = {
     cardSounds: "Card sounds",
     cardSoundsOn: "Card sounds on",
     cardSoundsOff: "Card sounds off",
+    cardSoundsDescription: "Atmospheric sounds while you handle cards",
+    config: "Config",
+    configureTable: "Configure table",
+    configOptions: "Configuration options",
+    appearance: "Appearance",
+    background: "Background",
+    backgroundOptions: "Background options",
+    backgroundConstellation: "Constellation",
+    backgroundSolarTemple: "Solar temple",
+    backgroundMoonlitGrove: "Moonlit grove",
+    lighting: "Lighting",
+    lightIntensity: "Light intensity",
+    lightIntensityValue: (value) => `${Math.round(value * 100)}%`,
+    shadowDepth: "Shadow depth",
+    shadowDepthValue: (value) => `${Math.round(value * 100)}%`,
     language: "Language",
     chooseLanguage: "Choose language",
     languageOptions: "Language options",
@@ -248,6 +278,21 @@ const messages: Record<AppLocale, Messages> = {
     cardSounds: "Sons das cartas",
     cardSoundsOn: "Sons das cartas ativados",
     cardSoundsOff: "Sons das cartas desativados",
+    cardSoundsDescription: "Sons atmosféricos ao interagir com as cartas",
+    config: "Configurações",
+    configureTable: "Configurar mesa",
+    configOptions: "Opções de configuração",
+    appearance: "Aparência",
+    background: "Fundo",
+    backgroundOptions: "Opções de fundo",
+    backgroundConstellation: "Constelação",
+    backgroundSolarTemple: "Templo solar",
+    backgroundMoonlitGrove: "Bosque ao luar",
+    lighting: "Iluminação",
+    lightIntensity: "Intensidade da luz",
+    lightIntensityValue: (value) => `${Math.round(value * 100)}%`,
+    shadowDepth: "Profundidade das sombras",
+    shadowDepthValue: (value) => `${Math.round(value * 100)}%`,
     language: "Idioma",
     chooseLanguage: "Escolher idioma",
     languageOptions: "Opções de idioma",
