@@ -60,6 +60,16 @@ type Messages = {
   lighting: string;
   lightIntensity: string;
   lightIntensityValue: (value: number) => string;
+  lightCount: string;
+  lightCountOne: string;
+  lightCountTwo: string;
+  lightCountThree: string;
+  lightArrangement: string;
+  lightArrangementCentered: string;
+  lightArrangementCross: string;
+  lightArrangementTriangle: string;
+  spotlightSize: string;
+  spotlightSizeValue: (value: number) => string;
   shadowDepth: string;
   shadowDepthValue: (value: number) => string;
   language: string;
@@ -169,6 +179,16 @@ const messages: Record<AppLocale, Messages> = {
     lighting: "Lighting",
     lightIntensity: "Light intensity",
     lightIntensityValue: (value) => `${Math.round(value * 100)}%`,
+    lightCount: "Lights",
+    lightCountOne: "One",
+    lightCountTwo: "Two",
+    lightCountThree: "Three",
+    lightArrangement: "Arrangement",
+    lightArrangementCentered: "Centered",
+    lightArrangementCross: "Cross",
+    lightArrangementTriangle: "Triangle",
+    spotlightSize: "Spotlight size",
+    spotlightSizeValue: (value) => `${Math.round(value * 100)}%`,
     shadowDepth: "Shadow depth",
     shadowDepthValue: (value) => `${Math.round(value * 100)}%`,
     language: "Language",
@@ -291,6 +311,16 @@ const messages: Record<AppLocale, Messages> = {
     lighting: "Iluminação",
     lightIntensity: "Intensidade da luz",
     lightIntensityValue: (value) => `${Math.round(value * 100)}%`,
+    lightCount: "Luzes",
+    lightCountOne: "Uma",
+    lightCountTwo: "Duas",
+    lightCountThree: "Três",
+    lightArrangement: "Disposição",
+    lightArrangementCentered: "Central",
+    lightArrangementCross: "Cruz",
+    lightArrangementTriangle: "Triângulo",
+    spotlightSize: "Tamanho do holofote",
+    spotlightSizeValue: (value) => `${Math.round(value * 100)}%`,
     shadowDepth: "Profundidade das sombras",
     shadowDepthValue: (value) => `${Math.round(value * 100)}%`,
     language: "Idioma",

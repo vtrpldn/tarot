@@ -1060,6 +1060,41 @@ button {
   cursor: ew-resize;
 }
 
+.tarot-config-option-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.28rem;
+}
+
+.tarot-config-option {
+  min-height: 2.15rem;
+  padding: 0.38rem 0.3rem;
+  border: 1px solid rgba(247, 239, 217, 0.15);
+  border-radius: 0.44rem;
+  background: rgba(48, 28, 59, 0.5);
+  color: var(--faint-ink);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.035em;
+  line-height: 1.1;
+  text-align: center;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease,
+    color 160ms ease, transform 160ms ease;
+}
+
+.tarot-config-option:hover,
+.tarot-config-option[aria-checked="true"] {
+  border-color: rgba(234, 212, 155, 0.5);
+  background: rgba(101, 68, 112, 0.7);
+  color: #fff9e8;
+}
+
+.tarot-config-option:hover {
+  transform: translateY(-1px);
+}
+
 .tarot-language-popover {
   position: absolute;
   right: 0;
