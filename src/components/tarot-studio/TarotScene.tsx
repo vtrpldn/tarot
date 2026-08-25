@@ -4,6 +4,7 @@ import { Line, RoundedBox, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
+  type RefCallback,
   memo,
   Suspense,
   useCallback,
@@ -71,12 +72,12 @@ const CELESTIAL_MARKS = [
   [0.16, -0.36, 0.015],
   [0.34, -0.19, 0.01],
 ] as const;
-const ASTROLOGICAL_MARKS = [
-  { kind: "moon", x: -0.39, y: 0.31, scale: 0.28, rotation: -0.3 },
-  { kind: "venus", x: 0.38, y: 0.29, scale: 0.24, rotation: 0.12 },
-  { kind: "sun", x: -0.4, y: -0.31, scale: 0.24, rotation: 0 },
-  { kind: "mars", x: 0.39, y: -0.28, scale: 0.22, rotation: -0.15 },
-  { kind: "mercury", x: 0.05, y: 0.38, scale: 0.2, rotation: 0.08 },
+const ASTROLOGICAL_KINDS = [
+  "moon",
+  "venus",
+  "sun",
+  "mars",
+  "mercury",
 ] as const;
 
 function createRoundedRectangleShape(
@@ -172,18 +173,54 @@ function createArcPoints(
   });
 }
 
-type AstrologicalMarkKind = (typeof ASTROLOGICAL_MARKS)[number]["kind"];
+type AstrologicalMarkKind = (typeof ASTROLOGICAL_KINDS)[number];
+
+type DriftingAstrologicalMark = {
+  kind: AstrologicalMarkKind;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  phase: number;
+  speed: number;
+  driftX: number;
+  driftY: number;
+};
+
+function createDriftingAstrologicalMarks(): DriftingAstrologicalMark[] {
+  return ASTROLOGICAL_KINDS.map((kind, index) => {
+    const angle =
+      (index / ASTROLOGICAL_KINDS.length) * Math.PI * 2 +
+      (Math.random() - 0.5) * 0.68;
+    const radiusX = 0.32 + Math.random() * 0.1;
+    const radiusY = 0.27 + Math.random() * 0.1;
+
+    return {
+      kind,
+      x: Math.cos(angle) * radiusX,
+      y: Math.sin(angle) * radiusY,
+      scale: 0.18 + Math.random() * 0.09,
+      rotation: (Math.random() - 0.5) * 0.5,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.045 + Math.random() * 0.035,
+      driftX: 0.025 + Math.random() * 0.035,
+      driftY: 0.02 + Math.random() * 0.03,
+    };
+  });
+}
 
 function AstrologicalMark({
   kind,
   position,
   rotation,
   scale,
+  markRef,
 }: {
   kind: AstrologicalMarkKind;
   position: [number, number, number];
   rotation: number;
   scale: number;
+  markRef?: RefCallback<Group>;
 }) {
   const paths = useMemo(() => {
     const circle = createArcPoints(0.7, 0, Math.PI * 2);
@@ -226,7 +263,12 @@ function AstrologicalMark({
   }, [kind]);
 
   return (
-    <group position={position} rotation={[0, 0, rotation]} scale={scale}>
+    <group
+      ref={markRef}
+      position={position}
+      rotation={[0, 0, rotation]}
+      scale={scale}
+    >
       {paths.map((points, index) => (
         <Line
           key={index}
@@ -240,6 +282,76 @@ function AstrologicalMark({
       ))}
     </group>
   );
+}
+
+function DriftingAstrologicalField({
+  width,
+  height,
+  reducedMotion,
+}: {
+  width: number;
+  height: number;
+  reducedMotion: boolean;
+}) {
+  const invalidate = useThree((state) => state.invalidate);
+  const marks = useMemo(createDriftingAstrologicalMarks, []);
+  const markRefs = useRef<Array<Group | null>>([]);
+
+  useEffect(() => {
+    invalidate();
+
+    if (reducedMotion) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        invalidate();
+      }
+    }, 66);
+
+    return () => window.clearInterval(interval);
+  }, [invalidate, reducedMotion]);
+
+  useFrame(({ clock }) => {
+    if (reducedMotion) {
+      return;
+    }
+
+    const elapsed = clock.getElapsedTime();
+
+    marks.forEach((mark, index) => {
+      const group = markRefs.current[index];
+
+      if (!group) {
+        return;
+      }
+
+      group.position.x =
+        (mark.x + Math.sin(elapsed * mark.speed + mark.phase) * mark.driftX) *
+        width;
+      group.position.y =
+        (mark.y +
+          Math.cos(elapsed * mark.speed * 0.82 + mark.phase) * mark.driftY) *
+        height;
+      group.rotation.z =
+        mark.rotation +
+        Math.sin(elapsed * mark.speed * 0.65 + mark.phase) * 0.16;
+    });
+  });
+
+  return marks.map((mark, index) => (
+    <AstrologicalMark
+      key={`${mark.kind}:${index}`}
+      kind={mark.kind}
+      position={[mark.x * width, mark.y * height, 0.001]}
+      rotation={mark.rotation}
+      scale={mark.scale}
+      markRef={(group) => {
+        markRefs.current[index] = group;
+      }}
+    />
+  ));
 }
 
 type TarotSceneProps = {
@@ -557,11 +669,13 @@ function TableSurface({
   width,
   height,
   dragBounds,
+  reducedMotion,
   onSelect,
 }: {
   width: number;
   height: number;
   dragBounds: SceneBounds;
+  reducedMotion: boolean;
   onSelect: (cardId: string | null) => void;
 }) {
   const visibleWidth = (width / MIN_VIEW_ZOOM) * 1.04;
@@ -653,15 +767,11 @@ function TableSurface({
             />
           </mesh>
         ))}
-        {ASTROLOGICAL_MARKS.map((mark) => (
-          <AstrologicalMark
-            key={mark.kind}
-            kind={mark.kind}
-            position={[mark.x * width, mark.y * height, 0.001]}
-            rotation={mark.rotation}
-            scale={mark.scale}
-          />
-        ))}
+        <DriftingAstrologicalField
+          width={width}
+          height={height}
+          reducedMotion={reducedMotion}
+        />
       </group>
     </>
   );
@@ -793,6 +903,7 @@ function TarotTable({
         width={baseViewportWidth}
         height={baseViewportHeight}
         dragBounds={layout.dragBounds}
+        reducedMotion={reducedMotion}
         onSelect={onSelect}
       />
       <DeckStack
