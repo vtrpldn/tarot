@@ -1,7 +1,8 @@
 /**
- * Lightweight, asset-free sound effects for the tarot table. Create an engine
- * inside a client component and call `play` directly from user interactions so
- * the AudioContext is only allocated after a browser gesture.
+ * Lightweight, asset-free sound effects for the tarot table. The palette uses
+ * low, softly enveloped sine tones and a short dark room tail instead of noise
+ * textures so card interactions feel atmospheric without becoming sharp or
+ * fatiguing.
  */
 
 export const CARD_SOUND_EVENTS = [
@@ -51,36 +52,48 @@ export type CardSoundEngine = {
   dispose: () => void;
 };
 
-type PaperStroke = {
-  attack?: number;
+type MysticTone = {
+  attack: number;
   delay?: number;
   duration: number;
-  endHighpass?: number;
-  endLowpass?: number;
-  grainPulse?: boolean;
-  highpass: number;
-  lowpass: number;
+  frequency: number;
+  lowpass?: number;
+  reverb?: number;
+  release: number;
   volume: number;
 };
 
-type ActivePaperStroke = {
+type ActiveTone = {
   cleanup: () => void;
-  source: AudioBufferSourceNode;
+  event: CardSoundEvent;
+  oscillator: OscillatorNode;
+};
+
+type MysticAudioGraph = {
+  convolver: ConvolverNode;
+  context: AudioContext;
+  output: GainNode;
+  preDelay: DelayNode;
+  reverbFilter: BiquadFilterNode;
+  reverbReturn: GainNode;
 };
 
 const DEFAULT_STORAGE_KEY = "tarot.card-sounds-muted";
-const DEFAULT_VOLUME = 0.32;
-const PAPER_NOISE_SECONDS = 0.72;
-const MAX_ACTIVE_MOVE_STROKES = 8;
+const DEFAULT_VOLUME = 0.18;
+const REVERB_DURATION_SECONDS = 0.74;
+const REVERB_PRE_DELAY_SECONDS = 0.028;
+const REVERB_RETURN = 0.11;
+const MAX_ACTIVE_TONES = 6;
+const MAX_ACTIVE_MOVE_TONES = 1;
 const THROTTLE_MS: Record<CardSoundEvent, number> = {
-  pickup: 75,
-  move: 120,
-  drop: 45,
-  flip: 100,
-  rotate: 65,
-  shuffle: 140,
-  arrange: 160,
-  draw: 110,
+  pickup: 110,
+  move: 240,
+  drop: 150,
+  flip: 280,
+  rotate: 180,
+  shuffle: 420,
+  arrange: 360,
+  draw: 420,
 };
 
 type LegacyAudioWindow = Window & {
@@ -120,302 +133,254 @@ function persistMuted(storageKey: string, muted: boolean) {
   }
 }
 
-const PAPER_STROKES: Record<CardSoundEvent, readonly PaperStroke[]> = {
+function createDarkReverbImpulse(context: AudioContext) {
+  const length = Math.max(
+    1,
+    Math.floor(context.sampleRate * REVERB_DURATION_SECONDS)
+  );
+  const impulse = context.createBuffer(2, length, context.sampleRate);
+
+  for (
+    let channelIndex = 0;
+    channelIndex < impulse.numberOfChannels;
+    channelIndex += 1
+  ) {
+    const channel = impulse.getChannelData(channelIndex);
+    let seed = 0x5f3759df ^ ((channelIndex + 1) * 0x45d9f3b);
+    let smoothed = 0;
+
+    for (let sampleIndex = 0; sampleIndex < length; sampleIndex += 1) {
+      seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+      const noise = (seed / 0xffffffff) * 2 - 1;
+      smoothed += (noise - smoothed) * 0.18;
+
+      const progress = sampleIndex / Math.max(1, length - 1);
+      const fadeIn = Math.min(1, progress / 0.025);
+      channel[sampleIndex] =
+        smoothed * fadeIn * Math.pow(1 - progress, 2.7) * 0.24;
+    }
+  }
+
+  return impulse;
+}
+
+// A low D-minor-nine palette keeps repeated gestures cohesive. Every voice is
+// a fixed sine wave: the depth comes from the harmony and room tail, never a
+// buzzy waveform, randomized pitch, or synthetic frequency sweep.
+const MYSTIC_TONES: Record<CardSoundEvent, readonly MysticTone[]> = {
   pickup: [
     {
-      duration: 0.052,
-      endHighpass: 1_500,
-      endLowpass: 6_500,
-      highpass: 1_050,
-      lowpass: 5_400,
-      volume: 0.055,
-    },
-    {
-      delay: 0.026,
-      duration: 0.018,
-      endHighpass: 1_700,
-      endLowpass: 5_600,
-      highpass: 2_200,
-      lowpass: 7_200,
-      volume: 0.025,
+      attack: 0.055,
+      duration: 0.28,
+      frequency: 146.83,
+      release: 0.19,
+      reverb: 0.08,
+      volume: 0.032,
     },
   ],
   move: [
     {
-      attack: 0.018,
-      duration: 0.16,
-      endHighpass: 320,
-      endLowpass: 2_200,
-      grainPulse: false,
-      highpass: 240,
-      lowpass: 2_600,
-      volume: 0.022,
+      attack: 0.06,
+      duration: 0.24,
+      frequency: 110,
+      release: 0.16,
+      volume: 0.012,
     },
   ],
   drop: [
     {
-      attack: 0.002,
-      duration: 0.028,
-      endHighpass: 350,
-      endLowpass: 1_800,
-      highpass: 550,
-      lowpass: 2_600,
-      volume: 0.05,
+      attack: 0.045,
+      duration: 0.42,
+      frequency: 110,
+      release: 0.3,
+      reverb: 0.2,
+      volume: 0.045,
     },
     {
-      attack: 0.002,
-      delay: 0.018,
-      duration: 0.06,
-      endHighpass: 45,
-      endLowpass: 700,
-      highpass: 80,
-      lowpass: 1_200,
-      volume: 0.075,
-    },
-    {
-      delay: 0.034,
-      duration: 0.045,
-      endHighpass: 600,
-      endLowpass: 2_400,
-      highpass: 900,
-      lowpass: 3_500,
-      volume: 0.035,
+      attack: 0.072,
+      delay: 0.05,
+      duration: 0.4,
+      frequency: 146.83,
+      release: 0.27,
+      reverb: 0.14,
+      volume: 0.018,
     },
   ],
   flip: [
     {
-      duration: 0.105,
-      endHighpass: 1_650,
-      endLowpass: 3_600,
-      highpass: 800,
-      lowpass: 6_500,
-      volume: 0.055,
+      attack: 0.068,
+      duration: 0.56,
+      frequency: 146.83,
+      release: 0.34,
+      reverb: 0.34,
+      volume: 0.034,
     },
     {
-      delay: 0.058,
-      duration: 0.055,
-      endHighpass: 850,
-      endLowpass: 4_200,
-      highpass: 1_800,
-      lowpass: 7_000,
-      volume: 0.035,
+      attack: 0.082,
+      delay: 0.085,
+      duration: 0.58,
+      frequency: 110,
+      release: 0.32,
+      reverb: 0.3,
+      volume: 0.022,
     },
   ],
   rotate: [
     {
-      duration: 0.06,
-      endHighpass: 900,
-      endLowpass: 4_200,
-      highpass: 1_400,
-      lowpass: 5_900,
-      volume: 0.034,
+      attack: 0.06,
+      duration: 0.26,
+      frequency: 146.83,
+      release: 0.17,
+      reverb: 0.1,
+      volume: 0.016,
     },
   ],
   shuffle: [
     {
-      duration: 0.048,
-      endHighpass: 1_300,
-      endLowpass: 4_000,
-      highpass: 650,
-      lowpass: 6_200,
-      volume: 0.038,
+      attack: 0.075,
+      duration: 0.48,
+      frequency: 110,
+      release: 0.3,
+      reverb: 0.18,
+      volume: 0.019,
     },
     {
-      delay: 0.04,
-      duration: 0.05,
-      endHighpass: 700,
-      endLowpass: 5_800,
-      highpass: 1_350,
-      lowpass: 4_100,
-      volume: 0.036,
+      attack: 0.082,
+      delay: 0.07,
+      duration: 0.5,
+      frequency: 87.31,
+      release: 0.31,
+      reverb: 0.16,
+      volume: 0.016,
     },
     {
-      delay: 0.082,
-      duration: 0.052,
-      endHighpass: 1_450,
-      endLowpass: 3_900,
-      highpass: 720,
-      lowpass: 6_400,
-      volume: 0.04,
-    },
-    {
-      delay: 0.126,
-      duration: 0.045,
-      endHighpass: 680,
-      endLowpass: 4_800,
-      highpass: 1_250,
-      lowpass: 3_700,
-      volume: 0.034,
+      attack: 0.07,
+      delay: 0.145,
+      duration: 0.42,
+      frequency: 146.83,
+      release: 0.25,
+      reverb: 0.12,
+      volume: 0.012,
     },
   ],
   arrange: [
     {
-      duration: 0.068,
-      endHighpass: 950,
-      endLowpass: 5_600,
-      highpass: 620,
-      lowpass: 4_300,
-      volume: 0.038,
+      attack: 0.08,
+      duration: 0.54,
+      frequency: 146.83,
+      release: 0.32,
+      reverb: 0.26,
+      volume: 0.026,
     },
     {
-      delay: 0.055,
-      duration: 0.072,
-      endHighpass: 650,
-      endLowpass: 4_100,
-      highpass: 1_000,
-      lowpass: 5_700,
-      volume: 0.036,
+      attack: 0.09,
+      delay: 0.12,
+      duration: 0.52,
+      frequency: 174.61,
+      release: 0.3,
+      reverb: 0.2,
+      volume: 0.016,
     },
   ],
   draw: [
     {
-      duration: 0.135,
-      endHighpass: 1_450,
-      endLowpass: 6_500,
-      highpass: 650,
-      lowpass: 4_200,
-      volume: 0.06,
-    },
-    {
-      delay: 0.006,
-      duration: 0.022,
-      endHighpass: 1_500,
-      endLowpass: 5_700,
-      highpass: 2_000,
-      lowpass: 7_200,
+      attack: 0.09,
+      duration: 0.74,
+      frequency: 110,
+      release: 0.4,
+      reverb: 0.4,
       volume: 0.03,
     },
     {
-      delay: 0.102,
-      duration: 0.04,
-      endHighpass: 950,
-      endLowpass: 4_200,
-      highpass: 1_600,
-      lowpass: 6_000,
-      volume: 0.025,
+      attack: 0.09,
+      delay: 0.14,
+      duration: 0.66,
+      frequency: 146.83,
+      release: 0.35,
+      reverb: 0.32,
+      volume: 0.02,
+    },
+    {
+      attack: 0.08,
+      delay: 0.27,
+      duration: 0.52,
+      frequency: 174.61,
+      release: 0.29,
+      reverb: 0.26,
+      volume: 0.012,
     },
   ],
 };
 
-function jitter(value: number, amount = 0.12) {
-  return value * (1 + (Math.random() * 2 - 1) * amount);
-}
-
-function createPaperNoise(context: AudioContext) {
-  const length = Math.ceil(context.sampleRate * PAPER_NOISE_SECONDS);
-  const buffer = context.createBuffer(1, length, context.sampleRate);
-  const channel = buffer.getChannelData(0);
-  let smoothedNoise = 0;
-  let clusterSamples = 0;
-  let clusterLevel = 1;
-
-  for (let index = 0; index < length; index += 1) {
-    if (clusterSamples <= 0) {
-      clusterSamples = Math.round(
-        context.sampleRate * (0.001 + Math.random() * 0.007)
-      );
-      clusterLevel = 0.42 + Math.random() * 0.58;
-    }
-
-    const whiteNoise = Math.random() * 2 - 1;
-    smoothedNoise = smoothedNoise * 0.82 + whiteNoise * 0.18;
-    const fiberClick = Math.random() < 0.0025 ? whiteNoise * 0.75 : 0;
-    channel[index] = clamp(
-      (whiteNoise * 0.58 + smoothedNoise * 0.42) * clusterLevel + fiberClick,
-      -1,
-      1
-    );
-    clusterSamples -= 1;
-  }
-
-  return buffer;
-}
-
-function playPaperStroke({
-  activeStrokes,
-  context,
-  noise,
-  output,
-  stroke,
+function playMysticTone({
+  activeTones,
+  event,
+  graph,
   intensity,
+  tone,
 }: {
-  activeStrokes: Set<ActivePaperStroke>;
-  context: AudioContext;
-  noise: AudioBuffer;
-  output: AudioNode;
-  stroke: PaperStroke;
+  activeTones: Set<ActiveTone>;
+  event: CardSoundEvent;
+  graph: MysticAudioGraph;
   intensity: number;
+  tone: MysticTone;
 }) {
-  const delay = Math.max(0, jitter(stroke.delay ?? 0, 0.08));
-  const duration = Math.max(0.012, jitter(stroke.duration));
-  const startAt = context.currentTime + delay;
-  const stopAt = startAt + duration;
-  const attackAt = Math.min(
-    stopAt - 0.004,
-    startAt + Math.max(0.001, stroke.attack ?? duration * 0.08)
+  const { context } = graph;
+  const startAt = context.currentTime + Math.max(0, tone.delay ?? 0);
+  const stopAt = startAt + tone.duration;
+  const attackAt = Math.min(stopAt - 0.008, startAt + tone.attack);
+  const releaseAt = Math.max(
+    attackAt + 0.004,
+    stopAt - Math.min(tone.release, tone.duration - 0.012)
   );
-  const source = context.createBufferSource();
-  const highpass = context.createBiquadFilter();
+  const oscillator = context.createOscillator();
   const lowpass = context.createBiquadFilter();
   const gain = context.createGain();
-  const peak = Math.max(0.0001, jitter(stroke.volume) * intensity);
+  const reverbSend = tone.reverb ? context.createGain() : null;
+  const peak = Math.max(0.0001, tone.volume * intensity);
   let cleanedUp = false;
 
-  source.buffer = noise;
-  source.loop = true;
-  source.playbackRate.value = jitter(1, 0.14);
-  highpass.type = "highpass";
-  highpass.Q.value = 0.55;
-  highpass.frequency.setValueAtTime(jitter(stroke.highpass), startAt);
-  highpass.frequency.exponentialRampToValueAtTime(
-    Math.max(20, jitter(stroke.endHighpass ?? stroke.highpass)),
-    stopAt
-  );
+  oscillator.type = "sine";
+  oscillator.frequency.setValueAtTime(tone.frequency, startAt);
   lowpass.type = "lowpass";
-  lowpass.Q.value = 0.7;
-  lowpass.frequency.setValueAtTime(jitter(stroke.lowpass), startAt);
-  lowpass.frequency.exponentialRampToValueAtTime(
-    Math.max(40, jitter(stroke.endLowpass ?? stroke.lowpass)),
-    stopAt
-  );
+  lowpass.Q.value = 0.2;
+  lowpass.frequency.setValueAtTime(tone.lowpass ?? 1_050, startAt);
   gain.gain.setValueAtTime(0.0001, startAt);
   gain.gain.linearRampToValueAtTime(peak, attackAt);
+  gain.gain.setValueAtTime(peak, releaseAt);
+  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
 
-  if (stroke.grainPulse !== false && duration >= 0.055) {
-    const notchAt = startAt + duration * 0.52;
-    gain.gain.linearRampToValueAtTime(peak * 0.48, notchAt);
-    gain.gain.linearRampToValueAtTime(
-      peak * 0.82,
-      Math.min(stopAt - 0.006, notchAt + duration * 0.13)
-    );
+  oscillator.connect(lowpass);
+  lowpass.connect(gain);
+  gain.connect(graph.output);
+
+  if (reverbSend) {
+    reverbSend.gain.value = clamp(tone.reverb ?? 0, 0, 0.5);
+    gain.connect(reverbSend);
+    reverbSend.connect(graph.preDelay);
   }
 
-  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
-  source.connect(highpass);
-  highpass.connect(lowpass);
-  lowpass.connect(gain);
-  gain.connect(output);
-
-  const activeStroke: ActivePaperStroke = {
-    source,
+  const activeTone: ActiveTone = {
+    event,
+    oscillator,
     cleanup: () => {
       if (cleanedUp) {
         return;
       }
 
       cleanedUp = true;
-      activeStrokes.delete(activeStroke);
-      source.disconnect();
-      highpass.disconnect();
+      activeTones.delete(activeTone);
+      oscillator.disconnect();
       lowpass.disconnect();
       gain.disconnect();
+      reverbSend?.disconnect();
     },
   };
 
-  activeStrokes.add(activeStroke);
-  source.onended = activeStroke.cleanup;
-  source.start(startAt, Math.random() * noise.duration);
-  source.stop(stopAt + 0.012);
+  activeTones.add(activeTone);
+  oscillator.onended = activeTone.cleanup;
+  oscillator.start(startAt);
+  oscillator.stop(stopAt + 0.02);
 }
 
 /**
@@ -429,11 +394,25 @@ export function createCardSoundEngine(
   const volume = clamp(options.volume ?? DEFAULT_VOLUME, 0, 1);
   let muted = readMuted(storageKey, options.muted ?? false);
   let context: AudioContext | null = null;
-  let paperNoise: AudioBuffer | null = null;
-  let output: GainNode | null = null;
+  let graph: MysticAudioGraph | null = null;
   let disposed = false;
-  const activeStrokes = new Set<ActivePaperStroke>();
+  const activeTones = new Set<ActiveTone>();
   const lastPlayedAt = new Map<CardSoundEvent, number>();
+
+  const stopTone = (tone: ActiveTone) => {
+    try {
+      tone.oscillator.stop();
+    } catch {
+      // A tone that already ended is safe to clean up directly.
+    }
+
+    tone.cleanup();
+  };
+
+  const silenceActiveTones = () => {
+    Array.from(activeTones).forEach(stopTone);
+    activeTones.clear();
+  };
 
   const ensureAudioGraph = () => {
     if (disposed || typeof window === "undefined") {
@@ -459,22 +438,61 @@ export function createCardSoundEngine(
       void context.resume().catch(() => undefined);
     }
 
-    if (!paperNoise) {
-      paperNoise = createPaperNoise(context);
-    }
+    if (!graph) {
+      const output = context.createGain();
+      const preDelay = context.createDelay(0.1);
+      const convolver = context.createConvolver();
+      const reverbFilter = context.createBiquadFilter();
+      const reverbReturn = context.createGain();
 
-    if (!output) {
-      output = context.createGain();
-      output.gain.value = volume;
+      output.gain.value = muted ? 0 : volume;
+      preDelay.delayTime.value = REVERB_PRE_DELAY_SECONDS;
+      convolver.buffer = createDarkReverbImpulse(context);
+      reverbFilter.type = "lowpass";
+      reverbFilter.frequency.value = 950;
+      reverbFilter.Q.value = 0.25;
+      reverbReturn.gain.value = muted ? 0 : REVERB_RETURN;
+
+      preDelay.connect(convolver);
+      convolver.connect(reverbFilter);
+      reverbFilter.connect(reverbReturn);
+      reverbReturn.connect(output);
       output.connect(context.destination);
+
+      graph = {
+        convolver,
+        context,
+        output,
+        preDelay,
+        reverbFilter,
+        reverbReturn,
+      };
     }
 
-    return { context, noise: paperNoise, output };
+    return graph;
+  };
+
+  const setGraphMuted = (nextMuted: boolean) => {
+    if (!graph) {
+      return;
+    }
+
+    graph.output.gain.value = nextMuted ? 0 : volume;
+
+    if (nextMuted) {
+      graph.reverbReturn.gain.value = 0;
+    }
   };
 
   return {
     play(event, playOptions = {}) {
       if (muted || disposed) {
+        return;
+      }
+
+      const requestedIntensity = clamp(playOptions.intensity ?? 1, 0.25, 1);
+
+      if (event === "move" && requestedIntensity < 0.3) {
         return;
       }
 
@@ -485,26 +503,50 @@ export function createCardSoundEngine(
         return;
       }
 
-      const audioGraph = ensureAudioGraph();
-
       if (
-        !audioGraph ||
-        (event === "move" && activeStrokes.size >= MAX_ACTIVE_MOVE_STROKES)
+        event === "move" &&
+        Array.from(activeTones).filter((tone) => tone.event === "move").length >=
+          MAX_ACTIVE_MOVE_TONES
       ) {
         return;
       }
 
-      lastPlayedAt.set(event, playedAt);
-      const intensity = clamp(playOptions.intensity ?? 1, 0.25, 1);
+      const audioGraph = ensureAudioGraph();
 
-      PAPER_STROKES[event].forEach((stroke) => {
-        playPaperStroke({
-          activeStrokes,
-          context: audioGraph.context,
+      if (!audioGraph) {
+        return;
+      }
+
+      const tones = MYSTIC_TONES[event];
+
+      while (activeTones.size + tones.length > MAX_ACTIVE_TONES) {
+        const oldest =
+          Array.from(activeTones).find((tone) => tone.event !== "draw") ??
+          activeTones.values().next().value;
+
+        if (!oldest) {
+          break;
+        }
+
+        stopTone(oldest);
+      }
+
+      lastPlayedAt.set(event, playedAt);
+      audioGraph.output.gain.value = volume;
+      audioGraph.reverbReturn.gain.value = REVERB_RETURN;
+      const intensity = ["flip", "shuffle", "arrange", "draw"].includes(
+        event
+      )
+        ? Math.min(requestedIntensity, 0.85)
+        : requestedIntensity;
+
+      tones.forEach((tone) => {
+        playMysticTone({
+          activeTones,
+          event,
+          graph: audioGraph,
           intensity,
-          noise: audioGraph.noise,
-          output: audioGraph.output,
-          stroke,
+          tone,
         });
       });
     },
@@ -517,28 +559,36 @@ export function createCardSoundEngine(
     setMuted(nextMuted) {
       muted = nextMuted;
       persistMuted(storageKey, muted);
+      setGraphMuted(muted);
+
+      if (muted) {
+        silenceActiveTones();
+      }
     },
     toggleMuted() {
       muted = !muted;
       persistMuted(storageKey, muted);
+      setGraphMuted(muted);
+
+      if (muted) {
+        silenceActiveTones();
+      }
+
       return muted;
     },
     dispose() {
       disposed = true;
       lastPlayedAt.clear();
-      activeStrokes.forEach((stroke) => {
-        try {
-          stroke.source.stop();
-        } catch {
-          // A source that already ended is safe to clean up directly.
-        }
+      silenceActiveTones();
 
-        stroke.cleanup();
-      });
-      activeStrokes.clear();
-      output?.disconnect();
-      output = null;
-      paperNoise = null;
+      if (graph) {
+        graph.preDelay.disconnect();
+        graph.convolver.disconnect();
+        graph.reverbFilter.disconnect();
+        graph.reverbReturn.disconnect();
+        graph.output.disconnect();
+        graph = null;
+      }
 
       if (context) {
         void context.close().catch(() => undefined);
