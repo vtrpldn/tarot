@@ -1029,6 +1029,51 @@ select:focus-visible {
     max-height: calc(100dvh - 6.5rem);
   }
 
+  .tarot-inspector .tarot-eyebrow {
+    margin-bottom: 0.35rem;
+  }
+
+  .tarot-inspector-heading {
+    min-height: 0;
+    padding-right: 2.75rem;
+  }
+
+  .tarot-inspector-collapse {
+    position: absolute;
+    top: 0.58rem;
+    right: 0.58rem;
+    margin: 0;
+  }
+
+  .tarot-inspector h2 {
+    font-size: 1.15rem;
+  }
+
+  .tarot-inspector > p:not(.tarot-eyebrow) {
+    margin-top: 0.2rem;
+    font-size: 0.84rem;
+  }
+
+  .tarot-card-browser {
+    margin-top: 0.42rem;
+  }
+
+  .tarot-inspector-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+    margin-top: 0.5rem;
+  }
+
+  .tarot-inspector-actions button {
+    min-height: 2.6rem;
+    padding: 0.25rem 0.38rem;
+    font-size: 0.58rem;
+  }
+
+  .tarot-shortcut {
+    display: none;
+  }
+
   .tarot-inspector-toggle {
     right: auto;
     bottom: 5.6rem;
