@@ -539,9 +539,11 @@ export function TarotStudio() {
       )}
 
       <div className="tarot-set-picker">
-        <label htmlFor="card-set">Card set</label>
+        <label htmlFor="card-set">Deck</label>
         <select
           id="card-set"
+          name="card-set"
+          autoComplete="off"
           value={activeCardSetId}
           onChange={(event) => {
             const nextCardSet = getCardSet(event.target.value);
@@ -603,6 +605,8 @@ export function TarotStudio() {
               <label htmlFor="drawn-card">Browse cards on the table</label>
               <select
                 id="drawn-card"
+                name="drawn-card"
+                autoComplete="off"
                 value={session.selectedCardId ?? ""}
                 disabled={tableCards.length === 0}
                 onChange={(event) =>
