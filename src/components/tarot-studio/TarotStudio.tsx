@@ -441,7 +441,7 @@ function useDockPopover({
         ?.querySelector<HTMLElement>(
           "[role='radio'][aria-checked='true'], button:not(:disabled), select:not(:disabled), input:not(:disabled)"
         )
-        ?.focus();
+        ?.focus({ preventScroll: true });
     });
     const closeOnOutsidePress = (event: PointerEvent) => {
       const targetNode = event.target as Node;
@@ -462,9 +462,13 @@ function useDockPopover({
           );
 
           if (tableRegion) {
-            window.requestAnimationFrame(() => tableRegion.focus());
+            window.requestAnimationFrame(() =>
+              tableRegion.focus({ preventScroll: true })
+            );
           } else if (!isFocusableControl) {
-            window.requestAnimationFrame(() => triggerRef.current?.focus());
+            window.requestAnimationFrame(() =>
+              triggerRef.current?.focus({ preventScroll: true })
+            );
           }
         }
       }
@@ -472,7 +476,7 @@ function useDockPopover({
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setIsOpen(false);
-        triggerRef.current?.focus();
+        triggerRef.current?.focus({ preventScroll: true });
       }
     };
 
