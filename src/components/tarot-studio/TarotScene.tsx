@@ -26,6 +26,7 @@ import type {
   TablePoint,
   TarotSession,
 } from "@/types";
+import { getCardStackOffset } from "@/lib/card-stack-layout";
 import {
   getRemainingDeckCount,
   getTopDeckCard,
@@ -51,25 +52,12 @@ const TABLE_SURFACE_Z = -0.16;
 const CARD_SURFACE_CLEARANCE = 0.002;
 const DECK_MAT_SURFACE_Z = TABLE_SURFACE_Z + 0.003;
 const TABLE_CARD_CONTACT_GAP = 0.002;
-const DECK_STACK_RENDER_ORDER = 10;
-const DECK_CARD_RENDER_ORDER = 20;
+const DECK_STACK_RENDER_ORDER = 1_000;
+const DECK_CARD_RENDER_ORDER = 2_000;
 const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
-const DECK_LAYER_REGISTRATION = [
-  [-0.009, 0.005],
-  [0.006, 0.003],
-  [-0.005, -0.006],
-  [0.009, -0.002],
-  [-0.007, 0.002],
-  [0.004, -0.006],
-  [-0.002, 0.006],
-  [0.007, -0.004],
-  [-0.006, -0.001],
-  [0.003, 0.005],
-  [-0.004, -0.004],
-  [0.005, 0.001],
-] as const;
+const MAX_DECK_VISUAL_LAYERS = 12;
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
   [-0.29, 0.18, 0.011],
@@ -90,6 +78,10 @@ const ASTROLOGICAL_KINDS = [
   "sun",
   "mars",
   "mercury",
+  "jupiter",
+  "saturn",
+  "uranus",
+  "neptune",
 ] as const;
 
 function createRoundedRectangleShape(
@@ -197,34 +189,68 @@ type DriftingAstrologicalMark = {
   speed: number;
   driftX: number;
   driftY: number;
+  opacity: number;
 };
 
 function createDriftingAstrologicalMarks(): DriftingAstrologicalMark[] {
-  const markCount = 4 + Math.floor(Math.random() * 3);
-
-  return Array.from({ length: markCount }, (_, index) => {
+  const createGrid = ({
+    columns,
+    rows,
+    extentX,
+    extentY,
+    minimumScale,
+    scaleVariation,
+  }: {
+    columns: number;
+    rows: number;
+    extentX: number;
+    extentY: number;
+    minimumScale: number;
+    scaleVariation: number;
+  }) => Array.from({ length: columns * rows }, (_, index) => {
     const kind =
       ASTROLOGICAL_KINDS[
         Math.floor(Math.random() * ASTROLOGICAL_KINDS.length)
       ];
-    const angle =
-      (index / markCount) * Math.PI * 2 +
-      (Math.random() - 0.5) * 0.68;
-    const radiusX = 0.32 + Math.random() * 0.1;
-    const radiusY = 0.27 + Math.random() * 0.1;
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const normalizedX =
+      (column + 0.5 + (Math.random() - 0.5) * 0.62) / columns;
+    const normalizedY =
+      (row + 0.5 + (Math.random() - 0.5) * 0.62) / rows;
 
     return {
       kind,
-      x: Math.cos(angle) * radiusX,
-      y: Math.sin(angle) * radiusY,
-      scale: 0.18 + Math.random() * 0.09,
-      rotation: (Math.random() - 0.5) * 0.5,
+      x: (normalizedX - 0.5) * 2 * extentX,
+      y: (normalizedY - 0.5) * 2 * extentY,
+      scale: minimumScale + Math.random() * scaleVariation,
+      rotation: (Math.random() - 0.5) * 0.72,
       phase: Math.random() * Math.PI * 2,
-      speed: 0.045 + Math.random() * 0.035,
-      driftX: 0.025 + Math.random() * 0.035,
-      driftY: 0.02 + Math.random() * 0.03,
+      speed: 0.035 + Math.random() * 0.04,
+      driftX: 0.004 + Math.random() * 0.007,
+      driftY: 0.004 + Math.random() * 0.007,
+      opacity: 0.1 + Math.random() * 0.08,
     };
   });
+
+  return [
+    ...createGrid({
+      columns: 5,
+      rows: 4,
+      extentX: 0.14,
+      extentY: 0.14,
+      minimumScale: 0.16,
+      scaleVariation: 0.08,
+    }),
+    ...createGrid({
+      columns: 7,
+      rows: 4,
+      extentX: 0.47,
+      extentY: 0.46,
+      minimumScale: 0.18,
+      scaleVariation: 0.12,
+    }),
+  ];
 }
 
 function AstrologicalMark({
@@ -232,12 +258,14 @@ function AstrologicalMark({
   position,
   rotation,
   scale,
+  opacity,
   markRef,
 }: {
   kind: AstrologicalMarkKind;
   position: [number, number, number];
   rotation: number;
   scale: number;
+  opacity: number;
   markRef?: RefCallback<Group>;
 }) {
   const paths = useMemo(() => {
@@ -274,6 +302,73 @@ function AstrologicalMark({
             [number, number, number]
           >,
         ];
+      case "jupiter":
+        return [
+          [
+            [-0.82, 0.55, 0],
+            [-0.12, 0.55, 0],
+            [0.42, 1.08, 0],
+          ] as Array<[number, number, number]>,
+          [
+            [0.12, 1.02, 0],
+            [-0.5, 0.12, 0],
+            [0.38, -0.18, 0],
+            [0.38, -1.08, 0],
+          ] as Array<[number, number, number]>,
+          [[-0.14, -0.58, 0], [0.82, -0.58, 0]] as Array<
+            [number, number, number]
+          >,
+        ];
+      case "saturn":
+        return [
+          [
+            [-0.38, 1.1, 0],
+            [-0.38, -0.18, 0],
+            [0.18, -0.72, 0],
+            [0.62, -0.38, 0],
+          ] as Array<[number, number, number]>,
+          [[-0.86, 0.55, 0], [0.28, 0.55, 0]] as Array<
+            [number, number, number]
+          >,
+          createArcPoints(0.58, -Math.PI * 0.58, Math.PI * 0.38, 0.08),
+        ];
+      case "uranus":
+        return [
+          circle,
+          [[0, 1.2, 0], [0, -1.2, 0]] as Array<[number, number, number]>,
+          [
+            [-0.95, 0.72, 0],
+            [-0.48, 0.72, 0],
+            [-0.48, -0.72, 0],
+            [-0.95, -0.72, 0],
+          ] as Array<[number, number, number]>,
+          [
+            [0.95, 0.72, 0],
+            [0.48, 0.72, 0],
+            [0.48, -0.72, 0],
+            [0.95, -0.72, 0],
+          ] as Array<[number, number, number]>,
+        ];
+      case "neptune":
+        return [
+          [[0, 1.15, 0], [0, -1.18, 0]] as Array<[number, number, number]>,
+          [
+            [-0.88, 0.84, 0],
+            [-0.88, 0.28, 0],
+            [0, -0.12, 0],
+            [0.88, 0.28, 0],
+            [0.88, 0.84, 0],
+          ] as Array<[number, number, number]>,
+          [[-1.12, 0.64, 0], [-0.88, 0.9, 0], [-0.64, 0.64, 0]] as Array<
+            [number, number, number]
+          >,
+          [[0.64, 0.64, 0], [0.88, 0.9, 0], [1.12, 0.64, 0]] as Array<
+            [number, number, number]
+          >,
+          [[-0.48, -0.78, 0], [0.48, -0.78, 0]] as Array<
+            [number, number, number]
+          >,
+        ];
       case "sun":
       default:
         return [circle, createArcPoints(0.09, 0, Math.PI * 2)];
@@ -294,7 +389,7 @@ function AstrologicalMark({
           color={TAROT_SCENE_PALETTE.celestialGold}
           lineWidth={0.7}
           transparent
-          opacity={0.16}
+          opacity={opacity}
           depthWrite={false}
         />
       ))}
@@ -365,6 +460,7 @@ function DriftingAstrologicalField({
       position={[mark.x * width, mark.y * height, 0.001]}
       rotation={mark.rotation}
       scale={mark.scale}
+      opacity={mark.opacity}
       markRef={(group) => {
         markRefs.current[index] = group;
       }}
@@ -476,7 +572,7 @@ function getDeckMetrics(count: number) {
   const layerCount =
     count > 0
       ? Math.min(
-          DECK_LAYER_REGISTRATION.length,
+          MAX_DECK_VISUAL_LAYERS,
           Math.max(1, Math.ceil(count / 7))
         )
       : 0;
@@ -502,18 +598,15 @@ function getDeckMetrics(count: number) {
 function getDeckLayerOffset(
   index: number,
   layerCount: number,
-  width: number,
-  height: number
+  layout: SceneTableLayout
 ): TablePoint {
-  const registration =
-    DECK_LAYER_REGISTRATION[index % DECK_LAYER_REGISTRATION.length];
-  const depth =
-    layerCount <= 1 ? 0 : (layerCount - 1 - index) / (layerCount - 1);
+  const visualCount = layerCount + 1;
+  const [layerX, layerY] = getCardStackOffset(index, visualCount);
+  const [topX, topY] = getCardStackOffset(layerCount, visualCount);
+  const origin = layout.toWorld([0, 0]);
+  const layer = layout.toWorld([layerX - topX, layerY - topY]);
 
-  return [
-    (-depth * 0.014 + registration[0] * depth * 0.32) * width,
-    (-depth * 0.01 + registration[1] * depth * 0.32) * height,
-  ];
+  return [layer[0] - origin[0], layer[1] - origin[1]];
 }
 
 function DeckMat({ width, height }: { width: number; height: number }) {
@@ -584,6 +677,7 @@ function DeckStack({
   count,
   showMat,
   position,
+  layout,
   width,
   height,
   backUrl,
@@ -594,6 +688,7 @@ function DeckStack({
   count: number;
   showMat: boolean;
   position: TablePoint;
+  layout: SceneTableLayout;
   width: number;
   height: number;
   backUrl: string;
@@ -668,8 +763,7 @@ function DeckStack({
     ? getDeckLayerOffset(
         metrics.layerCount - 1,
         metrics.layerCount,
-        width,
-        height
+        layout
       )
     : [0, 0];
 
@@ -680,8 +774,7 @@ function DeckStack({
         const [offsetX, offsetY] = getDeckLayerOffset(
           index,
           metrics.layerCount,
-          width,
-          height
+          layout
         );
 
         return (
@@ -696,7 +789,7 @@ function DeckStack({
               metrics.firstCenter + index * metrics.layerStep,
             ]}
             renderOrder={index}
-            castShadow={false}
+            castShadow
             receiveShadow
           >
             <CardPaperMaterial
@@ -707,7 +800,7 @@ function DeckStack({
               }
               roughness={index % 2 ? 0.88 : 0.84}
               paperSeed={getPaperSeed(`${backUrl}:${index}`)}
-              depthWrite={false}
+              depthTest={false}
             />
           </RoundedBox>
         );
@@ -724,7 +817,7 @@ function DeckStack({
             height={height - frameInset}
             renderOrder={metrics.layerCount + 1}
             paperSeed={getPaperSeed(`${backUrl}:passive`)}
-            depthWrite={false}
+            depthTest={false}
           />
         </Suspense>
       )}
@@ -837,8 +930,8 @@ function TableSurface({
           </mesh>
         ))}
         <DriftingAstrologicalField
-          width={width}
-          height={height}
+          width={visibleWidth}
+          height={visibleHeight}
           reducedMotion={reducedMotion}
         />
       </group>
@@ -868,8 +961,6 @@ function TarotTable({
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
-  const shadowHalfWidth = (baseViewportWidth / MIN_VIEW_ZOOM) * 0.55;
-  const shadowHalfHeight = (baseViewportHeight / MIN_VIEW_ZOOM) * 0.55;
   const layout = useMemo(
     () =>
       createSceneTableLayout({
@@ -968,28 +1059,27 @@ function TarotTable({
         viewportBounds={layout.viewportBounds}
         targetZoom={viewZoom}
       />
-      <ambientLight intensity={0.48} />
-      <directionalLight
+      <ambientLight intensity={0.44} />
+      <pointLight
         castShadow
-        position={[-3, 4.5, 12]}
-        intensity={2.45}
+        position={[0, 0, 7.5]}
+        intensity={86}
+        distance={24}
+        decay={2}
         color={TAROT_SCENE_PALETTE.keyLight}
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
         shadow-bias={-0.00035}
         shadow-radius={8}
         shadow-normalBias={0.001}
-        shadow-camera-left={-shadowHalfWidth}
-        shadow-camera-right={shadowHalfWidth}
-        shadow-camera-top={shadowHalfHeight}
-        shadow-camera-bottom={-shadowHalfHeight}
-        shadow-camera-near={0.1}
-        shadow-camera-far={24}
+        shadow-camera-near={0.2}
+        shadow-camera-far={18}
       />
       <pointLight
-        position={[4, -2, 5]}
-        intensity={4.2}
-        distance={14}
+        position={[0, 0, 4.5]}
+        intensity={8}
+        distance={16}
+        decay={2}
         color={TAROT_SCENE_PALETTE.fillLight}
       />
       <TableSurface
@@ -1003,6 +1093,7 @@ function TarotTable({
         count={Math.max(0, deckCount - 1)}
         showMat={deckCount > 0}
         position={deckPosition}
+        layout={layout}
         width={layout.cardWidth}
         height={layout.cardHeight}
         backUrl={cardSet.back.preview}
@@ -1070,7 +1161,7 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
       className="tarot-canvas"
       orthographic
       shadows="soft"
-      dpr={[1, 1.5]}
+      dpr={[0.5, 1.5]}
       frameloop="demand"
       camera={{
         position: [0, 0, 10],
