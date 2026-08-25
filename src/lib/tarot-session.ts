@@ -8,7 +8,7 @@ import type {
   TarotSession,
 } from "@/types";
 import { TABLE_POINT_LIMIT } from "@/types";
-import type { TarotSpread } from "@/lib/tarot-spreads";
+import type { CardSpread } from "@/lib/tarot-spreads";
 
 const HISTORY_LIMIT = 24;
 
@@ -40,6 +40,14 @@ function cloneDeckPosition(position: TablePoint | null): TablePoint | null {
   return position ? ([...position] as TablePoint) : null;
 }
 
+function cloneSnapshots(snapshots: TableSnapshot[]): TableSnapshot[] {
+  return snapshots.map((entry) => ({
+    cards: cloneCards(entry.cards),
+    deckPosition: cloneDeckPosition(entry.deckPosition),
+    selectedCardId: entry.selectedCardId,
+  }));
+}
+
 function snapshot(session: TarotSession): TableSnapshot {
   return {
     cards: cloneCards(session.cards),
@@ -60,6 +68,7 @@ function commit(
     deckPosition: cloneDeckPosition(deckPosition),
     selectedCardId,
     history: [...session.history, snapshot(session)].slice(-HISTORY_LIMIT),
+    redo: [],
   };
 }
 
@@ -89,6 +98,7 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
     deckPosition: null,
     selectedCardId: null,
     history: [],
+    redo: [],
   };
 }
 
@@ -213,7 +223,7 @@ export type TarotSessionAction =
   | { type: "nudge"; cardId: string; delta: TablePoint }
   | {
       type: "deal-spread";
-      spread: TarotSpread;
+      spread: CardSpread;
       deckPosition?: TablePoint;
     }
   | {
@@ -223,7 +233,18 @@ export type TarotSessionAction =
         Pick<TableCard, "position" | "rotation" | "zIndex">
       >;
     }
+  | {
+      type: "show-collection";
+      cardIds: string[];
+      deckPosition?: TablePoint;
+      placements: Map<
+        string,
+        Pick<TableCard, "position" | "rotation" | "zIndex">
+      >;
+    }
   | { type: "undo" }
+  | { type: "redo" }
+  | { type: "reset-table"; cardSet: CardSetDefinition }
   | { type: "new-shuffle"; cardSet: CardSetDefinition };
 
 export function tarotSessionReducer(
@@ -235,15 +256,16 @@ export function tarotSessionReducer(
       ...action.session,
       cards: cloneCards(action.session.cards),
       deckPosition: cloneDeckPosition(action.session.deckPosition),
-      history: action.session.history.map((entry) => ({
-        cards: cloneCards(entry.cards),
-        deckPosition: cloneDeckPosition(entry.deckPosition),
-        selectedCardId: entry.selectedCardId,
-      })),
+      history: cloneSnapshots(action.session.history),
+      redo: cloneSnapshots(action.session.redo ?? []),
     };
   }
 
   if (action.type === "select") {
+    if (session.selectedCardId === action.cardId) {
+      return session;
+    }
+
     return { ...session, selectedCardId: action.cardId };
   }
 
@@ -260,6 +282,38 @@ export function tarotSessionReducer(
       deckPosition: cloneDeckPosition(previous.deckPosition),
       selectedCardId: previous.selectedCardId,
       history: session.history.slice(0, -1),
+      redo: [...session.redo, snapshot(session)].slice(-HISTORY_LIMIT),
+    };
+  }
+
+  if (action.type === "redo") {
+    const next = session.redo[session.redo.length - 1];
+
+    if (!next) {
+      return session;
+    }
+
+    return {
+      ...session,
+      cards: cloneCards(next.cards),
+      deckPosition: cloneDeckPosition(next.deckPosition),
+      selectedCardId: next.selectedCardId,
+      history: [...session.history, snapshot(session)].slice(-HISTORY_LIMIT),
+      redo: session.redo.slice(0, -1),
+    };
+  }
+
+  if (action.type === "reset-table") {
+    if (action.cardSet.id !== session.cardSetId) {
+      return session;
+    }
+
+    const resetSession = createTarotSession(action.cardSet);
+
+    return {
+      ...resetSession,
+      history: [...session.history, snapshot(session)].slice(-HISTORY_LIMIT),
+      redo: [],
     };
   }
 
@@ -349,6 +403,76 @@ export function tarotSessionReducer(
         rotation: placement.slot.rotation,
         zIndex: zIndexBase + placement.index,
         faceUp: false,
+      };
+    });
+
+    return commit(
+      session,
+      cards,
+      null,
+      action.deckPosition ?? session.deckPosition
+    );
+  }
+
+  if (action.type === "show-collection") {
+    const requestedIds = new Set(action.cardIds);
+    const includedCards = session.cards.filter(
+      (candidate) =>
+        requestedIds.has(candidate.id) || requestedIds.has(candidate.cardId)
+    );
+    const missingPlacement = includedCards.some(
+      (candidate) =>
+        !action.placements.has(candidate.id) &&
+        !action.placements.has(candidate.cardId)
+    );
+
+    if (
+      (action.cardIds.length > 0 && includedCards.length === 0) ||
+      missingPlacement
+    ) {
+      return session;
+    }
+
+    const includedCardIds = new Set(includedCards.map((card) => card.id));
+    const deckZIndexByCardId = new Map(
+      session.cards
+        .filter((candidate) => !includedCardIds.has(candidate.id))
+        .sort(
+          (first, second) =>
+            first.zIndex - second.zIndex || first.id.localeCompare(second.id)
+        )
+        .map((candidate, index) => [candidate.id, index])
+    );
+    const cards = session.cards.map((candidate) => {
+      if (!includedCardIds.has(candidate.id)) {
+        return {
+          ...candidate,
+          zone: "deck" as const,
+          position: [0, 0] as TablePoint,
+          rotation: 0,
+          zIndex: deckZIndexByCardId.get(candidate.id) ?? candidate.zIndex,
+          faceUp: false,
+        };
+      }
+
+      const placement =
+        action.placements.get(candidate.id) ??
+        action.placements.get(candidate.cardId);
+
+      if (!placement) {
+        return candidate;
+      }
+
+      return {
+        ...candidate,
+        zone: "table" as const,
+        position: [
+          clampTablePoint(placement.position[0]),
+          clampTablePoint(placement.position[1]),
+        ] as TablePoint,
+        rotation: placement.rotation,
+        zIndex: placement.zIndex,
+        faceUp: true,
       };
     });
 

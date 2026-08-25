@@ -1,3 +1,5 @@
+import type { AppLocale } from "@/i18n/locale";
+
 export type CardSetKind = "tarot" | "lenormand";
 
 export type TarotSuit = "cups" | "pentacles" | "swords" | "wands";
@@ -11,9 +13,20 @@ export type CardArtwork = {
   source: string;
 };
 
+export type CardArtworkCrop = {
+  /** Fraction of the source texture hidden from each edge. */
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
 export type CardDefinition = {
   id: string;
+  /** Stable archival title used by the deck data and saved sessions. */
   name: string;
+  /** Viewer-facing title keyed by the application's supported locales. */
+  displayNames?: Partial<Record<AppLocale, string>>;
   order: number;
   image: CardArtwork;
   arcana?: "major" | "minor";
@@ -27,7 +40,12 @@ export type CardSetDefinition = {
   label: string;
   shortLabel: string;
   description: string;
+  /** Localized viewer-facing metadata; ids and archival labels stay stable. */
+  displayLabels?: Partial<Record<AppLocale, string>>;
+  displayShortLabels?: Partial<Record<AppLocale, string>>;
+  displayDescriptions?: Partial<Record<AppLocale, string>>;
   cardAspectRatio: number;
+  artworkCrop?: CardArtworkCrop;
   back: CardArtwork;
   cards: CardDefinition[];
 };
@@ -63,6 +81,7 @@ export type TarotSession = {
   deckPosition: TablePoint | null;
   selectedCardId: string | null;
   history: TableSnapshot[];
+  redo: TableSnapshot[];
 };
 
 export type TableLayout = "fan" | "grid" | "stack" | "sort";

@@ -4,6 +4,7 @@ import { Line, RoundedBox, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
+  type RefCallback,
   memo,
   Suspense,
   useCallback,
@@ -20,6 +21,7 @@ import {
   SRGBColorSpace,
 } from "three";
 import type {
+  CardArtworkCrop,
   CardSetDefinition,
   TablePoint,
   TarotSession,
@@ -48,13 +50,18 @@ const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
 const DECK_LAYER_REGISTRATION = [
-  [-0.0065, 0.0035],
-  [0.006, 0.0025],
-  [-0.0035, -0.004],
-  [0.008, -0.0015],
-  [-0.005, 0.0013],
-  [0.003, -0.0045],
-  [-0.0007, 0.0042],
+  [-0.009, 0.005],
+  [0.006, 0.003],
+  [-0.005, -0.006],
+  [0.009, -0.002],
+  [-0.007, 0.002],
+  [0.004, -0.006],
+  [-0.002, 0.006],
+  [0.007, -0.004],
+  [-0.006, -0.001],
+  [0.003, 0.005],
+  [-0.004, -0.004],
+  [0.005, 0.001],
 ] as const;
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
@@ -70,12 +77,12 @@ const CELESTIAL_MARKS = [
   [0.16, -0.36, 0.015],
   [0.34, -0.19, 0.01],
 ] as const;
-const ASTROLOGICAL_MARKS = [
-  { kind: "moon", x: -0.39, y: 0.31, scale: 0.28, rotation: -0.3 },
-  { kind: "venus", x: 0.38, y: 0.29, scale: 0.24, rotation: 0.12 },
-  { kind: "sun", x: -0.4, y: -0.31, scale: 0.24, rotation: 0 },
-  { kind: "mars", x: 0.39, y: -0.28, scale: 0.22, rotation: -0.15 },
-  { kind: "mercury", x: 0.05, y: 0.38, scale: 0.2, rotation: 0.08 },
+const ASTROLOGICAL_KINDS = [
+  "moon",
+  "venus",
+  "sun",
+  "mars",
+  "mercury",
 ] as const;
 
 function createRoundedRectangleShape(
@@ -171,18 +178,60 @@ function createArcPoints(
   });
 }
 
-type AstrologicalMarkKind = (typeof ASTROLOGICAL_MARKS)[number]["kind"];
+type AstrologicalMarkKind = (typeof ASTROLOGICAL_KINDS)[number];
+
+type DriftingAstrologicalMark = {
+  kind: AstrologicalMarkKind;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  phase: number;
+  speed: number;
+  driftX: number;
+  driftY: number;
+};
+
+function createDriftingAstrologicalMarks(): DriftingAstrologicalMark[] {
+  const markCount = 4 + Math.floor(Math.random() * 3);
+
+  return Array.from({ length: markCount }, (_, index) => {
+    const kind =
+      ASTROLOGICAL_KINDS[
+        Math.floor(Math.random() * ASTROLOGICAL_KINDS.length)
+      ];
+    const angle =
+      (index / markCount) * Math.PI * 2 +
+      (Math.random() - 0.5) * 0.68;
+    const radiusX = 0.32 + Math.random() * 0.1;
+    const radiusY = 0.27 + Math.random() * 0.1;
+
+    return {
+      kind,
+      x: Math.cos(angle) * radiusX,
+      y: Math.sin(angle) * radiusY,
+      scale: 0.18 + Math.random() * 0.09,
+      rotation: (Math.random() - 0.5) * 0.5,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.045 + Math.random() * 0.035,
+      driftX: 0.025 + Math.random() * 0.035,
+      driftY: 0.02 + Math.random() * 0.03,
+    };
+  });
+}
 
 function AstrologicalMark({
   kind,
   position,
   rotation,
   scale,
+  markRef,
 }: {
   kind: AstrologicalMarkKind;
   position: [number, number, number];
   rotation: number;
   scale: number;
+  markRef?: RefCallback<Group>;
 }) {
   const paths = useMemo(() => {
     const circle = createArcPoints(0.7, 0, Math.PI * 2);
@@ -225,7 +274,12 @@ function AstrologicalMark({
   }, [kind]);
 
   return (
-    <group position={position} rotation={[0, 0, rotation]} scale={scale}>
+    <group
+      ref={markRef}
+      position={position}
+      rotation={[0, 0, rotation]}
+      scale={scale}
+    >
       {paths.map((points, index) => (
         <Line
           key={index}
@@ -241,11 +295,87 @@ function AstrologicalMark({
   );
 }
 
+function DriftingAstrologicalField({
+  width,
+  height,
+  reducedMotion,
+}: {
+  width: number;
+  height: number;
+  reducedMotion: boolean;
+}) {
+  const invalidate = useThree((state) => state.invalidate);
+  const marks = useMemo(createDriftingAstrologicalMarks, []);
+  const markRefs = useRef<Array<Group | null>>([]);
+
+  useEffect(() => {
+    invalidate();
+
+    if (reducedMotion) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        invalidate();
+      }
+    }, 66);
+
+    return () => window.clearInterval(interval);
+  }, [invalidate, reducedMotion]);
+
+  useFrame(({ clock }) => {
+    if (reducedMotion) {
+      return;
+    }
+
+    const elapsed = clock.getElapsedTime();
+
+    marks.forEach((mark, index) => {
+      const group = markRefs.current[index];
+
+      if (!group) {
+        return;
+      }
+
+      group.position.x =
+        (mark.x + Math.sin(elapsed * mark.speed + mark.phase) * mark.driftX) *
+        width;
+      group.position.y =
+        (mark.y +
+          Math.cos(elapsed * mark.speed * 0.82 + mark.phase) * mark.driftY) *
+        height;
+      group.rotation.z =
+        mark.rotation +
+        Math.sin(elapsed * mark.speed * 0.65 + mark.phase) * 0.16;
+    });
+  });
+
+  return marks.map((mark, index) => (
+    <AstrologicalMark
+      key={`${mark.kind}:${index}`}
+      kind={mark.kind}
+      position={[mark.x * width, mark.y * height, 0.001]}
+      rotation={mark.rotation}
+      scale={mark.scale}
+      markRef={(group) => {
+        markRefs.current[index] = group;
+      }}
+    />
+  ));
+}
+
 type TarotSceneProps = {
   cardSet: CardSetDefinition;
   session: TarotSession;
   reducedMotion: boolean;
   viewZoom: number;
+  /**
+   * The camera centre in scene world units. This intentionally stays
+   * independent from `viewZoom`, so callers can map a space-drag delta to
+   * world coordinates without rescaling the table or cards.
+   */
+  viewPan?: TablePoint;
   deckMoveMode: boolean;
   onLayoutChange: (layout: SceneTableLayout) => void;
   onSelect: (cardId: string | null) => void;
@@ -299,17 +429,35 @@ function AnimatedCameraZoom({
   return null;
 }
 
+function CameraPan({ value }: { value?: TablePoint }) {
+  const camera = useThree((state) => state.camera) as OrthographicCamera;
+  const invalidate = useThree((state) => state.invalidate);
+  const [x, y] = value ?? [0, 0];
+
+  useEffect(() => {
+    if (camera.position.x === x && camera.position.y === y) {
+      return;
+    }
+
+    camera.position.set(x, y, camera.position.z);
+    camera.updateMatrixWorld();
+    invalidate();
+  }, [camera, invalidate, x, y]);
+
+  return null;
+}
+
 function getDeckMetrics(count: number) {
   const layerCount =
     count > 0
       ? Math.min(
           DECK_LAYER_REGISTRATION.length,
-          Math.max(1, Math.ceil(count / 11))
+          Math.max(1, Math.ceil(count / 7))
         )
       : 0;
-  const layerThickness = 0.012;
-  const layerStep = 0.016;
-  const firstCenter = TABLE_SURFACE_Z + 0.006 + layerThickness / 2;
+  const layerThickness = 0.018;
+  const layerStep = 0.019;
+  const firstCenter = TABLE_SURFACE_Z + 0.008 + layerThickness / 2;
   const topSurface = layerCount
     ? firstCenter + (layerCount - 1) * layerStep + layerThickness / 2
     : TABLE_SURFACE_Z + 0.007;
@@ -330,14 +478,14 @@ function getDeckLayerOffset(
   width: number,
   height: number
 ): TablePoint {
-  const registration = DECK_LAYER_REGISTRATION[index];
-  const distanceFromTop = layerCount - index;
+  const registration =
+    DECK_LAYER_REGISTRATION[index % DECK_LAYER_REGISTRATION.length];
+  const depth =
+    layerCount <= 1 ? 0 : (layerCount - 1 - index) / (layerCount - 1);
 
   return [
-    registration[0] * width * 0.25 -
-      distanceFromTop * width * 0.0035,
-    registration[1] * height * 0.25 +
-      distanceFromTop * height * 0.0025,
+    (-depth * 0.014 + registration[0] * depth * 0.32) * width,
+    (-depth * 0.01 + registration[1] * depth * 0.32) * height,
   ];
 }
 
@@ -412,6 +560,7 @@ function DeckStack({
   width,
   height,
   backUrl,
+  artworkCrop,
   reducedMotion,
   previewPositionRef,
 }: {
@@ -421,6 +570,7 @@ function DeckStack({
   width: number;
   height: number;
   backUrl: string;
+  artworkCrop?: CardArtworkCrop;
   reducedMotion: boolean;
   previewPositionRef: MutableRefObject<TablePoint | null>;
 }) {
@@ -538,6 +688,7 @@ function DeckStack({
               card is lifted, without adding another pointer target. */}
           <CardArtwork
             url={backUrl}
+            crop={artworkCrop}
             position={[topOffsetX, topOffsetY, metrics.topSurface + 0.002]}
             width={width - frameInset}
             height={height - frameInset}
@@ -553,11 +704,13 @@ function TableSurface({
   width,
   height,
   dragBounds,
+  reducedMotion,
   onSelect,
 }: {
   width: number;
   height: number;
   dragBounds: SceneBounds;
+  reducedMotion: boolean;
   onSelect: (cardId: string | null) => void;
 }) {
   const visibleWidth = (width / MIN_VIEW_ZOOM) * 1.04;
@@ -649,15 +802,11 @@ function TableSurface({
             />
           </mesh>
         ))}
-        {ASTROLOGICAL_MARKS.map((mark) => (
-          <AstrologicalMark
-            key={mark.kind}
-            kind={mark.kind}
-            position={[mark.x * width, mark.y * height, 0.001]}
-            rotation={mark.rotation}
-            scale={mark.scale}
-          />
-        ))}
+        <DriftingAstrologicalField
+          width={width}
+          height={height}
+          reducedMotion={reducedMotion}
+        />
       </group>
     </>
   );
@@ -789,6 +938,7 @@ function TarotTable({
         width={baseViewportWidth}
         height={baseViewportHeight}
         dragBounds={layout.dragBounds}
+        reducedMotion={reducedMotion}
         onSelect={onSelect}
       />
       <DeckStack
@@ -798,6 +948,7 @@ function TarotTable({
         width={layout.cardWidth}
         height={layout.cardHeight}
         backUrl={cardSet.back.preview}
+        artworkCrop={cardSet.artworkCrop}
         reducedMotion={reducedMotion}
         previewPositionRef={deckPreviewPositionRef}
       />
@@ -879,6 +1030,7 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         value={props.viewZoom}
         reducedMotion={props.reducedMotion}
       />
+      <CameraPan value={props.viewPan} />
       <TarotTable {...props} />
     </Canvas>
   );

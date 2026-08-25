@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import {
   type Dispatch,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
   type SetStateAction,
@@ -15,8 +16,21 @@ import {
   useRef,
   useState,
 } from "react";
-import { cardSets, getCardSet } from "@/data/card-sets";
+import {
+  cardSets,
+  getCardDisplayName,
+  getCardSet,
+  getCardSetDisplayDescription,
+  getCardSetDisplayLabel,
+} from "@/data/card-sets";
 import type { CardReading } from "@/data/card-readings";
+import {
+  applyDocumentLocale,
+  getInitialLocale,
+  persistLocale,
+  type AppLocale,
+} from "@/i18n/locale";
+import { getCardCount, getMessages } from "@/i18n/messages";
 import {
   createCardSoundEngine,
   type CardSoundEvent,
@@ -32,8 +46,8 @@ import {
 } from "@/lib/tarot-session";
 import {
   getSpreadPresentation,
-  popularTarotSpreads,
-  type TarotSpread,
+  getPopularSpreads,
+  type CardSpread,
 } from "@/lib/tarot-spreads";
 import {
   loadTarotWorkspace,
@@ -51,12 +65,72 @@ const WHEEL_LAYER_THRESHOLD = 36;
 const DOCK_EDGE_REVEAL_DISTANCE = 52;
 const DOCK_HIDE_DELAY = 850;
 const DOCK_INITIAL_HIDE_DELAY = 1800;
+const LANGUAGE_OPTIONS = ["en", "pt-BR"] as const satisfies readonly AppLocale[];
+const COURT_RANKS = new Set(["page", "knight", "queen", "king"]);
+
+type TarotCollectionId = "all" | "major" | "minor" | "court";
+
+const COLLECTION_ZOOM: Record<TarotCollectionId, number> = {
+  all: MIN_VIEW_ZOOM,
+  major: 0.48,
+  minor: 0.35,
+  court: 0.48,
+};
+
+function getCollectionColumnCount(
+  collection: TarotCollectionId,
+  cardCount: number
+) {
+  if (collection === "all") {
+    return 13;
+  }
+
+  if (collection === "minor") {
+    return 10;
+  }
+
+  if (collection === "major") {
+    return 6;
+  }
+
+  return Math.min(4, Math.max(1, cardCount));
+}
+
+function createCollectionPlacements(
+  cardIds: string[],
+  collection: TarotCollectionId
+) {
+  const columns = getCollectionColumnCount(collection, cardIds.length);
+  const rows = Math.max(1, Math.ceil(cardIds.length / columns));
+  const horizontalGap =
+    collection === "all" ? 0.37 : collection === "minor" ? 0.46 : 0.62;
+  const verticalGap = 0.76;
+
+  return new Map(
+    cardIds.map((cardId, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+
+      return [
+        cardId,
+        {
+          position: [
+            (column - (columns - 1) / 2) * horizontalGap,
+            ((rows - 1) / 2 - row) * verticalGap,
+          ] as TablePoint,
+          rotation: 0,
+          zIndex: index + 1,
+        },
+      ] as const;
+    })
+  );
+}
 
 const TarotScene = dynamic(
   () => import("./TarotScene").then((module) => module.TarotScene),
   {
     ssr: false,
-    loading: () => <div className="tarot-scene-loading">Preparing the table…</div>,
+    loading: () => null,
   }
 );
 
@@ -304,7 +378,7 @@ function useDockPopover({
     const focusTimer = window.requestAnimationFrame(() => {
       containerRef.current
         ?.querySelector<HTMLElement>(
-          "[role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled)"
+          "[role='dialog'] [role='radio'][aria-checked='true'], [role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled)"
         )
         ?.focus();
     });
@@ -352,7 +426,14 @@ export function TarotStudio() {
   const canvasShellRef = useRef<HTMLDivElement>(null);
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
-  const activeSpreadRef = useRef<TarotSpread | null>(null);
+  const activeSpreadRef = useRef<CardSpread | null>(null);
+  const spacePressedRef = useRef(false);
+  const panGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startPan: TablePoint;
+  } | null>(null);
   const deckMenuRef = useRef<HTMLDivElement>(null);
   const deckMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const zoomMenuRef = useRef<HTMLDivElement>(null);
@@ -361,8 +442,8 @@ export function TarotStudio() {
   const spreadMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const arrangeMenuRef = useRef<HTMLDivElement>(null);
   const arrangeMenuTriggerRef = useRef<HTMLButtonElement>(null);
-  const shuffleMenuRef = useRef<HTMLDivElement>(null);
-  const shuffleMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const languageMenuRef = useRef<HTMLDivElement>(null);
+  const languageMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const inspectorCollapseRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const layerWheelRef = useRef({
@@ -372,11 +453,15 @@ export function TarotStudio() {
   });
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
   const [viewZoom, setViewZoom] = useState(1);
+  const [viewPan, setViewPan] = useState<TablePoint>([0, 0]);
+  const [spacePanState, setSpacePanState] = useState<
+    "idle" | "ready" | "active"
+  >("idle");
   const [isDeckMenuOpen, setIsDeckMenuOpen] = useState(false);
   const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
   const [isSpreadMenuOpen, setIsSpreadMenuOpen] = useState(false);
   const [isArrangeMenuOpen, setIsArrangeMenuOpen] = useState(false);
-  const [isShuffleMenuOpen, setIsShuffleMenuOpen] = useState(false);
+  const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const [isDeckMoveMode, setIsDeckMoveMode] = useState(false);
   const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
@@ -385,6 +470,8 @@ export function TarotStudio() {
     null
   );
   const [isReadingLoading, setIsReadingLoading] = useState(false);
+  const [locale, setLocale] = useState<AppLocale>("en");
+  const messages = getMessages(locale);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -419,7 +506,7 @@ export function TarotStudio() {
     isZoomMenuOpen ||
     isSpreadMenuOpen ||
     isArrangeMenuOpen ||
-    isShuffleMenuOpen ||
+    isLanguageMenuOpen ||
     isInspectorOpen ||
     isDeckMoveMode;
   const {
@@ -435,8 +522,19 @@ export function TarotStudio() {
   const canBringForward =
     selectedTableIndex >= 0 && selectedTableIndex < tableCards.length - 1;
   const deckCount = getRemainingDeckCount(session);
-  const deckCardNoun = deckCount === 1 ? "card" : "cards";
-  const tableCardNoun = tableCards.length === 1 ? "card" : "cards";
+  const deckCardCount = getCardCount(locale, deckCount);
+  const tableCardCount = getCardCount(locale, tableCards.length);
+  const availableSpreads = useMemo(
+    () => getPopularSpreads(activeCardSet.kind),
+    [activeCardSet.kind]
+  );
+
+  useEffect(() => {
+    const initialLocale = getInitialLocale();
+
+    setLocale(initialLocale);
+    applyDocumentLocale(initialLocale);
+  }, []);
 
   useEffect(() => {
     const workspace = loadTarotWorkspace(cardSets);
@@ -501,10 +599,10 @@ export function TarotStudio() {
     triggerRef: arrangeMenuTriggerRef,
   });
   useDockPopover({
-    containerRef: shuffleMenuRef,
-    isOpen: isShuffleMenuOpen,
-    setIsOpen: setIsShuffleMenuOpen,
-    triggerRef: shuffleMenuTriggerRef,
+    containerRef: languageMenuRef,
+    isOpen: isLanguageMenuOpen,
+    setIsOpen: setIsLanguageMenuOpen,
+    triggerRef: languageMenuTriggerRef,
   });
 
   useEffect(() => {
@@ -533,7 +631,7 @@ export function TarotStudio() {
       .then(({ getCardReading }) => {
         if (!cancelled) {
           setSelectedReading(
-            getCardReading(activeCardSet.id, selectedDefinition) ?? null
+            getCardReading(activeCardSet.id, selectedDefinition, locale) ?? null
           );
         }
       })
@@ -554,6 +652,7 @@ export function TarotStudio() {
   }, [
     activeCardSet.id,
     isInspectorOpen,
+    locale,
     selectedCard?.faceUp,
     selectedDefinition,
   ]);
@@ -573,21 +672,6 @@ export function TarotStudio() {
     window.requestAnimationFrame(() => arrangeMenuTriggerRef.current?.focus());
   }, []);
 
-  const closeShuffleMenu = useCallback(() => {
-    setIsShuffleMenuOpen(false);
-    window.requestAnimationFrame(() => shuffleMenuTriggerRef.current?.focus());
-  }, []);
-
-  const drawCard = useCallback(() => {
-    if (!topDeckCard) {
-      return;
-    }
-
-    activeSpreadRef.current = null;
-    playCardSound("draw");
-    dispatch({ type: "draw", cardId: topDeckCard.id, position: [0.3, 0] });
-  }, [playCardSound, topDeckCard]);
-
   const arrangeCards = useCallback(
     (layout: TableLayout) => {
       if (tableCards.length === 0) {
@@ -605,7 +689,7 @@ export function TarotStudio() {
   );
 
   const dealSpread = useCallback(
-    (spread: TarotSpread) => {
+    (spread: CardSpread) => {
       const layout = sceneLayoutRef.current;
 
       if (!layout) {
@@ -614,6 +698,7 @@ export function TarotStudio() {
 
       const presentation = getSpreadPresentation(spread, layout);
       activeSpreadRef.current = spread;
+      setViewPan([0, 0]);
       setViewZoom(presentation.zoom);
       playCardSound("arrange");
 
@@ -711,6 +796,63 @@ export function TarotStudio() {
     hoveredCardIdRef.current = cardId;
   }, []);
 
+  const updateLocale = useCallback(
+    (nextLocale: AppLocale, closeMenu: boolean) => {
+      persistLocale(nextLocale);
+      applyDocumentLocale(nextLocale);
+      setLocale(nextLocale);
+
+      if (closeMenu) {
+        setIsLanguageMenuOpen(false);
+        window.requestAnimationFrame(() =>
+          languageMenuTriggerRef.current?.focus()
+        );
+        return;
+      }
+
+      window.requestAnimationFrame(() =>
+        languageMenuRef.current
+          ?.querySelector<HTMLButtonElement>(
+            `[data-locale-option="${nextLocale}"]`
+          )
+          ?.focus()
+      );
+    },
+    []
+  );
+
+  const handleLanguageRadioKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, currentLocale: AppLocale) => {
+      const currentIndex = LANGUAGE_OPTIONS.indexOf(currentLocale);
+      let nextIndex: number;
+
+      switch (event.key) {
+        case "ArrowLeft":
+        case "ArrowUp":
+          nextIndex =
+            (currentIndex - 1 + LANGUAGE_OPTIONS.length) %
+            LANGUAGE_OPTIONS.length;
+          break;
+        case "ArrowRight":
+        case "ArrowDown":
+          nextIndex = (currentIndex + 1) % LANGUAGE_OPTIONS.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = LANGUAGE_OPTIONS.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      updateLocale(LANGUAGE_OPTIONS[nextIndex], false);
+    },
+    [updateLocale]
+  );
+
   const undoLastAction = useCallback(() => {
     const previous = session.history[session.history.length - 1];
 
@@ -720,12 +862,81 @@ export function TarotStudio() {
 
     if (previous.cards.every((card) => card.zone === "deck")) {
       activeSpreadRef.current = null;
-      setViewZoom(1);
     }
 
     playCardSound("arrange");
     dispatch({ type: "undo" });
   }, [playCardSound, session.history]);
+
+  const redoLastAction = useCallback(() => {
+    const next = session.redo[session.redo.length - 1];
+
+    if (!next) {
+      return;
+    }
+
+    playCardSound("arrange");
+    dispatch({ type: "redo" });
+  }, [playCardSound, session.redo]);
+
+  const resetTable = useCallback(() => {
+    activeSpreadRef.current = null;
+    setIsDeckMoveMode(false);
+    setIsInspectorCollapsed(true);
+    setViewPan([0, 0]);
+    setViewZoom(1);
+    playCardSound("shuffle");
+    dispatch({ type: "reset-table", cardSet: activeCardSet });
+    window.requestAnimationFrame(() => canvasShellRef.current?.focus());
+  }, [activeCardSet, playCardSound]);
+
+  const showTarotCollection = useCallback(
+    (collection: TarotCollectionId) => {
+      if (activeCardSet.kind !== "tarot") {
+        return;
+      }
+
+      const definitions = activeCardSet.cards
+        .filter((definition) => {
+          if (collection === "all") {
+            return true;
+          }
+
+          if (collection === "major") {
+            return definition.arcana === "major";
+          }
+
+          if (collection === "minor") {
+            return definition.arcana === "minor";
+          }
+
+          return (
+            definition.arcana === "minor" &&
+            definition.rank !== undefined &&
+            COURT_RANKS.has(definition.rank)
+          );
+        })
+        .sort((first, second) => first.order - second.order);
+      const cardIds = definitions.map(
+        (definition) => `${activeCardSet.id}:${definition.id}`
+      );
+      const layout = sceneLayoutRef.current;
+
+      activeSpreadRef.current = null;
+      setIsDeckMoveMode(false);
+      setIsInspectorCollapsed(true);
+      setViewPan([0, 0]);
+      setViewZoom(COLLECTION_ZOOM[collection]);
+      playCardSound("arrange");
+      dispatch({
+        type: "show-collection",
+        cardIds,
+        placements: createCollectionPlacements(cardIds, collection),
+        deckPosition: layout?.deckPositionCandidates[0]?.position,
+      });
+    },
+    [activeCardSet, playCardSound]
+  );
 
   const adjustViewZoom = useCallback((delta: number) => {
     setViewZoom((current) =>
@@ -740,15 +951,29 @@ export function TarotStudio() {
     (event: ReactWheelEvent<HTMLDivElement>) => {
       const hoveredCardId = hoveredCardIdRef.current;
 
-      if (!hoveredCardId || event.ctrlKey || event.metaKey) {
+      if (event.ctrlKey || event.metaKey) {
         return;
       }
 
+      event.preventDefault();
       event.stopPropagation();
-      const wheel = layerWheelRef.current;
       const deltaMultiplier =
         event.deltaMode === 0 ? 1 : event.deltaMode === 1 ? 16 : 120;
       const normalizedDelta = event.deltaY * deltaMultiplier;
+
+      if (!hoveredCardId) {
+        if (normalizedDelta !== 0) {
+          const zoomStep = Math.min(
+            0.12,
+            Math.max(0.03, Math.abs(normalizedDelta) * 0.0014)
+          );
+          adjustViewZoom(normalizedDelta < 0 ? zoomStep : -zoomStep);
+        }
+
+        return;
+      }
+
+      const wheel = layerWheelRef.current;
       const direction = Math.sign(normalizedDelta);
 
       if (direction !== 0 && direction !== wheel.direction) {
@@ -776,8 +1001,148 @@ export function TarotStudio() {
         direction: layerDirection,
       });
     },
-    [playCardSound]
+    [adjustViewZoom, playCardSound]
   );
+
+  const finishPanGesture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const gesture = panGestureRef.current;
+
+      if (!gesture || gesture.pointerId !== event.pointerId) {
+        return;
+      }
+
+      panGestureRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      setSpacePanState(spacePressedRef.current ? "ready" : "idle");
+    },
+    []
+  );
+
+  const handlePanPointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!spacePressedRef.current || event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      hoveredCardIdRef.current = null;
+      layerWheelRef.current = {
+        accumulatedDelta: 0,
+        direction: 0,
+        lastChangeAt: 0,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      panGestureRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startPan: [...viewPan] as TablePoint,
+      };
+      setSpacePanState("active");
+    },
+    [viewPan]
+  );
+
+  const handlePanPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const gesture = panGestureRef.current;
+      const layout = sceneLayoutRef.current;
+      const canvasWidth = canvasShellRef.current?.clientWidth ?? 0;
+
+      if (
+        !gesture ||
+        gesture.pointerId !== event.pointerId ||
+        !layout ||
+        canvasWidth <= 0
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const unitsPerPixel =
+        (layout.viewportBounds.right - layout.viewportBounds.left) /
+        canvasWidth /
+        viewZoom;
+      const deltaX = event.clientX - gesture.startX;
+      const deltaY = event.clientY - gesture.startY;
+
+      setViewPan([
+        gesture.startPan[0] - deltaX * unitsPerPixel,
+        gesture.startPan[1] + deltaY * unitsPerPixel,
+      ]);
+    },
+    [viewZoom]
+  );
+
+  useEffect(() => {
+    const isTextEditingTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target.matches("select, input, textarea"));
+    const isInteractiveTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (isTextEditingTarget(target) || target.matches("button, a[href]"));
+    const handleGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() === "z" &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !isTextEditingTarget(event.target)
+      ) {
+        event.preventDefault();
+
+        if (event.shiftKey) {
+          redoLastAction();
+        } else {
+          undoLastAction();
+        }
+
+        return;
+      }
+
+      if (
+        event.code === "Space" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !isInteractiveTarget(event.target)
+      ) {
+        event.preventDefault();
+        spacePressedRef.current = true;
+        setSpacePanState((current) =>
+          current === "active" ? current : "ready"
+        );
+      }
+    };
+    const handleGlobalKeyUp = (event: globalThis.KeyboardEvent) => {
+      if (event.code !== "Space") {
+        return;
+      }
+
+      spacePressedRef.current = false;
+      setSpacePanState(panGestureRef.current ? "active" : "idle");
+    };
+    const clearSpaceState = () => {
+      spacePressedRef.current = false;
+      panGestureRef.current = null;
+      setSpacePanState("idle");
+    };
+
+    document.addEventListener("keydown", handleGlobalKeyDown, true);
+    document.addEventListener("keyup", handleGlobalKeyUp, true);
+    window.addEventListener("blur", clearSpaceState);
+
+    return () => {
+      document.removeEventListener("keydown", handleGlobalKeyDown, true);
+      document.removeEventListener("keyup", handleGlobalKeyUp, true);
+      window.removeEventListener("blur", clearSpaceState);
+    };
+  }, [redoLastAction, undoLastAction]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
@@ -805,13 +1170,13 @@ export function TarotStudio() {
       return;
     }
 
-    if (event.key === "[" && selectedCard?.zone === "table") {
+    if (key === "j" && selectedCard?.zone === "table") {
       event.preventDefault();
       turnSelected(-15);
       return;
     }
 
-    if (event.key === "]" && selectedCard?.zone === "table") {
+    if (key === "l" && selectedCard?.zone === "table") {
       event.preventDefault();
       turnSelected(15);
       return;
@@ -832,24 +1197,19 @@ export function TarotStudio() {
     if (event.key === "0") {
       event.preventDefault();
       setViewZoom(1);
+      setViewPan([0, 0]);
       return;
     }
 
-    if (key === "pageup" && selectedCard?.zone === "table") {
+    if (key === "i" && selectedCard?.zone === "table") {
       event.preventDefault();
       reorderSelected("forward");
       return;
     }
 
-    if (key === "pagedown" && selectedCard?.zone === "table") {
+    if (key === "k" && selectedCard?.zone === "table") {
       event.preventDefault();
       reorderSelected("backward");
-      return;
-    }
-
-    if ((key === "enter" || key === " ") && !selectedCard) {
-      event.preventDefault();
-      drawCard();
       return;
     }
 
@@ -881,22 +1241,35 @@ export function TarotStudio() {
     ? ((selectedCard.rotation % 360) + 360) % 360
     : 0;
   const selectedTitle = selectedCard?.faceUp
-    ? selectedDefinition?.name ?? "Selected card"
+    ? selectedDefinition
+      ? getCardDisplayName(selectedDefinition, locale)
+      : messages.selectedCard
     : selectedCard
-      ? "Face-down card"
-      : "Nothing selected";
+      ? messages.faceDownCard
+      : messages.selectCardControls;
   const selectedHint = selectedCard?.faceUp
-    ? `${Math.abs(normalizedRotation - 180) < 0.8 ? "Reversed · " : normalizedRotation > 0.8 ? `Rotation ${Math.round(normalizedRotation)}° · ` : ""}${activeCardSet.kind === "lenormand" ? "Lenormand" : selectedDefinition?.arcana === "major" ? "Major Arcana" : "Minor Arcana"} · Layer ${selectedTableIndex + 1} of ${tableCards.length}`
+    ? messages.selectedHint({
+        category:
+          activeCardSet.kind === "lenormand"
+            ? "lenormand"
+            : selectedDefinition?.arcana === "major"
+              ? "major"
+              : "minor",
+        layer: selectedTableIndex + 1,
+        total: tableCards.length,
+        rotation: normalizedRotation,
+        isReversed: Math.abs(normalizedRotation - 180) < 0.8,
+      })
     : selectedCard
-      ? `Face down · Layer ${selectedTableIndex + 1} of ${tableCards.length}. Use the layer controls to restack.`
-      : "Draw a card or tap one on the table.";
+      ? messages.faceDownHint(selectedTableIndex + 1, tableCards.length)
+      : messages.noSelectionHint;
 
   if (!isWorkspaceReady) {
     return (
       <main className="tarot-app tarot-app--restoring">
         <div className="tarot-grain" aria-hidden="true" />
         <div className="tarot-workspace-loading" role="status">
-          Opening the table…
+          {messages.loadingTable}
         </div>
       </main>
     );
@@ -910,15 +1283,21 @@ export function TarotStudio() {
         className="tarot-canvas-shell"
         tabIndex={0}
         role="region"
-        aria-label="Interactive card table. Drag the top card to draw it, drag table cards to arrange them, use the card controls to flip, rotate, or change layers, and use Arrange to move the whole deck without keyboard modifiers."
+        aria-label={messages.tableDescription}
+        data-space-pan={spacePanState}
         onKeyDown={handleKeyDown}
         onWheel={handleTableWheel}
+        onPointerDownCapture={handlePanPointerDownCapture}
+        onPointerMove={handlePanPointerMove}
+        onPointerUp={finishPanGesture}
+        onPointerCancel={finishPanGesture}
       >
         <TarotScene
           cardSet={activeCardSet}
           session={session}
           reducedMotion={reducedMotion}
           viewZoom={viewZoom}
+          viewPan={viewPan}
           deckMoveMode={isDeckMoveMode}
           onLayoutChange={handleLayoutChange}
           onSelect={handleSelect}
@@ -935,7 +1314,7 @@ export function TarotStudio() {
       <nav
         ref={dockRef}
         className="tarot-toolbar"
-        aria-label="Table actions"
+        aria-label={messages.tableActions}
         data-dock-state={
           isDockVisible || isDockPinned ? "visible" : "hidden"
         }
@@ -953,7 +1332,10 @@ export function TarotStudio() {
             ref={deckMenuTriggerRef}
             type="button"
             className="tarot-toolbar-trigger tarot-deck-trigger"
-            aria-label={`Choose deck. ${activeCardSet.label}, ${deckCount} ${deckCardNoun} remaining`}
+            aria-label={messages.deckTrigger(
+              getCardSetDisplayLabel(activeCardSet, locale),
+              deckCardCount
+            )}
             aria-controls="deck-actions"
             aria-expanded={isDeckMenuOpen}
             aria-haspopup="dialog"
@@ -962,7 +1344,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
-              setIsShuffleMenuOpen(false);
+              setIsLanguageMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
               }
@@ -974,7 +1356,7 @@ export function TarotStudio() {
               <path d="M8 3.8h10.2a1.8 1.8 0 0 1 1.8 1.8V17" />
               <path d="m11 10 .7 1.7 1.8.1-1.4 1.2.5 1.8-1.6-1-1.6 1 .5-1.8-1.4-1.2 1.8-.1L11 10Z" />
             </svg>
-            <span>Deck</span>
+            <span>{messages.deck}</span>
             <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
               <path d="m8 10 4 4 4-4" />
             </svg>
@@ -984,9 +1366,9 @@ export function TarotStudio() {
               id="deck-actions"
               className="tarot-set-picker"
               role="dialog"
-              aria-label="Choose deck"
+              aria-label={messages.chooseDeck}
             >
-              <label htmlFor="card-set">Deck</label>
+              <label htmlFor="card-set">{messages.deck}</label>
               <select
                 id="card-set"
                 name="card-set"
@@ -1001,6 +1383,7 @@ export function TarotStudio() {
                   playCardSound("shuffle");
                   dispatch({ type: "new-shuffle", cardSet: nextCardSet });
                   setViewZoom(1);
+                  setViewPan([0, 0]);
                   setIsDeckMenuOpen(false);
                   window.requestAnimationFrame(() =>
                     deckMenuTriggerRef.current?.focus()
@@ -1009,12 +1392,15 @@ export function TarotStudio() {
               >
                 {cardSets.map((cardSet) => (
                   <option key={cardSet.id} value={cardSet.id}>
-                    {cardSet.label}
+                    {getCardSetDisplayLabel(cardSet, locale)}
                   </option>
                 ))}
               </select>
+              <p className="tarot-set-picker-description">
+                {getCardSetDisplayDescription(activeCardSet, locale)}
+              </p>
               <span>
-                {deckCount} {deckCardNoun} in the deck
+                {messages.cardsInDeck(deckCardCount)}
               </span>
             </div>
           )}
@@ -1024,7 +1410,7 @@ export function TarotStudio() {
             ref={zoomMenuTriggerRef}
             type="button"
             className="tarot-toolbar-trigger tarot-zoom-trigger"
-            aria-label={`Table zoom, ${Math.round(viewZoom * 100)} percent`}
+            aria-label={messages.tableZoom(Math.round(viewZoom * 100))}
             aria-controls="zoom-actions"
             aria-expanded={isZoomMenuOpen}
             aria-haspopup="dialog"
@@ -1033,7 +1419,7 @@ export function TarotStudio() {
               setIsDeckMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
-              setIsShuffleMenuOpen(false);
+              setIsLanguageMenuOpen(false);
               setIsInspectorCollapsed(true);
               setIsZoomMenuOpen(willOpen);
             }}
@@ -1042,7 +1428,7 @@ export function TarotStudio() {
               <circle cx="10.5" cy="10.5" r="5.5" />
               <path d="m14.5 14.5 5 5M8 10.5h5M10.5 8v5" />
             </svg>
-            <span>Zoom</span>
+            <span>{messages.zoom}</span>
             <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
               <path d="m8 10 4 4 4-4" />
             </svg>
@@ -1051,11 +1437,11 @@ export function TarotStudio() {
             id="zoom-actions"
             className={`tarot-zoom-controls${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
             role={isZoomMenuOpen ? "dialog" : undefined}
-            aria-label="Table zoom"
+            aria-label={messages.zoom}
           >
             <button
               type="button"
-              aria-label="Zoom out"
+              aria-label={messages.zoomOut}
               onClick={() => adjustViewZoom(-0.1)}
               disabled={viewZoom <= MIN_VIEW_ZOOM}
             >
@@ -1063,15 +1449,15 @@ export function TarotStudio() {
             </button>
             <button
               type="button"
-              aria-label="Reset table zoom"
-              title="Reset zoom"
+              aria-label={messages.resetZoom}
+              title={messages.resetZoom}
               onClick={() => setViewZoom(1)}
             >
               {Math.round(viewZoom * 100)}%
             </button>
             <button
               type="button"
-              aria-label="Zoom in"
+              aria-label={messages.zoomIn}
               onClick={() => adjustViewZoom(0.1)}
               disabled={viewZoom >= MAX_VIEW_ZOOM}
             >
@@ -1083,7 +1469,7 @@ export function TarotStudio() {
           <button
             type="button"
             className="tarot-mode-cancel"
-            aria-label="Cancel deck move mode"
+            aria-label={messages.cancelDeckMove}
             onClick={() => {
               setIsDeckMoveMode(false);
               canvasShellRef.current?.focus();
@@ -1092,19 +1478,20 @@ export function TarotStudio() {
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M6.5 12.5V8.8a1.4 1.4 0 0 1 2.8 0v2.4-5a1.4 1.4 0 0 1 2.8 0v4.5-3a1.4 1.4 0 0 1 2.8 0v3.6-2a1.4 1.4 0 0 1 2.8 0v5.2c0 3.6-2.2 5.5-5.7 5.5h-.7c-2.4 0-3.7-1.2-5.2-3.2L4.5 14a1.35 1.35 0 0 1 2-1.8l1.7 1.6" />
             </svg>
-            <span className="tarot-mode-cancel-label">Moving deck</span>
-            <span>Cancel</span>
+            <span className="tarot-mode-cancel-label">
+              {messages.movingDeck}
+            </span>
+            <span>{messages.cancel}</span>
           </button>
         )}
-        {activeCardSet.kind === "tarot" &&
-          tableCards.length === 0 &&
+        {tableCards.length === 0 &&
           !isDeckMoveMode && (
             <div className="tarot-spread-menu" ref={spreadMenuRef}>
               <button
                 ref={spreadMenuTriggerRef}
                 type="button"
                 className="tarot-toolbar-trigger tarot-spread-trigger"
-                aria-label="Choose a tarot spread"
+                aria-label={messages.chooseSpread}
                 aria-controls="spread-actions"
                 aria-expanded={isSpreadMenuOpen}
                 aria-haspopup="dialog"
@@ -1113,7 +1500,7 @@ export function TarotStudio() {
                   setIsDeckMenuOpen(false);
                   setIsZoomMenuOpen(false);
                   setIsArrangeMenuOpen(false);
-                  setIsShuffleMenuOpen(false);
+                  setIsLanguageMenuOpen(false);
                   setIsSpreadMenuOpen(willOpen);
                 }}
               >
@@ -1122,7 +1509,7 @@ export function TarotStudio() {
                   <rect x="9.5" y="5" width="5" height="11" rx="1" />
                   <rect x="15.5" y="8" width="5" height="8" rx="1" />
                 </svg>
-                <span>Spreads</span>
+                <span>{messages.spreads}</span>
                 <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="m8 10 4 4 4-4" />
                 </svg>
@@ -1132,11 +1519,11 @@ export function TarotStudio() {
                   id="spread-actions"
                   className="tarot-spread-actions"
                   role="dialog"
-                  aria-label="Popular tarot spreads"
+                  aria-label={messages.popularSpreads}
                 >
-                  <span>Choose a spread</span>
+                  <span>{messages.chooseASpread}</span>
                   <div>
-                    {popularTarotSpreads.map((spread) => (
+                    {availableSpreads.map((spread) => (
                       <button
                         key={spread.id}
                         type="button"
@@ -1151,8 +1538,8 @@ export function TarotStudio() {
                           !isSceneLayoutReady || deckCount < spread.slots.length
                         }
                       >
-                        {spread.label}
-                        <small>{spread.shortLabel}</small>
+                        {messages.spreadLabels[spread.id][0]}
+                        <small>{messages.spreadLabels[spread.id][1]}</small>
                       </button>
                     ))}
                   </div>
@@ -1165,7 +1552,7 @@ export function TarotStudio() {
             ref={arrangeMenuTriggerRef}
             type="button"
             className="tarot-toolbar-trigger tarot-arrange-trigger"
-            aria-label="Arrange cards and undo"
+            aria-label={messages.arrangeAndUndo}
             aria-controls="arrange-actions"
             aria-expanded={isArrangeMenuOpen}
             aria-haspopup="dialog"
@@ -1174,21 +1561,24 @@ export function TarotStudio() {
               setIsDeckMenuOpen(false);
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
-              setIsShuffleMenuOpen(false);
+              setIsLanguageMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
               }
               setIsArrangeMenuOpen(willOpen);
             }}
             disabled={
-              !topDeckCard && !tableCards.length && !session.history.length
+              !topDeckCard &&
+              !tableCards.length &&
+              !session.history.length &&
+              !session.redo.length
             }
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M5 7.5h10v12H5zM9 4.5h10v12" />
               <path d="M8 11.5h4M8 14.5h4" />
             </svg>
-            <span>Arrange</span>
+            <span>{messages.arrange}</span>
             <svg
               className="tarot-menu-chevron"
               viewBox="0 0 24 24"
@@ -1202,16 +1592,16 @@ export function TarotStudio() {
               id="arrange-actions"
               className="tarot-arrange-popover"
               role="dialog"
-              aria-label="Arrange cards and undo"
+              aria-label={messages.arrangeAndUndo}
             >
-              <p>Table actions</p>
-              <div>
+              <p>{messages.tableActionsTitle}</p>
+              <div className="tarot-arrange-grid">
                 {(
                   [
-                    ["fan", "Fan", "Open arc"],
-                    ["grid", "Grid", "Even rows"],
-                    ["stack", "Stack", "Single pile"],
-                    ["sort", "Sort", "Deck order"],
+                    ["fan", ...messages.layouts.fan],
+                    ["grid", ...messages.layouts.grid],
+                    ["stack", ...messages.layouts.stack],
+                    ["sort", ...messages.layouts.sort],
                   ] as const
                 ).map(([layout, label, hint]) => (
                   <button
@@ -1234,7 +1624,7 @@ export function TarotStudio() {
                     setIsDeckMenuOpen(false);
                     setIsZoomMenuOpen(false);
                     setIsSpreadMenuOpen(false);
-                    setIsShuffleMenuOpen(false);
+                    setIsLanguageMenuOpen(false);
                     setIsDeckMoveMode(true);
                     setIsArrangeMenuOpen(false);
                     window.requestAnimationFrame(() =>
@@ -1243,8 +1633,8 @@ export function TarotStudio() {
                   }}
                   disabled={!topDeckCard}
                 >
-                  <span>Move deck</span>
-                  <small>Then drag the pile</small>
+                  <span>{messages.moveDeck[0]}</span>
+                  <small>{messages.moveDeck[1]}</small>
                 </button>
                 <button
                   type="button"
@@ -1254,74 +1644,79 @@ export function TarotStudio() {
                   }}
                   disabled={!session.history.length}
                 >
-                  <span>Undo</span>
-                  <small>Last table move</small>
+                  <span>{messages.undo[0]}</span>
+                  <small>{messages.undo[1]}</small>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    redoLastAction();
+                    closeArrangeMenu();
+                  }}
+                  disabled={!session.redo.length}
+                >
+                  <span>{messages.redo[0]}</span>
+                  <small>{messages.redo[1]}</small>
                 </button>
               </div>
-            </div>
-          )}
-        </div>
-        <div className="tarot-shuffle-menu" ref={shuffleMenuRef}>
-          <button
-            ref={shuffleMenuTriggerRef}
-            type="button"
-            className="tarot-toolbar-trigger tarot-shuffle-trigger"
-            aria-label="Shuffle"
-            aria-controls="shuffle-actions"
-            aria-expanded={isShuffleMenuOpen}
-            aria-haspopup="dialog"
-            onClick={() => {
-              const willOpen = !isShuffleMenuOpen;
-              setIsDeckMenuOpen(false);
-              setIsZoomMenuOpen(false);
-              setIsSpreadMenuOpen(false);
-              setIsArrangeMenuOpen(false);
-              if (selectedCard?.zone === "table") {
-                setIsInspectorCollapsed(true);
-              }
-              setIsShuffleMenuOpen(willOpen);
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M4 7h2.7c3.2 0 4 10 7.3 10H20" />
-              <path d="m17 14 3 3-3 3M4 17h2.7c1.2 0 2-.7 2.8-1.7M14.5 7H20m-3-3 3 3-3 3" />
-            </svg>
-            <span>Shuffle</span>
-            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m8 10 4 4 4-4" />
-            </svg>
-          </button>
-          {isShuffleMenuOpen && (
-            <div
-              id="shuffle-actions"
-              className="tarot-shuffle-popover"
-              role="dialog"
-              aria-label="Shuffle actions"
-            >
-              <p>Deck session</p>
-              <button
-                type="button"
-                onClick={() => {
-                  activeSpreadRef.current = null;
-                  setIsDeckMoveMode(false);
-                  playCardSound("shuffle");
-                  dispatch({ type: "new-shuffle", cardSet: activeCardSet });
-                  closeShuffleMenu();
-                  setViewZoom(1);
-                }}
-              >
-                <span>New shuffle</span>
-                <small>Restart with all {activeCardSet.cards.length} cards</small>
-              </button>
+              {activeCardSet.kind === "tarot" && (
+                <section
+                  className="tarot-arrange-section"
+                  aria-label={messages.tarotCollectionActions}
+                >
+                  <h3 className="tarot-arrange-section-title">
+                    {messages.tarotCollection}
+                  </h3>
+                  <div className="tarot-arrange-grid">
+                    {(
+                      ["all", "major", "minor", "court"] as const
+                    ).map((collection) => (
+                      <button
+                        key={collection}
+                        type="button"
+                        onClick={() => {
+                          showTarotCollection(collection);
+                          closeArrangeMenu();
+                        }}
+                      >
+                        <span>{messages.tarotCollections[collection][0]}</span>
+                        <small>
+                          {messages.tarotCollections[collection][1]}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
             </div>
           )}
         </div>
         <button
           type="button"
+          className="tarot-toolbar-trigger tarot-reset-trigger"
+          aria-label={`${messages.resetTable}. ${messages.resetTableDescription(activeCardSet.cards.length)}`}
+          title={messages.resetTableDescription(activeCardSet.cards.length)}
+          onClick={() => {
+            setIsDeckMenuOpen(false);
+            setIsZoomMenuOpen(false);
+            setIsSpreadMenuOpen(false);
+            setIsArrangeMenuOpen(false);
+            setIsLanguageMenuOpen(false);
+            resetTable();
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M19 8a7.5 7.5 0 1 0 .2 7.6" />
+            <path d="M19 3.8V8h-4.2" />
+          </svg>
+          <span>{messages.resetTable}</span>
+        </button>
+        <button
+          type="button"
           className="tarot-toolbar-trigger tarot-sound-toggle"
-          aria-label="Card sounds"
+          aria-label={messages.cardSounds}
           aria-pressed={!areCardSoundsMuted}
-          title={areCardSoundsMuted ? "Card sounds off" : "Card sounds on"}
+          title={areCardSoundsMuted ? messages.cardSoundsOff : messages.cardSoundsOn}
           onClick={toggleCardSounds}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1332,8 +1727,73 @@ export function TarotStudio() {
               <path d="M16.5 9.2a4 4 0 0 1 0 5.6M18.8 7a7 7 0 0 1 0 10" />
             )}
           </svg>
-          <span>Sound</span>
+          <span>{messages.cardSounds}</span>
         </button>
+        <div className="tarot-language-menu" ref={languageMenuRef}>
+          <button
+            ref={languageMenuTriggerRef}
+            type="button"
+            className="tarot-toolbar-trigger tarot-language-trigger"
+            aria-label={`${messages.language}: ${messages.localeLabel}`}
+            aria-controls="language-actions"
+            aria-expanded={isLanguageMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              const willOpen = !isLanguageMenuOpen;
+
+              setIsDeckMenuOpen(false);
+              setIsZoomMenuOpen(false);
+              setIsSpreadMenuOpen(false);
+              setIsArrangeMenuOpen(false);
+              if (selectedCard?.zone === "table") {
+                setIsInspectorCollapsed(true);
+              }
+              setIsLanguageMenuOpen(willOpen);
+            }}
+          >
+            <span>{messages.localeShortLabel}</span>
+            <svg
+              className="tarot-menu-chevron"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="m8 10 4 4 4-4" />
+            </svg>
+          </button>
+          {isLanguageMenuOpen && (
+            <section
+              id="language-actions"
+              className="tarot-language-popover"
+              role="dialog"
+              aria-label={messages.chooseLanguage}
+            >
+              <span>{messages.language}</span>
+              <div role="radiogroup" aria-label={messages.languageOptions}>
+                {LANGUAGE_OPTIONS.map((optionLocale) => {
+                  const optionMessages = getMessages(optionLocale);
+
+                  return (
+                    <button
+                      key={optionLocale}
+                      type="button"
+                      role="radio"
+                      aria-checked={locale === optionLocale}
+                      data-locale-option={optionLocale}
+                      tabIndex={locale === optionLocale ? 0 : -1}
+                      onKeyDown={(event) =>
+                        handleLanguageRadioKeyDown(event, optionLocale)
+                      }
+                      onClick={() => updateLocale(optionLocale, true)}
+                    >
+                      <span>{optionMessages.localeShortLabel}</span>
+                      <small>{optionMessages.localeLabel}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
         <div className="tarot-card-menu">
           <button
             ref={inspectorToggleRef}
@@ -1341,8 +1801,8 @@ export function TarotStudio() {
             className="tarot-toolbar-trigger tarot-card-trigger"
             aria-label={
               hasSelectedTableCard
-                ? `${isInspectorOpen ? "Close" : "Open"} selected card controls for ${selectedTitle}`
-                : "Select a card to use card controls"
+                ? messages.selectedCardControls(selectedTitle, isInspectorOpen)
+                : messages.selectCardControls
             }
             aria-controls="selected-card-inspector"
             aria-expanded={isInspectorOpen}
@@ -1352,7 +1812,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
-              setIsShuffleMenuOpen(false);
+              setIsLanguageMenuOpen(false);
               if (isInspectorOpen) {
                 collapseInspector();
               } else {
@@ -1364,7 +1824,7 @@ export function TarotStudio() {
               <rect x="5" y="3.5" width="14" height="17" rx="1.5" />
               <path d="m12 7 .8 2.1 2.2.1-1.7 1.4.6 2.2-1.9-1.2-1.9 1.2.6-2.2-1.7-1.4 2.2-.1L12 7Z" />
             </svg>
-            <span>Card</span>
+            <span>{messages.card}</span>
             <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
               <path d="m8 10 4 4 4-4" />
             </svg>
@@ -1373,16 +1833,16 @@ export function TarotStudio() {
             <aside
               id="selected-card-inspector"
               className={`tarot-inspector${selectedCard?.faceUp ? " tarot-inspector--with-reading" : ""}`}
-              aria-label={`Selected card controls for ${selectedTitle}`}
+              aria-label={messages.selectedCardControls(selectedTitle, true)}
             >
               <div className="tarot-inspector-controls">
                 <div className="tarot-inspector-heading">
-                  <p className="tarot-eyebrow">Selected card</p>
+                  <p className="tarot-eyebrow">{messages.selectedCard}</p>
                   <button
                     ref={inspectorCollapseRef}
                     type="button"
                     className="tarot-inspector-collapse"
-                    aria-label="Collapse selected card controls"
+                    aria-label={messages.collapseCardControls}
                     aria-expanded="true"
                     onClick={collapseInspector}
                   >
@@ -1394,7 +1854,7 @@ export function TarotStudio() {
                 <h2>{selectedTitle}</h2>
                 <p>{selectedHint}</p>
                 <div className="tarot-card-browser">
-                  <label htmlFor="drawn-card">Browse cards on the table</label>
+                  <label htmlFor="drawn-card">{messages.browseTableCards}</label>
                   <select
                     id="drawn-card"
                     name="drawn-card"
@@ -1410,7 +1870,7 @@ export function TarotStudio() {
                       handleSelect(cardId);
                     }}
                   >
-                    <option value="">Select a drawn card</option>
+                    <option value="">{messages.selectDrawnCard}</option>
                     {tableCards.map((card, index) => {
                       const definition = activeCardSet.cards.find(
                         (candidate) => candidate.id === card.cardId
@@ -1419,8 +1879,10 @@ export function TarotStudio() {
                       return (
                         <option key={card.id} value={card.id}>
                           {card.faceUp
-                            ? definition?.name ?? `Card ${index + 1}`
-                            : `Face-down card ${index + 1}`}
+                            ? definition
+                              ? getCardDisplayName(definition, locale)
+                              : messages.cardNumber(index + 1)
+                            : messages.faceDownCardNumber(index + 1)}
                         </option>
                       );
                     })}
@@ -1428,30 +1890,30 @@ export function TarotStudio() {
                 </div>
                 <div className="tarot-inspector-actions">
                   <button type="button" onClick={flipSelected}>
-                    Flip <Shortcut>F</Shortcut>
+                    {messages.flip} <Shortcut>F</Shortcut>
                   </button>
                   <button type="button" onClick={() => turnSelected(-15)}>
-                    Turn −15° <Shortcut>[</Shortcut>
+                    {messages.turnLeft} <Shortcut>J</Shortcut>
                   </button>
                   <button type="button" onClick={() => turnSelected(15)}>
-                    Turn +15° <Shortcut>]</Shortcut>
+                    {messages.turnRight} <Shortcut>L</Shortcut>
                   </button>
                   <button type="button" onClick={() => turnSelected(180)}>
-                    Reverse <Shortcut>R</Shortcut>
+                    {messages.reverse} <Shortcut>R</Shortcut>
                   </button>
                   <button
                     type="button"
                     onClick={() => reorderSelected("backward")}
                     disabled={!canSendBackward}
                   >
-                    Send back <Shortcut>Pg↓</Shortcut>
+                    {messages.moveDown} <Shortcut>K</Shortcut>
                   </button>
                   <button
                     type="button"
                     onClick={() => reorderSelected("forward")}
                     disabled={!canBringForward}
                   >
-                    Bring forward <Shortcut>Pg↑</Shortcut>
+                    {messages.moveUp} <Shortcut>I</Shortcut>
                   </button>
                 </div>
               </div>
@@ -1459,12 +1921,12 @@ export function TarotStudio() {
                 <section
                   className="tarot-card-reading"
                   aria-busy={isReadingLoading}
-                  aria-label={`Symbolism and correspondences for ${selectedTitle}`}
+                  aria-label={messages.symbolism(selectedTitle)}
                 >
-                  <h3>Symbolism &amp; correspondences</h3>
+                  <h3>{messages.symbolismTitle}</h3>
                   {isReadingLoading && (
                     <p className="tarot-card-reading-loading">
-                      Opening the card notes…
+                      {messages.openingNotes}
                     </p>
                   )}
                   {selectedReading && (
@@ -1485,8 +1947,14 @@ export function TarotStudio() {
                           {selectedReading.traditionNote}
                         </p>
                       )}
+                      {selectedReading.perspective && (
+                        <div className="tarot-card-perspective">
+                          <span>{selectedReading.perspective.label}</span>
+                          <p>{selectedReading.perspective.text}</p>
+                        </div>
+                      )}
                       <div className="tarot-card-sources">
-                        <span>Sources</span>
+                        <span>{messages.sources}</span>
                         <ul>
                           {selectedReading.sources.map((source) => (
                             <li key={source.href}>
@@ -1513,8 +1981,8 @@ export function TarotStudio() {
 
       <p className="tarot-live-status" aria-live="polite">
         {deckCount === 0
-          ? "The deck is empty. Start a new shuffle to begin again."
-          : `${deckCount} ${deckCardNoun} ${deckCount === 1 ? "remains" : "remain"} in the deck. ${tableCards.length} ${tableCardNoun} ${tableCards.length === 1 ? "is" : "are"} on the table.`}
+          ? messages.emptyDeck
+          : messages.liveStatus(deckCardCount, tableCardCount)}
       </p>
     </main>
   );
