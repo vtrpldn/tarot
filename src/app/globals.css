@@ -1577,7 +1577,7 @@ input:focus-visible {
   }
 }
 
-@media (max-width: 399px) {
+@media (max-width: 419px) {
   .tarot-toolbar {
     display: grid;
     grid-template-columns: repeat(4, 2.75rem);
@@ -1601,11 +1601,6 @@ input:focus-visible {
   .tarot-toolbar {
     gap: 0.18rem;
     padding: 0.28rem;
-  }
-
-  .tarot-zoom-controls {
-    grid-template-columns: 2.5rem 2.75rem 2.5rem;
-    gap: 0.1rem;
   }
 
 }
