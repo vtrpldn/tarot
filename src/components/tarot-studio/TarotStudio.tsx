@@ -23,6 +23,7 @@ import {
 } from "@/lib/tarot-session";
 import { popularTarotSpreads } from "@/lib/tarot-spreads";
 import type { CardLayerDirection, TableLayout } from "@/types";
+import { MAX_VIEW_ZOOM, MIN_VIEW_ZOOM } from "./table-layout";
 
 const WHEEL_LAYER_COOLDOWN = 110;
 const WHEEL_LAYER_THRESHOLD = 36;
@@ -135,7 +136,10 @@ export function TarotStudio() {
 
   const adjustViewZoom = useCallback((delta: number) => {
     setViewZoom((current) =>
-      Math.min(1.35, Math.max(0.65, Number((current + delta).toFixed(2))))
+      Math.min(
+        MAX_VIEW_ZOOM,
+        Math.max(MIN_VIEW_ZOOM, Number((current + delta).toFixed(2)))
+      )
     );
   }, []);
 
@@ -330,7 +334,6 @@ export function TarotStudio() {
               key={spread.id}
               type="button"
               onClick={() => {
-                setViewZoom(spread.viewZoom);
                 dispatch({ type: "deal-spread", spread });
               }}
               disabled={deckCount < spread.slots.length}
@@ -350,7 +353,6 @@ export function TarotStudio() {
           onChange={(event) => {
             const nextCardSet = getCardSet(event.target.value);
             setActiveCardSetId(nextCardSet.id);
-            setViewZoom(1);
             dispatch({ type: "new-shuffle", cardSet: nextCardSet });
           }}
         >
@@ -431,7 +433,7 @@ export function TarotStudio() {
             type="button"
             aria-label="Zoom out"
             onClick={() => adjustViewZoom(-0.1)}
-            disabled={viewZoom <= 0.65}
+            disabled={viewZoom <= MIN_VIEW_ZOOM}
           >
             −
           </button>
@@ -447,7 +449,7 @@ export function TarotStudio() {
             type="button"
             aria-label="Zoom in"
             onClick={() => adjustViewZoom(0.1)}
-            disabled={viewZoom >= 1.35}
+            disabled={viewZoom >= MAX_VIEW_ZOOM}
           >
             +
           </button>
@@ -493,7 +495,6 @@ export function TarotStudio() {
           type="button"
           className="tarot-reset-action"
           onClick={() => {
-            setViewZoom(1);
             dispatch({ type: "new-shuffle", cardSet: activeCardSet });
           }}
         >

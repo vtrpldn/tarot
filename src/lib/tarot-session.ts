@@ -7,11 +7,13 @@ import type {
   TableSnapshot,
   TarotSession,
 } from "@/types";
+import { TABLE_POINT_LIMIT } from "@/types";
 import type { TarotSpread } from "@/lib/tarot-spreads";
 
 const HISTORY_LIMIT = 24;
 
-const clampTablePoint = (value: number) => Math.min(1, Math.max(-1, value));
+const clampTablePoint = (value: number) =>
+  Math.min(TABLE_POINT_LIMIT, Math.max(-TABLE_POINT_LIMIT, value));
 
 function shuffle<T>(items: T[]): T[] {
   const shuffled = [...items];
@@ -73,7 +75,6 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
     zone: "deck" as const,
     position: [0, 0] as TablePoint,
     rotation: 0,
-    scale: 1,
     zIndex: index,
     faceUp: false,
   }));
@@ -111,11 +112,11 @@ export function createLayout(
   layout: TableLayout
 ): Map<
   string,
-  Pick<TableCard, "position" | "rotation" | "scale" | "zIndex">
+  Pick<TableCard, "position" | "rotation" | "zIndex">
 > {
   const placements = new Map<
     string,
-    Pick<TableCard, "position" | "rotation" | "scale" | "zIndex">
+    Pick<TableCard, "position" | "rotation" | "zIndex">
   >();
   const orderedCards =
     layout === "sort"
@@ -136,7 +137,6 @@ export function createLayout(
       placements.set(card.id, {
         position: [0.3 + index * 0.008, index * 0.01],
         rotation: alignedRotation(card),
-        scale: 1,
         zIndex: index + 1,
       });
     });
@@ -147,17 +147,11 @@ export function createLayout(
   if (layout === "fan") {
     const midpoint = (orderedCards.length - 1) / 2;
     const spread = Math.min(0.24, 1.45 / Math.max(orderedCards.length, 1));
-    const cardScale = Math.min(
-      0.82,
-      2.9 / Math.max(orderedCards.length, 3)
-    );
-
     orderedCards.forEach((card, index) => {
       const offset = index - midpoint;
       placements.set(card.id, {
         position: [0.34 + offset * spread, -Math.abs(offset) * 0.025],
         rotation: alignedRotation(card) + offset * 8,
-        scale: cardScale,
         zIndex: index + 1,
       });
     });
@@ -172,8 +166,6 @@ export function createLayout(
   const rows = Math.max(1, Math.ceil(orderedCards.length / columns));
   const horizontalGap = Math.min(0.44, 1.65 / Math.max(columns - 1, 1));
   const verticalGap = Math.min(0.54, 1.45 / Math.max(rows - 1, 1));
-  const cardScale = Math.min(0.78, 1.85 / Math.max(columns, rows));
-
   orderedCards.forEach((card, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
@@ -183,7 +175,6 @@ export function createLayout(
         ((rows - 1) / 2 - row) * verticalGap,
       ],
       rotation: alignedRotation(card),
-      scale: cardScale,
       zIndex: index + 1,
     });
   });
@@ -209,7 +200,7 @@ export type TarotSessionAction =
       type: "layout";
       placements: Map<
         string,
-        Pick<TableCard, "position" | "rotation" | "scale" | "zIndex">
+        Pick<TableCard, "position" | "rotation" | "zIndex">
       >;
     }
   | { type: "undo" }
@@ -302,7 +293,6 @@ export function tarotSessionReducer(
         zone: "table" as const,
         position: [...placement.slot.position] as TablePoint,
         rotation: placement.slot.rotation,
-        scale: placement.slot.scale,
         zIndex: zIndexBase + placement.index,
         faceUp: false,
       };
@@ -328,7 +318,6 @@ export function tarotSessionReducer(
             ...candidate,
             zone: "table" as const,
             position: action.position,
-            scale: 1,
             zIndex: nextZIndex(session.cards),
           }
         : candidate

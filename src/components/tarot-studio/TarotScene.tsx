@@ -28,11 +28,13 @@ import {
   getTopDeckCard,
 } from "@/lib/tarot-session";
 import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
-import { createSceneTableLayout } from "./table-layout";
+import {
+  createSceneTableLayout,
+  MIN_VIEW_ZOOM,
+} from "./table-layout";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
 const BASE_CAMERA_ZOOM = 75;
-const MIN_VIEW_ZOOM = 0.65;
 const TABLE_SURFACE_Z = -0.16;
 
 type TarotSceneProps = {
@@ -296,6 +298,8 @@ function TarotTable({
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
+  const shadowHalfWidth = (baseViewportWidth / MIN_VIEW_ZOOM) * 0.55;
+  const shadowHalfHeight = (baseViewportHeight / MIN_VIEW_ZOOM) * 0.55;
   const layout = useMemo(
     () =>
       createSceneTableLayout({
@@ -349,7 +353,13 @@ function TarotTable({
         shadow-mapSize-height={1024}
         shadow-bias={-0.00035}
         shadow-radius={8}
-        shadow-normalBias={0.018}
+        shadow-normalBias={0.001}
+        shadow-camera-left={-shadowHalfWidth}
+        shadow-camera-right={shadowHalfWidth}
+        shadow-camera-top={shadowHalfHeight}
+        shadow-camera-bottom={-shadowHalfHeight}
+        shadow-camera-near={0.1}
+        shadow-camera-far={24}
       />
       <pointLight
         position={[4, -2, 5]}
@@ -385,7 +395,7 @@ function TarotTable({
             : TABLE_SURFACE_Z +
               CARD_THICKNESS / 2 +
               0.008 +
-              tableIndex * 0.0015;
+              tableIndex * 0.004;
 
         return (
           <CardMesh

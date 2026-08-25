@@ -1,4 +1,8 @@
 import type { TablePoint } from "@/types";
+import { TABLE_POINT_LIMIT } from "@/types";
+
+export const MIN_VIEW_ZOOM = 0.35;
+export const MAX_VIEW_ZOOM = 1.35;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(Math.max(value, minimum), maximum);
@@ -49,8 +53,16 @@ export function createSceneTableLayout({
     cardHeight,
     toWorld: ([x, y]) => [centerX + x * halfWidth, centerY + y * halfHeight],
     toPoint: (x, y) => [
-      clamp((x - centerX) / halfWidth, -1, 1),
-      clamp((y - centerY) / halfHeight, -1, 1),
+      clamp(
+        (x - centerX) / halfWidth,
+        -TABLE_POINT_LIMIT,
+        TABLE_POINT_LIMIT
+      ),
+      clamp(
+        (y - centerY) / halfHeight,
+        -TABLE_POINT_LIMIT,
+        TABLE_POINT_LIMIT
+      ),
     ],
   };
 }

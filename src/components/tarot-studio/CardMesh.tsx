@@ -4,6 +4,7 @@ import { RoundedBox, useTexture } from "@react-three/drei";
 import { ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import {
   Suspense,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -31,6 +32,13 @@ import { TAROT_SCENE_PALETTE } from "./theme";
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const DRAG_THRESHOLD = 0.045;
 const ROTATION_EDGE_THRESHOLD = 0.14;
+const DRAG_FOLLOW_LAMBDA = 21;
+const POSITION_SETTLE_LAMBDA = 11;
+const MAX_POINTER_SPEED = 7.5;
+const RELEASE_GLIDE_SECONDS = 0.06;
+const MAX_RELEASE_GLIDE = 0.32;
+const FLIP_DURATION_SECONDS = 0.52;
+const FLIP_LIFT = 0.14;
 
 export const CARD_THICKNESS = 0.11;
 
@@ -45,6 +53,9 @@ type DragState = {
   origin: Vector3;
   offset: Vector3;
   lastPoint: Vector3;
+  target: Vector3;
+  velocity: Vector3;
+  lastMoveAt: number;
   moved: boolean;
   tiltX: number;
   tiltY: number;
@@ -52,6 +63,57 @@ type DragState = {
   startRotation: number;
   previewRotation: number;
 };
+
+type FlipAnimation = {
+  from: number;
+  to: number;
+  elapsed: number;
+};
+
+type LostPointerCaptureBinding = {
+  target: HTMLElement;
+  handler: (event: PointerEvent) => void;
+};
+
+function sampleDragVelocity(
+  drag: DragState,
+  point: Vector3,
+  timestamp: number
+): [number, number] {
+  const deltaX = point.x - drag.lastPoint.x;
+  const deltaY = point.y - drag.lastPoint.y;
+  const elapsed = Math.min(
+    0.064,
+    Math.max(0.004, (timestamp - drag.lastMoveAt) / 1000)
+  );
+  let sampleVelocityX = deltaX / elapsed;
+  let sampleVelocityY = deltaY / elapsed;
+  const sampleSpeed = Math.hypot(sampleVelocityX, sampleVelocityY);
+
+  if (sampleSpeed > MAX_POINTER_SPEED) {
+    const velocityScale = MAX_POINTER_SPEED / sampleSpeed;
+    sampleVelocityX *= velocityScale;
+    sampleVelocityY *= velocityScale;
+  }
+
+  if (Math.hypot(deltaX, deltaY) > 0.0001) {
+    const velocityBlend = 1 - Math.exp(-elapsed * 18);
+    drag.velocity.x = MathUtils.lerp(
+      drag.velocity.x,
+      sampleVelocityX,
+      velocityBlend
+    );
+    drag.velocity.y = MathUtils.lerp(
+      drag.velocity.y,
+      sampleVelocityY,
+      velocityBlend
+    );
+    drag.lastMoveAt = timestamp;
+  }
+
+  drag.lastPoint.copy(point);
+  return [deltaX, deltaY];
+}
 
 type CardMeshProps = {
   card: TableCard;
@@ -108,6 +170,7 @@ export function CardArtwork({
       position={position}
       rotation={rotation}
       renderOrder={2}
+      castShadow
       receiveShadow
     >
       <planeGeometry args={[width, height]} />
@@ -223,7 +286,10 @@ export function CardMesh({
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
   const dragRef = useRef<DragState | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const flipAnimationRef = useRef<FlipAnimation | null>(null);
+  const lostPointerCaptureRef =
+    useRef<LostPointerCaptureBinding | null>(null);
+  const deckPreviewRef = useRef<TablePoint | null>(null);
   const [hasRevealed, setHasRevealed] = useState(card.faceUp);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
@@ -231,15 +297,54 @@ export function CardMesh({
   const canvas = useThree((state) => state.gl.domElement);
   const targetPosition =
     card.zone === "deck" ? deckPosition : layout.toWorld(card.position);
+  const targetPositionX = targetPosition[0];
+  const targetPositionY = targetPosition[1];
   const cardWidth = layout.cardWidth;
   const cardHeight = layout.cardHeight;
   const frontTexture = definition.image.preview;
 
+  const clearLostPointerCapture = useCallback(() => {
+    const binding = lostPointerCaptureRef.current;
+
+    if (!binding) {
+      return;
+    }
+
+    binding.target.removeEventListener(
+      "lostpointercapture",
+      binding.handler
+    );
+    lostPointerCaptureRef.current = null;
+  }, []);
+
+  const setDeckPreview = useCallback(
+    (position: TablePoint | null) => {
+      const current = deckPreviewRef.current;
+      const unchanged =
+        current === position ||
+        (current !== null &&
+          position !== null &&
+          Math.abs(current[0] - position[0]) <= 0.0005 &&
+          Math.abs(current[1] - position[1]) <= 0.0005);
+
+      if (unchanged) {
+        return;
+      }
+
+      deckPreviewRef.current = position;
+      onPreviewDeckPosition(position);
+    },
+    [onPreviewDeckPosition]
+  );
+
   useEffect(() => {
     if (card.faceUp) {
       setHasRevealed(true);
+      useTexture.preload(frontTexture);
     }
-  }, [card.faceUp]);
+
+    invalidate();
+  }, [card.faceUp, frontTexture, invalidate]);
 
   useEffect(() => {
     if (card.zone === "table" && selected) {
@@ -249,16 +354,26 @@ export function CardMesh({
 
   useEffect(
     () => () => {
+      dragRef.current = null;
+      flipAnimationRef.current = null;
+      clearLostPointerCapture();
+      setDeckPreview(null);
       canvas.style.cursor = "grab";
     },
-    [canvas]
+    [canvas, clearLostPointerCapture, setDeckPreview]
   );
 
   useLayoutEffect(() => {
     const group = groupRef.current;
     const cardChanged = cardIdentityRef.current !== card.id;
 
-    if (!group || (hasPositionedRef.current && !cardChanged)) {
+    const flippingCard = flipRef.current;
+
+    if (
+      !group ||
+      !flippingCard ||
+      (hasPositionedRef.current && !cardChanged)
+    ) {
       return;
     }
 
@@ -266,10 +381,51 @@ export function CardMesh({
       card.zone === "table" ? deckPosition : targetPosition;
 
     group.position.set(initialPosition[0], initialPosition[1], restingZ);
+    group.rotation.set(0, 0, 0);
     group.scale.set(1, 1, 1);
+    flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
+    flipAnimationRef.current = null;
     hasPositionedRef.current = true;
     cardIdentityRef.current = card.id;
-  }, [card.id, card.zone, deckPosition, restingZ, targetPosition]);
+  }, [card.faceUp, card.id, card.zone, deckPosition, restingZ, targetPosition]);
+
+  useEffect(() => {
+    const flippingCard = flipRef.current;
+
+    if (!flippingCard) {
+      return;
+    }
+
+    const target = card.faceUp ? 0 : Math.PI;
+
+    if (reducedMotion) {
+      flippingCard.rotation.set(0, target, 0);
+      flipAnimationRef.current = null;
+      invalidate();
+      return;
+    }
+
+    if (Math.abs(flippingCard.rotation.y - target) <= 0.0008) {
+      return;
+    }
+
+    flipAnimationRef.current = {
+      from: flippingCard.rotation.y,
+      to: target,
+      elapsed: 0,
+    };
+    invalidate();
+  }, [card.faceUp, invalidate, reducedMotion]);
+
+  useEffect(() => {
+    invalidate();
+  }, [
+    card.rotation,
+    card.zone,
+    invalidate,
+    targetPositionX,
+    targetPositionY,
+  ]);
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -279,52 +435,77 @@ export function CardMesh({
       return;
     }
 
-    const flipTarget = card.faceUp ? 0 : Math.PI;
     const drag = dragRef.current;
+    const moving = drag && drag.mode !== "rotate";
     const rotationDegrees =
-      dragging && drag?.mode === "rotate"
+      drag?.mode === "rotate"
         ? drag.previewRotation
         : card.rotation;
     const rotationTarget = MathUtils.degToRad(rotationDegrees);
     const tiltXTarget =
-      dragging && drag?.mode === "move" ? drag.tiltX : 0;
+      drag?.mode === "move" ? drag.tiltX : 0;
     const tiltYTarget =
-      dragging && drag?.mode === "move" ? drag.tiltY : 0;
-    const lift = dragging
+      drag?.mode === "move" ? drag.tiltY : 0;
+    const lift = drag
       ? drag?.mode === "move"
-        ? 0.18
+        ? 0.15
         : drag?.mode === "rotate"
           ? 0.035
           : 0.006
       : 0;
-    const flipLift = reducedMotion
-      ? 0
-      : Math.abs(Math.sin(flippingCard.rotation.y)) * 0.1;
-    const zTarget = restingZ + lift + flipLift;
-    const positionXTarget = targetPosition[0];
-    const positionYTarget = targetPosition[1];
-    const scaleTarget = card.scale;
+    const flipAnimation = flipAnimationRef.current;
+    let flipIsActive = false;
 
     if (reducedMotion) {
-      flippingCard.rotation.y = flipTarget;
+      flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
+      flipAnimationRef.current = null;
+    } else if (flipAnimation) {
+      flipAnimation.elapsed = Math.min(
+        FLIP_DURATION_SECONDS,
+        flipAnimation.elapsed + Math.min(delta, 1 / 30)
+      );
+      const progress = flipAnimation.elapsed / FLIP_DURATION_SECONDS;
+      const easedProgress =
+        progress < 0.5
+          ? 4 * progress * progress * progress
+          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+      flippingCard.rotation.y = MathUtils.lerp(
+        flipAnimation.from,
+        flipAnimation.to,
+        easedProgress
+      );
+      flippingCard.rotation.x = Math.sin(Math.PI * progress) * 0.025;
+      flipIsActive = progress < 1;
+
+      if (!flipIsActive) {
+        flippingCard.rotation.set(0, flipAnimation.to, 0);
+        flipAnimationRef.current = null;
+      }
+    }
+
+    const flipLift =
+      reducedMotion || !flipIsActive
+        ? 0
+        : Math.abs(Math.sin(flippingCard.rotation.y)) * FLIP_LIFT;
+    const zTarget = restingZ + lift + flipLift;
+    const positionXTarget = moving ? drag.target.x : targetPositionX;
+    const positionYTarget = moving ? drag.target.y : targetPositionY;
+
+    if (reducedMotion) {
       group.rotation.x = 0;
       group.rotation.y = 0;
       group.rotation.z = rotationTarget;
-      if (!dragging) {
-        group.position.x = positionXTarget;
-        group.position.y = positionYTarget;
-      }
+      group.position.x = positionXTarget;
+      group.position.y = positionYTarget;
       group.position.z = zTarget;
-      group.scale.set(scaleTarget, scaleTarget, 1);
+      group.scale.set(1, 1, 1);
+      if (drag?.mode === "move-deck") {
+        setDeckPreview([positionXTarget, positionYTarget]);
+      }
       return;
     }
 
-    const nextFlip = MathUtils.damp(
-      flippingCard.rotation.y,
-      flipTarget,
-      10,
-      delta
-    );
     const nextTiltX = MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
     const nextTiltY = MathUtils.damp(group.rotation.y, tiltYTarget, 14, delta);
     const nextRotation = MathUtils.damp(
@@ -333,38 +514,43 @@ export function CardMesh({
       14,
       delta
     );
-    const nextX = dragging
-      ? group.position.x
-      : MathUtils.damp(group.position.x, positionXTarget, 15, delta);
-    const nextY = dragging
-      ? group.position.y
-      : MathUtils.damp(group.position.y, positionYTarget, 15, delta);
-    const nextZ = MathUtils.damp(group.position.z, zTarget, 18, delta);
-    const nextScale = MathUtils.damp(
-      group.scale.x,
-      scaleTarget,
-      12,
+    const positionLambda = moving
+      ? DRAG_FOLLOW_LAMBDA
+      : POSITION_SETTLE_LAMBDA;
+    const nextX = MathUtils.damp(
+      group.position.x,
+      positionXTarget,
+      positionLambda,
       delta
     );
+    const nextY = MathUtils.damp(
+      group.position.y,
+      positionYTarget,
+      positionLambda,
+      delta
+    );
+    const nextZ = MathUtils.damp(group.position.z, zTarget, 18, delta);
 
     const needsAnotherFrame =
-      Math.abs(nextFlip - flipTarget) > 0.0008 ||
+      flipIsActive ||
       Math.abs(nextTiltX - tiltXTarget) > 0.0008 ||
       Math.abs(nextTiltY - tiltYTarget) > 0.0008 ||
       Math.abs(nextRotation - rotationTarget) > 0.0008 ||
       Math.abs(nextX - positionXTarget) > 0.0008 ||
       Math.abs(nextY - positionYTarget) > 0.0008 ||
-      Math.abs(nextZ - zTarget) > 0.0008 ||
-      Math.abs(nextScale - scaleTarget) > 0.0008;
+      Math.abs(nextZ - zTarget) > 0.0008;
 
-    flippingCard.rotation.y = nextFlip;
     group.rotation.x = nextTiltX;
     group.rotation.y = nextTiltY;
     group.rotation.z = nextRotation;
     group.position.x = nextX;
     group.position.y = nextY;
     group.position.z = nextZ;
-    group.scale.set(nextScale, nextScale, 1);
+    group.scale.set(1, 1, 1);
+
+    if (drag?.mode === "move-deck") {
+      setDeckPreview([nextX, nextY]);
+    }
 
     if (needsAnotherFrame) {
       invalidate();
@@ -402,29 +588,37 @@ export function CardMesh({
       point.x - group.position.x
     );
 
+    const canCapture = typeof target.setPointerCapture === "function";
     target.setPointerCapture?.(event.pointerId);
     const pointerTarget = event.nativeEvent.target;
 
-    if (pointerTarget instanceof HTMLElement) {
+    clearLostPointerCapture();
+    if (canCapture && pointerTarget instanceof HTMLElement) {
+      const handleLostPointerCapture = (lostEvent: PointerEvent) => {
+        lostPointerCaptureRef.current = null;
+        const activeDrag = dragRef.current;
+
+        if (!activeDrag || activeDrag.pointerId !== lostEvent.pointerId) {
+          return;
+        }
+
+        dragRef.current = null;
+        if (activeDrag.mode === "move-deck") {
+          setDeckPreview(null);
+        }
+        canvas.style.cursor = "grab";
+        invalidate();
+      };
+
       pointerTarget.addEventListener(
         "lostpointercapture",
-        (lostEvent) => {
-          const activeDrag = dragRef.current;
-
-          if (!activeDrag || activeDrag.pointerId !== lostEvent.pointerId) {
-            return;
-          }
-
-          dragRef.current = null;
-          if (activeDrag.mode === "move-deck") {
-            onPreviewDeckPosition(null);
-          }
-          setDragging(false);
-          canvas.style.cursor = "grab";
-          invalidate();
-        },
+        handleLostPointerCapture,
         { once: true }
       );
+      lostPointerCaptureRef.current = {
+        target: pointerTarget,
+        handler: handleLostPointerCapture,
+      };
     }
 
     dragRef.current = {
@@ -437,6 +631,9 @@ export function CardMesh({
         0
       ),
       lastPoint: point.clone(),
+      target: group.position.clone(),
+      velocity: new Vector3(),
+      lastMoveAt: event.timeStamp,
       moved: false,
       tiltX: 0,
       tiltY: 0,
@@ -445,9 +642,8 @@ export function CardMesh({
       previewRotation: card.rotation,
     };
     if (mode === "move-deck") {
-      onPreviewDeckPosition([group.position.x, group.position.y]);
+      setDeckPreview([group.position.x, group.position.y]);
     }
-    setDragging(true);
     canvas.style.cursor = mode === "rotate" ? "crosshair" : "grabbing";
     onSelect(mode === "move-deck" ? null : card.id);
     invalidate();
@@ -515,8 +711,11 @@ export function CardMesh({
 
     const nextX = point.x - drag.offset.x;
     const nextY = point.y - drag.offset.y;
-    const deltaX = point.x - drag.lastPoint.x;
-    const deltaY = point.y - drag.lastPoint.y;
+    const [deltaX, deltaY] = sampleDragVelocity(
+      drag,
+      point,
+      event.timeStamp
+    );
 
     if (point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
       drag.moved = true;
@@ -524,12 +723,7 @@ export function CardMesh({
 
     drag.tiltX = MathUtils.clamp(-deltaY * 0.48, -0.13, 0.13);
     drag.tiltY = MathUtils.clamp(deltaX * 0.48, -0.13, 0.13);
-    drag.lastPoint.copy(point);
-    group.position.x = nextX;
-    group.position.y = nextY;
-    if (drag.mode === "move-deck") {
-      onPreviewDeckPosition([nextX, nextY]);
-    }
+    drag.target.set(nextX, nextY, group.position.z);
     invalidate();
   };
 
@@ -544,6 +738,7 @@ export function CardMesh({
     event.stopPropagation();
     const target = event.target as unknown as PointerCaptureTarget;
     dragRef.current = null;
+    clearLostPointerCapture();
     target.releasePointerCapture?.(event.pointerId);
 
     if (!cancelled) {
@@ -554,9 +749,32 @@ export function CardMesh({
         );
       } else if (drag.mode !== "rotate" && drag.moved) {
         const point = getPointerPoint(event);
+        const releaseX = point.x - drag.offset.x;
+        const releaseY = point.y - drag.offset.y;
+        sampleDragVelocity(drag, point, event.timeStamp);
+        drag.target.set(releaseX, releaseY, group.position.z);
+        const idleSeconds = Math.max(
+          0,
+          (event.timeStamp - drag.lastMoveAt) / 1000
+        );
+        const velocityDecay = reducedMotion
+          ? 0
+          : Math.exp(-idleSeconds * 10);
+        let glideX =
+          drag.velocity.x * velocityDecay * RELEASE_GLIDE_SECONDS;
+        let glideY =
+          drag.velocity.y * velocityDecay * RELEASE_GLIDE_SECONDS;
+        const glideDistance = Math.hypot(glideX, glideY);
+
+        if (glideDistance > MAX_RELEASE_GLIDE) {
+          const glideScale = MAX_RELEASE_GLIDE / glideDistance;
+          glideX *= glideScale;
+          glideY *= glideScale;
+        }
+
         const nextPoint = layout.toPoint(
-          point.x - drag.offset.x,
-          point.y - drag.offset.y
+          releaseX + glideX,
+          releaseY + glideY
         );
 
         if (drag.mode === "move-deck") {
@@ -570,9 +788,8 @@ export function CardMesh({
     }
 
     if (drag.mode === "move-deck") {
-      onPreviewDeckPosition(null);
+      setDeckPreview(null);
     }
-    setDragging(false);
     canvas.style.cursor = "grab";
     invalidate();
   };
@@ -586,12 +803,8 @@ export function CardMesh({
   };
 
   return (
-    <group
-      ref={groupRef}
-      position={[targetPosition[0], targetPosition[1], restingZ]}
-      rotation={[0, 0, MathUtils.degToRad(card.rotation)]}
-    >
-      <group ref={flipRef} rotation={[0, card.faceUp ? 0 : Math.PI, 0]}>
+    <group ref={groupRef}>
+      <group ref={flipRef}>
         <RoundedBox
           args={[cardWidth, cardHeight, CARD_THICKNESS]}
           radius={0.075}
