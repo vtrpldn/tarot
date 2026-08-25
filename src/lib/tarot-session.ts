@@ -147,9 +147,16 @@ export function createLayout(
       : cards;
 
   if (layout === "stack") {
+    const stackIntervals = Math.max(1, orderedCards.length - 1);
+    const horizontalStep = Math.min(0.008, 0.08 / stackIntervals);
+    const verticalStep = Math.min(0.01, 0.1 / stackIntervals);
+
     orderedCards.forEach((card, index) => {
       placements.set(card.id, {
-        position: [0.3 + index * 0.008, index * 0.01],
+        position: [
+          0.3 + index * horizontalStep,
+          index * verticalStep,
+        ],
         rotation: alignedRotation(card),
         zIndex: index + 1,
       });

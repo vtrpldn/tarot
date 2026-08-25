@@ -934,7 +934,7 @@ function TarotTable({
       <ambientLight intensity={0.48} />
       <directionalLight
         castShadow
-        position={[-4, 7, 8]}
+        position={[-3, 4.5, 12]}
         intensity={2.45}
         color={TAROT_SCENE_PALETTE.keyLight}
         shadow-mapSize-width={1024}
