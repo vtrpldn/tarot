@@ -4,6 +4,7 @@ import { RoundedBox, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -27,6 +28,7 @@ import {
   getTableCards,
   getTopDeckCard,
 } from "@/lib/tarot-session";
+import type { CardSoundPlayer } from "@/lib/card-sounds";
 import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
 import {
   createSceneTableLayout,
@@ -63,6 +65,7 @@ type TarotSceneProps = {
   session: TarotSession;
   reducedMotion: boolean;
   viewZoom: number;
+  deckMoveMode: boolean;
   onLayoutChange: (layout: SceneTableLayout) => void;
   onSelect: (cardId: string | null) => void;
   onDraw: (
@@ -79,6 +82,7 @@ type TarotSceneProps = {
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
   onHover: (cardId: string | null) => void;
+  onSound: CardSoundPlayer;
 };
 
 function AnimatedCameraZoom({
@@ -391,6 +395,7 @@ function TarotTable({
   cardSet,
   session,
   reducedMotion,
+  deckMoveMode,
   onSelect,
   onDraw,
   onMoveDeck,
@@ -398,6 +403,7 @@ function TarotTable({
   onFlip,
   onRotate,
   onHover,
+  onSound,
   onLayoutChange,
 }: TarotSceneProps) {
   const size = useThree((state) => state.size);
@@ -558,6 +564,7 @@ function TarotTable({
             dragRenderOrder={DRAG_RENDER_ORDER}
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}
+            deckMoveMode={deckMoveMode}
             onSelect={onSelect}
             onDraw={onDraw}
             onMoveDeck={onMoveDeck}
@@ -566,6 +573,7 @@ function TarotTable({
             onFlip={onFlip}
             onRotate={onRotate}
             onHover={onHover}
+            onSound={onSound}
           />
         );
       })}
@@ -573,7 +581,7 @@ function TarotTable({
   );
 }
 
-export function TarotScene(props: TarotSceneProps) {
+export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
   return (
     <Canvas
       className="tarot-canvas"
@@ -600,4 +608,4 @@ export function TarotScene(props: TarotSceneProps) {
       <TarotTable {...props} />
     </Canvas>
   );
-}
+});
