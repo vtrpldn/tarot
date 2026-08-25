@@ -9,7 +9,9 @@
     "lint": "next lint",
     "optimize:artwork": "node scripts/optimize-tarot-artwork.mjs",
     "build:lenormand-assets": "node scripts/build-lenormand-assets.mjs",
-    "validate:lenormand-assets": "node scripts/validate-lenormand-assets.mjs"
+    "validate:lenormand-assets": "node scripts/validate-lenormand-assets.mjs",
+    "build:marseille-assets": "node scripts/build-marseille-assets.mjs",
+    "validate:marseille-assets": "node scripts/validate-marseille-assets.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
