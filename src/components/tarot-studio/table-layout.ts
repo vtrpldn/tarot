@@ -1,8 +1,11 @@
 import type { TablePoint } from "@/types";
-import { TABLE_POINT_LIMIT } from "@/types";
+import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
 
 export const MIN_VIEW_ZOOM = 0.3;
 export const MAX_VIEW_ZOOM = 1.35;
+export const TABLE_SURFACE_OVERSCAN = 1.04;
+export const DECK_MAT_WIDTH_PADDING = 0.58;
+export const DECK_MAT_HEIGHT_PADDING = 0.64;
 const CARD_SCALE_AT_100_PERCENT = 0.8;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -23,6 +26,8 @@ export type SceneTableLayout = {
    */
   deckPositionCandidates: DeckPositionCandidate[];
   toPoint: (x: number, y: number) => TablePoint;
+  /** Converts a planner position using the deck's wider parking range. */
+  toDeckPoint: (x: number, y: number) => TablePoint;
   toWorld: (point: TablePoint) => [number, number];
 };
 
@@ -44,6 +49,49 @@ export type DeckPositionCandidate = {
   position: TablePoint;
   worldPosition: [number, number];
 };
+
+export function getViewPanBounds(
+  viewportBounds: SceneBounds,
+  viewZoom: number
+): SceneBounds {
+  const zoom = clamp(
+    Number.isFinite(viewZoom) ? viewZoom : 1,
+    MIN_VIEW_ZOOM,
+    MAX_VIEW_ZOOM
+  );
+  const viewportWidth = viewportBounds.right - viewportBounds.left;
+  const viewportHeight = viewportBounds.top - viewportBounds.bottom;
+  const surfaceHalfWidth =
+    (viewportWidth / MIN_VIEW_ZOOM) * TABLE_SURFACE_OVERSCAN * 0.5;
+  const surfaceHalfHeight =
+    (viewportHeight / MIN_VIEW_ZOOM) * TABLE_SURFACE_OVERSCAN * 0.5;
+  const visibleHalfWidth = viewportWidth / zoom / 2;
+  const visibleHalfHeight = viewportHeight / zoom / 2;
+  const maximumX = Math.max(0, surfaceHalfWidth - visibleHalfWidth);
+  const maximumY = Math.max(0, surfaceHalfHeight - visibleHalfHeight);
+
+  return {
+    left: -maximumX,
+    right: maximumX,
+    top: maximumY,
+    bottom: -maximumY,
+  };
+}
+
+export function clampViewPan(
+  pan: TablePoint,
+  viewportBounds: SceneBounds,
+  viewZoom: number
+): TablePoint {
+  const bounds = getViewPanBounds(viewportBounds, viewZoom);
+  const x = Number.isFinite(pan[0]) ? pan[0] : 0;
+  const y = Number.isFinite(pan[1]) ? pan[1] : 0;
+
+  return [
+    clamp(x, bounds.left, bounds.right),
+    clamp(y, bounds.bottom, bounds.top),
+  ];
+}
 
 export function createSceneTableLayout({
   viewportWidth,
@@ -90,18 +138,28 @@ export function createSceneTableLayout({
   const halfHeight = Math.max((tableTop - tableBottom) / 2, cardHeight / 2);
   const deckSideInset = 0.12;
   const deckVerticalInset = isMobile ? 0.58 : 0.95;
-  const toPoint = (x: number, y: number): TablePoint => [
+  const deckWidth = cardWidth + DECK_MAT_WIDTH_PADDING;
+  const deckHeight = cardHeight + DECK_MAT_HEIGHT_PADDING;
+  const toLimitedPoint = (
+    x: number,
+    y: number,
+    limit: number
+  ): TablePoint => [
     clamp(
       (x - centerX) / halfWidth,
-      -TABLE_POINT_LIMIT,
-      TABLE_POINT_LIMIT
+      -limit,
+      limit
     ),
     clamp(
       (y - centerY) / halfHeight,
-      -TABLE_POINT_LIMIT,
-      TABLE_POINT_LIMIT
+      -limit,
+      limit
     ),
   ];
+  const toPoint = (x: number, y: number): TablePoint =>
+    toLimitedPoint(x, y, TABLE_POINT_LIMIT);
+  const toDeckPoint = (x: number, y: number): TablePoint =>
+    toLimitedPoint(x, y, DECK_POINT_LIMIT);
   const toWorld = ([x, y]: TablePoint): [number, number] => [
     centerX + x * halfWidth,
     centerY + y * halfHeight,
@@ -132,32 +190,32 @@ export function createSceneTableLayout({
   const deckPositionCandidates: DeckPositionCandidate[] = [
     createDeckCandidate(
       "top-left",
-      tableLeft + cardWidth / 2 + deckSideInset,
-      tableTop - cardHeight / 2 - deckVerticalInset
+      tableLeft + deckWidth / 2 + deckSideInset,
+      tableTop - deckHeight / 2 - deckVerticalInset
     ),
     createDeckCandidate(
       "top-right",
-      tableRight - cardWidth / 2 - deckSideInset,
-      tableTop - cardHeight / 2 - deckVerticalInset
+      tableRight - deckWidth / 2 - deckSideInset,
+      tableTop - deckHeight / 2 - deckVerticalInset
     ),
     createDeckCandidate(
       "bottom-left",
-      tableLeft + cardWidth / 2 + deckSideInset,
-      tableBottom + cardHeight / 2 + deckSideInset
+      tableLeft + deckWidth / 2 + deckSideInset,
+      tableBottom + deckHeight / 2 + deckSideInset
     ),
     createDeckCandidate(
       "bottom-right",
-      tableRight - cardWidth / 2 - deckSideInset,
-      tableBottom + cardHeight / 2 + deckSideInset
+      tableRight - deckWidth / 2 - deckSideInset,
+      tableBottom + deckHeight / 2 + deckSideInset
     ),
     createDeckCandidate(
       "left",
-      tableLeft + cardWidth / 2 + deckSideInset,
+      tableLeft + deckWidth / 2 + deckSideInset,
       centerY
     ),
     createDeckCandidate(
       "right",
-      tableRight - cardWidth / 2 - deckSideInset,
+      tableRight - deckWidth / 2 - deckSideInset,
       centerY
     ),
   ];
@@ -172,5 +230,6 @@ export function createSceneTableLayout({
     deckPositionCandidates,
     toWorld,
     toPoint,
+    toDeckPoint,
   };
 }

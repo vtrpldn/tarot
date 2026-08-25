@@ -37,6 +37,10 @@ import {
   type CardSoundPlayOptions,
 } from "@/lib/card-sounds";
 import {
+  getArrangementPresentation,
+  type AutomaticCardPlacement,
+} from "@/lib/card-arrangement";
+import {
   createLayout,
   createTarotSession,
   getRemainingDeckCount,
@@ -55,6 +59,7 @@ import {
 } from "@/lib/tarot-workspace";
 import type { CardLayerDirection, TableLayout, TablePoint } from "@/types";
 import {
+  clampViewPan,
   MAX_VIEW_ZOOM,
   MIN_VIEW_ZOOM,
   type SceneTableLayout,
@@ -70,11 +75,11 @@ const COURT_RANKS = new Set(["page", "knight", "queen", "king"]);
 
 type TarotCollectionId = "all" | "major" | "minor" | "court";
 
-const COLLECTION_ZOOM: Record<TarotCollectionId, number> = {
-  all: MIN_VIEW_ZOOM,
-  major: 0.48,
-  minor: 0.35,
-  court: 0.48,
+type ActiveAutomaticArrangement = {
+  adjustZoom: boolean;
+  deckPosition: TablePoint;
+  includeDeck: boolean;
+  placements: AutomaticCardPlacement[];
 };
 
 function getCollectionColumnCount(
@@ -124,6 +129,15 @@ function createCollectionPlacements(
       ] as const;
     })
   );
+}
+
+function copyAutomaticPlacements(
+  placements: Iterable<AutomaticCardPlacement>
+): AutomaticCardPlacement[] {
+  return Array.from(placements, (placement) => ({
+    position: [...placement.position] as TablePoint,
+    rotation: placement.rotation,
+  }));
 }
 
 const TarotScene = dynamic(
@@ -426,7 +440,8 @@ export function TarotStudio() {
   const canvasShellRef = useRef<HTMLDivElement>(null);
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
-  const activeSpreadRef = useRef<CardSpread | null>(null);
+  const viewZoomRef = useRef(1);
+  const activeArrangementRef = useRef<ActiveAutomaticArrangement | null>(null);
   const spacePressedRef = useRef(false);
   const panGestureRef = useRef<{
     pointerId: number;
@@ -471,6 +486,28 @@ export function TarotStudio() {
   );
   const [isReadingLoading, setIsReadingLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("en");
+
+  useEffect(() => {
+    viewZoomRef.current = viewZoom;
+    const layout = sceneLayoutRef.current;
+
+    if (!layout) {
+      return;
+    }
+
+    setViewPan((current) => {
+      const next = clampViewPan(
+        current,
+        layout.viewportBounds,
+        viewZoom
+      );
+
+      return next[0] === current[0] && next[1] === current[1]
+        ? current
+        : next;
+    });
+  }, [viewZoom]);
+
   const messages = getMessages(locale);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
@@ -673,19 +710,51 @@ export function TarotStudio() {
   }, []);
 
   const arrangeCards = useCallback(
-    (layout: TableLayout) => {
-      if (tableCards.length === 0) {
+    (tableLayout: TableLayout) => {
+      const layout = sceneLayoutRef.current;
+
+      if (tableCards.length === 0 || !layout) {
         return;
       }
 
-      activeSpreadRef.current = null;
+      const placements = createLayout(
+        tableCards,
+        activeCardSet,
+        tableLayout
+      );
+      const automaticPlacements = copyAutomaticPlacements(
+        placements.values()
+      );
+      const includeDeck = deckCount > 0;
+      const presentation = getArrangementPresentation(
+        automaticPlacements,
+        layout,
+        {
+          includeDeck,
+          preferredDeckPosition: session.deckPosition,
+        }
+      );
+
+      activeArrangementRef.current = {
+        adjustZoom: false,
+        deckPosition: presentation.deckPosition,
+        includeDeck,
+        placements: automaticPlacements,
+      };
       playCardSound("arrange");
       dispatch({
         type: "layout",
-        placements: createLayout(tableCards, activeCardSet, layout),
+        deckPosition: presentation.deckPosition,
+        placements,
       });
     },
-    [activeCardSet, playCardSound, tableCards]
+    [
+      activeCardSet,
+      deckCount,
+      playCardSound,
+      session.deckPosition,
+      tableCards,
+    ]
   );
 
   const dealSpread = useCallback(
@@ -696,8 +765,17 @@ export function TarotStudio() {
         return;
       }
 
-      const presentation = getSpreadPresentation(spread, layout);
-      activeSpreadRef.current = spread;
+      const includeDeck = deckCount > spread.slots.length;
+      const presentation = getSpreadPresentation(spread, layout, {
+        includeDeck,
+        preferredDeckPosition: session.deckPosition,
+      });
+      activeArrangementRef.current = {
+        adjustZoom: true,
+        deckPosition: presentation.deckPosition,
+        includeDeck,
+        placements: copyAutomaticPlacements(spread.slots),
+      };
       setViewPan([0, 0]);
       setViewZoom(presentation.zoom);
       playCardSound("arrange");
@@ -708,7 +786,7 @@ export function TarotStudio() {
         deckPosition: presentation.deckPosition,
       });
     },
-    [playCardSound]
+    [deckCount, playCardSound, session.deckPosition]
   );
 
   const flipSelected = useCallback(() => {
@@ -720,7 +798,7 @@ export function TarotStudio() {
 
   const turnSelected = useCallback((degrees: number) => {
     if (selectedCard?.zone === "table") {
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("rotate");
       dispatch({ type: "rotate", cardId: selectedCard.id, degrees });
     }
@@ -739,16 +817,42 @@ export function TarotStudio() {
   const handleLayoutChange = useCallback((layout: SceneTableLayout) => {
     sceneLayoutRef.current = layout;
     setIsSceneLayoutReady(true);
+    setViewPan((current) => {
+      const next = clampViewPan(
+        current,
+        layout.viewportBounds,
+        viewZoomRef.current
+      );
 
-    const spread = activeSpreadRef.current;
+      return next[0] === current[0] && next[1] === current[1]
+        ? current
+        : next;
+    });
 
-    if (spread) {
-      const presentation = getSpreadPresentation(spread, layout);
-      setViewZoom(presentation.zoom);
-      dispatch({
-        type: "sync-deck-position",
-        position: presentation.deckPosition,
-      });
+    const arrangement = activeArrangementRef.current;
+
+    if (arrangement) {
+      const presentation = getArrangementPresentation(
+        arrangement.placements,
+        layout,
+        {
+          includeDeck: arrangement.includeDeck,
+          preferredDeckPosition: arrangement.deckPosition,
+        }
+      );
+
+      arrangement.deckPosition = presentation.deckPosition;
+
+      if (arrangement.adjustZoom) {
+        setViewZoom(presentation.zoom);
+      }
+
+      if (arrangement.includeDeck) {
+        dispatch({
+          type: "sync-deck-position",
+          position: presentation.deckPosition,
+        });
+      }
     }
   }, []);
 
@@ -758,7 +862,7 @@ export function TarotStudio() {
 
   const handleDraw = useCallback(
     (cardId: string, position: TablePoint, rotation?: number) => {
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("draw");
       dispatch({ type: "draw", cardId, position, rotation });
     },
@@ -766,7 +870,7 @@ export function TarotStudio() {
   );
 
   const handleMoveDeck = useCallback((position: TablePoint) => {
-    activeSpreadRef.current = null;
+    activeArrangementRef.current = null;
     setIsDeckMoveMode(false);
     playCardSound("drop");
     dispatch({ type: "move-deck", position });
@@ -774,7 +878,7 @@ export function TarotStudio() {
 
   const handleMove = useCallback(
     (cardId: string, position: TablePoint, rotation?: number) => {
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("drop");
       dispatch({ type: "move", cardId, position, rotation });
     },
@@ -787,7 +891,7 @@ export function TarotStudio() {
   }, [playCardSound]);
 
   const handleRotate = useCallback((cardId: string, degrees: number) => {
-    activeSpreadRef.current = null;
+    activeArrangementRef.current = null;
     playCardSound("rotate");
     dispatch({ type: "rotate", cardId, degrees });
   }, [playCardSound]);
@@ -860,10 +964,7 @@ export function TarotStudio() {
       return;
     }
 
-    if (previous.cards.every((card) => card.zone === "deck")) {
-      activeSpreadRef.current = null;
-    }
-
+    activeArrangementRef.current = null;
     playCardSound("arrange");
     dispatch({ type: "undo" });
   }, [playCardSound, session.history]);
@@ -875,12 +976,13 @@ export function TarotStudio() {
       return;
     }
 
+    activeArrangementRef.current = null;
     playCardSound("arrange");
     dispatch({ type: "redo" });
   }, [playCardSound, session.redo]);
 
   const resetTable = useCallback(() => {
-    activeSpreadRef.current = null;
+    activeArrangementRef.current = null;
     setIsDeckMoveMode(false);
     setIsInspectorCollapsed(true);
     setViewPan([0, 0]);
@@ -922,20 +1024,43 @@ export function TarotStudio() {
       );
       const layout = sceneLayoutRef.current;
 
-      activeSpreadRef.current = null;
+      if (!layout) {
+        return;
+      }
+
+      const placements = createCollectionPlacements(cardIds, collection);
+      const automaticPlacements = copyAutomaticPlacements(
+        placements.values()
+      );
+      const includeDeck = cardIds.length < activeCardSet.cards.length;
+      const presentation = getArrangementPresentation(
+        automaticPlacements,
+        layout,
+        {
+          includeDeck,
+          preferredDeckPosition: session.deckPosition,
+        }
+      );
+
+      activeArrangementRef.current = {
+        adjustZoom: true,
+        deckPosition: presentation.deckPosition,
+        includeDeck,
+        placements: automaticPlacements,
+      };
       setIsDeckMoveMode(false);
       setIsInspectorCollapsed(true);
       setViewPan([0, 0]);
-      setViewZoom(COLLECTION_ZOOM[collection]);
+      setViewZoom(presentation.zoom);
       playCardSound("arrange");
       dispatch({
         type: "show-collection",
         cardIds,
-        placements: createCollectionPlacements(cardIds, collection),
-        deckPosition: layout?.deckPositionCandidates[0]?.position,
+        placements,
+        deckPosition: presentation.deckPosition,
       });
     },
-    [activeCardSet, playCardSound]
+    [activeCardSet, playCardSound, session.deckPosition]
   );
 
   const adjustViewZoom = useCallback((delta: number) => {
@@ -1071,10 +1196,16 @@ export function TarotStudio() {
       const deltaX = event.clientX - gesture.startX;
       const deltaY = event.clientY - gesture.startY;
 
-      setViewPan([
-        gesture.startPan[0] - deltaX * unitsPerPixel,
-        gesture.startPan[1] + deltaY * unitsPerPixel,
-      ]);
+      setViewPan(
+        clampViewPan(
+          [
+            gesture.startPan[0] - deltaX * unitsPerPixel,
+            gesture.startPan[1] + deltaY * unitsPerPixel,
+          ],
+          layout.viewportBounds,
+          viewZoom
+        )
+      );
     },
     [viewZoom]
   );
@@ -1223,7 +1354,7 @@ export function TarotStudio() {
 
     if (nudge && selectedCard?.zone === "table") {
       event.preventDefault();
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("move", { intensity: 0.6 });
       dispatch({
         type: "nudge",
@@ -1376,7 +1507,7 @@ export function TarotStudio() {
                 value={activeCardSetId}
                 onChange={(event) => {
                   const nextCardSet = getCardSet(event.target.value);
-                  activeSpreadRef.current = null;
+                  activeArrangementRef.current = null;
                   setIsDeckMoveMode(false);
                   setIsSceneLayoutReady(false);
                   setActiveCardSetId(nextCardSet.id);
@@ -1611,7 +1742,7 @@ export function TarotStudio() {
                       arrangeCards(layout);
                       closeArrangeMenu();
                     }}
-                    disabled={!tableCards.length}
+                    disabled={!tableCards.length || !isSceneLayoutReady}
                   >
                     <span>{label}</span>
                     <small>{hint}</small>
@@ -1678,6 +1809,7 @@ export function TarotStudio() {
                           showTarotCollection(collection);
                           closeArrangeMenu();
                         }}
+                        disabled={!isSceneLayoutReady}
                       >
                         <span>{messages.tarotCollections[collection][0]}</span>
                         <small>
@@ -1946,12 +2078,6 @@ export function TarotStudio() {
                         <p className="tarot-tradition-note">
                           {selectedReading.traditionNote}
                         </p>
-                      )}
-                      {selectedReading.perspective && (
-                        <div className="tarot-card-perspective">
-                          <span>{selectedReading.perspective.label}</span>
-                          <p>{selectedReading.perspective.text}</p>
-                        </div>
                       )}
                       <div className="tarot-card-sources">
                         <span>{messages.sources}</span>

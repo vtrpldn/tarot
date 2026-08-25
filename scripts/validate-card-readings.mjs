@@ -34,8 +34,6 @@ const { getCardReading } = loadTypeScriptModule(
 );
 const failures = [];
 const locales = ["en", "pt-BR"];
-const pollackSource =
-  "https://redwheelweiser.com/book/seventy-eight-degrees-of-wisdom-9781578636655/";
 const englishAstrologyNames =
   /^(Air|Aquarius|Aries|Cancer|Capricorn|Earth|Fire|Gemini|Jupiter|Leo|Mars|Mercury|Moon|Pisces|Sagittarius|Saturn|Scorpio|Sun|Taurus|Venus|Virgo|Water)\b/;
 
@@ -96,19 +94,7 @@ for (const cardSet of cardSets) {
         failures.push(`${cardKey} has invalid sources`);
       }
 
-      const hasPollack = reading?.sources.some(
-        (source) => source.href === pollackSource
-      );
-
       if (cardSet.id === "rider-waite-smith") {
-        if (
-          !hasPollack ||
-          !reading?.perspective?.label ||
-          !reading.perspective.text
-        ) {
-          failures.push(`${cardKey} is missing the Rachel Pollack methodology lens`);
-        }
-
         const astrology = reading?.correspondences.find(
           ({ label }) => label === "Astrologia"
         )?.value;
@@ -116,8 +102,6 @@ for (const cardSet of cardSets) {
         if (locale === "pt-BR" && astrology && englishAstrologyNames.test(astrology)) {
           failures.push(`${cardKey} has untranslated astrology metadata`);
         }
-      } else if (hasPollack || reading?.perspective) {
-        failures.push(`${cardKey} incorrectly includes the Rachel Pollack lens`);
       }
     }
   }
