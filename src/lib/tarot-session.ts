@@ -266,7 +266,7 @@ export function tarotSessionReducer(
       return session;
     }
 
-    return { ...session, selectedCardId: action.cardId, redo: [] };
+    return { ...session, selectedCardId: action.cardId };
   }
 
   if (action.type === "undo") {

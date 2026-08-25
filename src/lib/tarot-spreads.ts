@@ -1,4 +1,4 @@
-import type { TablePoint } from "@/types";
+import type { CardSetKind, TablePoint } from "@/types";
 import {
   MAX_VIEW_ZOOM,
   MIN_VIEW_ZOOM,
@@ -309,22 +309,22 @@ export const popularLenormandSpreads: LenormandSpread[] = [
     label: "Portrait",
     shortLabel: "9 cards",
     slots: [
-      { position: [-0.55, 1.5], rotation: 0 },
-      { position: [0, 1.5], rotation: 0 },
-      { position: [0.55, 1.5], rotation: 0 },
+      { position: [-0.55, 0.94], rotation: 0 },
+      { position: [0, 0.94], rotation: 0 },
+      { position: [0.55, 0.94], rotation: 0 },
       { position: [-0.55, 0], rotation: 0 },
       { position: [0, 0], rotation: 0 },
       { position: [0.55, 0], rotation: 0 },
-      { position: [-0.55, -1.5], rotation: 0 },
-      { position: [0, -1.5], rotation: 0 },
-      { position: [0.55, -1.5], rotation: 0 },
+      { position: [-0.55, -0.94], rotation: 0 },
+      { position: [0, -0.94], rotation: 0 },
+      { position: [0.55, -0.94], rotation: 0 },
     ],
   },
   {
     id: "lenormand-grand-tableau",
     label: "Grand Tableau",
     shortLabel: "36 cards",
-    slots: [2.4, 0.8, -0.8, -2.4].flatMap((y) =>
+    slots: [1.41, 0.47, -0.47, -1.41].flatMap((y) =>
       [-2.0, -1.5, -1.0, -0.5, 0, 0.5, 1.0, 1.5, 2.0].map((x) => ({
         position: [x, y] as TablePoint,
         rotation: 0,
@@ -338,8 +338,8 @@ export const popularLenormandSpreads: LenormandSpread[] = [
  * selection here means future card sets can opt into their own vocabulary and
  * geometry without changing the presentation code.
  */
-export function getPopularSpreads(cardSetId: string): CardSpread[] {
-  return cardSetId === "classic-lenormand"
+export function getPopularSpreads(cardSetKind: CardSetKind): CardSpread[] {
+  return cardSetKind === "lenormand"
     ? popularLenormandSpreads
     : popularTarotSpreads;
 }

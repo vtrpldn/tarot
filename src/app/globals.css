@@ -916,7 +916,7 @@ button {
   bottom: calc(100% + 0.58rem);
   z-index: 4;
   width: min(19rem, calc(100vw - 2rem));
-  max-height: min(24rem, calc(100dvh - 7rem));
+  max-height: min(36rem, calc(100dvh - 7rem));
   padding: 0.68rem;
   overflow-y: auto;
   overscroll-behavior: contain;

@@ -525,8 +525,8 @@ export function TarotStudio() {
   const deckCardCount = getCardCount(locale, deckCount);
   const tableCardCount = getCardCount(locale, tableCards.length);
   const availableSpreads = useMemo(
-    () => getPopularSpreads(activeCardSet.id),
-    [activeCardSet.id]
+    () => getPopularSpreads(activeCardSet.kind),
+    [activeCardSet.kind]
   );
 
   useEffect(() => {
@@ -862,8 +862,6 @@ export function TarotStudio() {
 
     if (previous.cards.every((card) => card.zone === "deck")) {
       activeSpreadRef.current = null;
-      setViewZoom(1);
-      setViewPan([0, 0]);
     }
 
     playCardSound("arrange");
@@ -875,12 +873,6 @@ export function TarotStudio() {
 
     if (!next) {
       return;
-    }
-
-    if (next.cards.every((card) => card.zone === "deck")) {
-      activeSpreadRef.current = null;
-      setViewZoom(1);
-      setViewPan([0, 0]);
     }
 
     playCardSound("arrange");
@@ -1082,16 +1074,19 @@ export function TarotStudio() {
   );
 
   useEffect(() => {
-    const isInteractiveTarget = (target: EventTarget | null) =>
+    const isTextEditingTarget = (target: EventTarget | null) =>
       target instanceof HTMLElement &&
       (target.isContentEditable ||
-        target.matches("button, select, input, textarea, a[href]"));
+        target.matches("select, input, textarea"));
+    const isInteractiveTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (isTextEditingTarget(target) || target.matches("button, a[href]"));
     const handleGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
         event.key.toLowerCase() === "z" &&
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
-        !isInteractiveTarget(event.target)
+        !isTextEditingTarget(event.target)
       ) {
         event.preventDefault();
 
