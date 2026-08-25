@@ -106,6 +106,11 @@ type PointerEndFallbackBinding = {
   pointerCancelHandler: (event: PointerEvent) => void;
 };
 
+export type ExternalCardDrag = {
+  cardId: string;
+  position: TablePoint;
+};
+
 function sampleDragVelocity(
   drag: DragState,
   point: Vector3,
@@ -160,6 +165,8 @@ type CardMeshProps = {
   /** Compressed paper thickness while this card remains in the deck. */
   deckDepthScale: number;
   deckPreviewPositionRef: MutableRefObject<TablePoint | null>;
+  externalDragRef: MutableRefObject<ExternalCardDrag | null>;
+  peeked: boolean;
   slabGeometry: ExtrudeGeometry;
   restingZ: number;
   interactionZ: number;
@@ -184,7 +191,6 @@ type CardMeshProps = {
   ) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
-  onDeckHover: (hovered: boolean) => void;
   onHover: (cardId: string | null) => void;
   onSound: CardSoundPlayer;
 };
@@ -453,6 +459,8 @@ export const CardMesh = memo(function CardMesh({
   deckOffset,
   deckDepthScale,
   deckPreviewPositionRef,
+  externalDragRef,
+  peeked,
   slabGeometry,
   restingZ,
   interactionZ,
@@ -469,13 +477,11 @@ export const CardMesh = memo(function CardMesh({
   onMove,
   onFlip,
   onRotate,
-  onDeckHover,
   onHover,
   onSound,
 }: CardMeshProps) {
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
-  const slabRef = useRef<Mesh>(null);
   const parentRotationRef = useRef(new Euler());
   const parentRotationMatrixRef = useRef(new Matrix4());
   const flipRotationMatrixRef = useRef(new Matrix4());
@@ -493,7 +499,6 @@ export const CardMesh = memo(function CardMesh({
     useRef<PointerEndFallbackBinding | null>(null);
   const deckPreviewRef = useRef<TablePoint | null>(null);
   const [hasRevealed, setHasRevealed] = useState(card.faceUp);
-  const [hasActiveDrag, setHasActiveDrag] = useState(false);
   const hasPositionedRef = useRef(false);
   const cardIdentityRef = useRef(card.id);
   const invalidate = useThree((state) => state.invalidate);
@@ -837,9 +842,6 @@ export const CardMesh = memo(function CardMesh({
 
       if (!drag.moved && point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
         drag.moved = true;
-        if (drag.mode === "move") {
-          setHasActiveDrag(true);
-        }
       }
 
       if (drag.moved && Math.hypot(deltaX, deltaY) > 0.003) {
@@ -965,13 +967,8 @@ export const CardMesh = memo(function CardMesh({
       }
 
       dragRef.current = null;
-      setHasActiveDrag(false);
-
       if (drag.mode === "move-deck") {
         setDeckPreview(null);
-      }
-      if (card.zone === "deck") {
-        onDeckHover(false);
       }
       canvas.style.cursor = "grab";
       invalidate();
@@ -989,7 +986,6 @@ export const CardMesh = memo(function CardMesh({
       invalidate,
       layout,
       onDraw,
-      onDeckHover,
       onHover,
       onMove,
       onMoveDeck,
@@ -1004,22 +1000,29 @@ export const CardMesh = memo(function CardMesh({
   useFrame((_, delta) => {
     const group = groupRef.current;
     const flippingCard = flipRef.current;
-    const slab = slabRef.current;
-
     if (!group || !flippingCard) {
       return;
     }
 
     const drag = dragRef.current;
+    const externalDrag =
+      externalDragRef.current?.cardId === card.id
+        ? externalDragRef.current
+        : null;
     const pendingPosition = pendingPositionRef.current;
     const pendingRotation = pendingRotationRef.current;
-    const rendersOnTop = Boolean(drag?.moved) || pendingTopLayerRef.current;
+    const rendersOnTop =
+      Boolean(drag?.moved) ||
+      Boolean(externalDrag) ||
+      peeked ||
+      pendingTopLayerRef.current;
     const activeRenderOrder = rendersOnTop
       ? dragRenderOrder
       : renderOrder;
     group.renderOrder = activeRenderOrder;
     flippingCard.renderOrder = activeRenderOrder;
-    const moving = drag && drag.mode !== "rotate";
+    const pointerMoving = Boolean(drag && drag.mode !== "rotate");
+    const moving = pointerMoving || Boolean(externalDrag);
     const rotationDegrees =
       drag?.mode === "rotate"
         ? drag.previewRotation
@@ -1029,9 +1032,14 @@ export const CardMesh = memo(function CardMesh({
       drag?.mode === "move" ? drag.tiltX : 0;
     const tiltYTarget =
       drag?.mode === "move" ? drag.tiltY : 0;
-    const scaleTarget = drag?.mode === "move" && drag.moved ? DRAG_SCALE : 1;
+    const scaleTarget =
+      (drag?.mode === "move" && drag.moved) || externalDrag
+        ? DRAG_SCALE
+        : 1;
     const flipAnimation = flipAnimationRef.current;
     let flipIsActive = false;
+    let flipScaleX = 1;
+    let flipScaleY = 1;
 
     if (reducedMotion) {
       flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
@@ -1047,26 +1055,24 @@ export const CardMesh = memo(function CardMesh({
           ? 4 * progress * progress * progress
           : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
-      flippingCard.rotation.y = MathUtils.lerp(
-        flipAnimation.from,
-        flipAnimation.to,
-        easedProgress
+      const squeeze = Math.sin(Math.PI * easedProgress);
+
+      flipScaleX = Math.max(
+        0.018,
+        Math.abs(Math.cos(Math.PI * easedProgress))
       );
-      flippingCard.rotation.x = Math.sin(Math.PI * progress) * 0.025;
+      flipScaleY = 1 - squeeze * 0.012;
+      flippingCard.rotation.y =
+        easedProgress < 0.5 ? flipAnimation.from : flipAnimation.to;
+      flippingCard.rotation.x = 0;
       flipIsActive = progress < 1;
 
       if (!flipIsActive) {
         flippingCard.rotation.set(0, flipAnimation.to, 0);
         flipAnimationRef.current = null;
+        flipScaleX = 1;
+        flipScaleY = 1;
       }
-    }
-
-    // Face layers use painter ordering rather than physical depth. Keeping
-    // them out of the shadow pass prevents another card's shadow from reading
-    // as transparency, while the slab still gives placed cards a stable shadow.
-    if (slab) {
-      slab.castShadow =
-        !flipIsActive && (card.zone !== "deck" || hasActiveDrag);
     }
 
     const previewDeckPosition =
@@ -1077,15 +1083,21 @@ export const CardMesh = memo(function CardMesh({
     const restingPositionY = previewDeckPosition
       ? previewDeckPosition[1] + deckOffset[1]
       : targetPositionY;
-    const positionXTarget = moving
-      ? drag.target.x
+    const positionXTarget = externalDrag
+      ? externalDrag.position[0]
+      : pointerMoving && drag
+        ? drag.target.x
       : pendingPosition?.[0] ?? restingPositionX;
-    const positionYTarget = moving
-      ? drag.target.y
+    const positionYTarget = externalDrag
+      ? externalDrag.position[1]
+      : pointerMoving && drag
+        ? drag.target.y
       : pendingPosition?.[1] ?? restingPositionY;
     const positionLambda = moving
       ? DRAG_FOLLOW_LAMBDA
-      : POSITION_SETTLE_LAMBDA;
+      : card.zone === "deck"
+        ? 24
+        : POSITION_SETTLE_LAMBDA;
     const nextTiltX = reducedMotion
       ? 0
       : MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
@@ -1095,7 +1107,9 @@ export const CardMesh = memo(function CardMesh({
     const nextRotation = reducedMotion
       ? rotationTarget
       : MathUtils.damp(group.rotation.z, rotationTarget, 14, delta);
-    const nextX = reducedMotion
+    const followsDeckPreview =
+      Boolean(previewDeckPosition) && card.zone === "deck" && !moving;
+    const nextX = reducedMotion || followsDeckPreview
       ? positionXTarget
       : MathUtils.damp(
           group.position.x,
@@ -1103,7 +1117,7 @@ export const CardMesh = memo(function CardMesh({
           positionLambda,
           delta
         );
-    const nextY = reducedMotion
+    const nextY = reducedMotion || followsDeckPreview
       ? positionYTarget
       : MathUtils.damp(
           group.position.y,
@@ -1114,11 +1128,12 @@ export const CardMesh = memo(function CardMesh({
     const nextScale = reducedMotion
       ? scaleTarget
       : MathUtils.damp(group.scale.x, scaleTarget, 17, delta);
-    const isLiftedDrag = drag?.moved && drag.mode === "move";
+    const isLiftedDrag =
+      (drag?.moved && drag.mode === "move") || Boolean(externalDrag);
     const expandsToCardThickness =
       card.zone === "table" ||
-      flipIsActive ||
       isLiftedDrag ||
+      peeked ||
       pendingTopLayerRef.current;
     const depthScaleTarget = expandsToCardThickness ? 1 : deckDepthScale;
     const nextDepthScale = reducedMotion
@@ -1131,7 +1146,7 @@ export const CardMesh = memo(function CardMesh({
         );
     let projectedSurfaceLift = 0;
 
-    if (flipIsActive || isLiftedDrag) {
+    if (isLiftedDrag) {
       const parentRotation = parentRotationRef.current.set(
         nextTiltX,
         nextTiltY,
@@ -1152,17 +1167,16 @@ export const CardMesh = memo(function CardMesh({
           CARD_VISIBLE_HALF_DEPTH *
           nextDepthScale;
 
-      // Keep the lowest visible corner on or above the surface throughout a
-      // flip or a tilted drag. Without this lift, a fast pointer delta can
-      // tip a card through the table or an overlapping card before depth
-      // testing gets a chance to draw it on top.
+      // Keep the lowest visible corner on or above the surface during a
+      // tilted drag. Flips use a flat squeeze-and-swap animation so each card
+      // can stay in its existing layer without intersecting its neighbours.
       projectedSurfaceLift =
         Math.max(0, projectedHalfDepth - CARD_VISIBLE_HALF_DEPTH) +
         FLIP_SURFACE_CLEARANCE;
     }
 
     const zBase =
-      drag?.moved && drag.mode !== "move-deck"
+      externalDrag || (drag?.moved && drag.mode !== "move-deck")
         ? draggingZ
         : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0);
     const zTarget = zBase + projectedSurfaceLift;
@@ -1175,7 +1189,7 @@ export const CardMesh = memo(function CardMesh({
       group.position.y = positionYTarget;
       group.position.z = zTarget;
       group.scale.set(scaleTarget, scaleTarget, 1);
-      flippingCard.scale.set(1, 1, depthScaleTarget);
+      flippingCard.scale.set(flipScaleX, flipScaleY, depthScaleTarget);
       if (drag?.mode === "move-deck") {
         setDeckPreview([
           positionXTarget - deckOffset[0],
@@ -1185,7 +1199,7 @@ export const CardMesh = memo(function CardMesh({
       return;
     }
 
-    const nextZ = flipIsActive || isLiftedDrag
+    const nextZ = isLiftedDrag
       ? Math.max(
           MathUtils.damp(group.position.z, zTarget, 18, delta),
           zTarget
@@ -1210,7 +1224,7 @@ export const CardMesh = memo(function CardMesh({
     group.position.y = nextY;
     group.position.z = nextZ;
     group.scale.set(nextScale, nextScale, 1);
-    flippingCard.scale.set(1, 1, nextDepthScale);
+    flippingCard.scale.set(flipScaleX, flipScaleY, nextDepthScale);
 
     if (drag?.mode === "move-deck") {
       setDeckPreview([
@@ -1315,9 +1329,6 @@ export const CardMesh = memo(function CardMesh({
       previewRotation: card.rotation,
     };
     onSound("pickup");
-    if (card.zone === "deck") {
-      onDeckHover(true);
-    }
     if (mode === "move-deck") {
       setDeckPreview([
         group.position.x - deckOffset[0],
@@ -1452,9 +1463,8 @@ export const CardMesh = memo(function CardMesh({
     <group ref={groupRef} renderOrder={renderOrder}>
       <group ref={flipRef} renderOrder={renderOrder}>
         <mesh
-          ref={slabRef}
           geometry={slabGeometry}
-          castShadow={card.zone !== "deck" || hasActiveDrag}
+          castShadow
           receiveShadow
           renderOrder={0}
         >
@@ -1495,9 +1505,6 @@ export const CardMesh = memo(function CardMesh({
         onPointerOver={(event) => {
           if (event.nativeEvent.pointerType !== "touch") {
             event.stopPropagation();
-            if (card.zone === "deck") {
-              onDeckHover(true);
-            }
             onHover(card.zone === "table" ? card.id : null);
             const deckMoveReady =
               card.zone === "deck" &&
@@ -1515,9 +1522,6 @@ export const CardMesh = memo(function CardMesh({
           }
         }}
         onPointerOut={() => {
-          if (card.zone === "deck") {
-            onDeckHover(false);
-          }
           onHover(null);
           if (!dragRef.current) {
             canvas.style.cursor = "default";
