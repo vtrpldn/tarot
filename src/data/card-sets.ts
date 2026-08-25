@@ -18,7 +18,7 @@ const artwork = (filename: string): CardArtwork => {
 const lenormandArtwork = (filename: string): CardArtwork => ({
   preview: `/decks/classic-lenormand/preview/${filename}.webp`,
   detail: `/decks/classic-lenormand/detail/${filename}.webp`,
-  source: `/decks/classic-lenormand/source/${filename}.jpg`,
+  source: `/decks/classic-lenormand/source/${filename}.avif`,
 });
 
 const majorArcana = [
@@ -149,11 +149,11 @@ const classicLenormandCards = [
 export const classicLenormand: CardSetDefinition = {
   id: "classic-lenormand",
   kind: "lenormand",
-  label: "Classic Lenormand",
-  shortLabel: "Classic Lenormand",
+  label: "Stralsund Lenormand",
+  shortLabel: "Stralsund Lenormand",
   description:
-    "The original 36-card Game of Hope, the historic foundation of Petit Lenormand.",
-  cardAspectRatio: 25 / 33,
+    "A complete 36-card Stralsund deck from Spielkartenfabrik Altenburg, circa 1890.",
+  cardAspectRatio: 51 / 83,
   back: lenormandArtwork("back"),
   cards: classicLenormandCards.map(([id, name], order) => ({
     id,
