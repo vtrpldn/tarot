@@ -23,6 +23,8 @@ type Messages = {
   zoomOut: string;
   resetZoom: string;
   zoomIn: string;
+  enterFullscreen: string;
+  exitFullscreen: string;
   cancelDeckMove: string;
   movingDeck: string;
   cancel: string;
@@ -117,6 +119,8 @@ const messages: Record<AppLocale, Messages> = {
     zoomOut: "Zoom out",
     resetZoom: "Reset table zoom",
     zoomIn: "Zoom in",
+    enterFullscreen: "Enter fullscreen",
+    exitFullscreen: "Exit fullscreen",
     cancelDeckMove: "Cancel deck move mode",
     movingDeck: "Moving deck",
     cancel: "Cancel",
@@ -232,6 +236,8 @@ const messages: Record<AppLocale, Messages> = {
     zoomOut: "Diminuir zoom",
     resetZoom: "Redefinir zoom da mesa",
     zoomIn: "Aumentar zoom",
+    enterFullscreen: "Entrar em tela cheia",
+    exitFullscreen: "Sair da tela cheia",
     cancelDeckMove: "Cancelar modo de mover baralho",
     movingDeck: "Movendo baralho",
     cancel: "Cancelar",

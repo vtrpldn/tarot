@@ -16,6 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   cardSets,
   getCardDisplayName,
@@ -177,6 +178,38 @@ function useReducedMotionPreference() {
   }, []);
 
   return reducedMotion;
+}
+
+function useMobileViewport() {
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateViewport = () => setIsMobileViewport(mediaQuery.matches);
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
+
+  return isMobileViewport;
+}
+
+function MobilePopoverPortal({
+  children,
+  isMobileViewport,
+  portalRoot,
+}: {
+  children: ReactNode;
+  isMobileViewport: boolean;
+  portalRoot: HTMLElement | null;
+}) {
+  if (!isMobileViewport || !portalRoot) {
+    return children;
+  }
+
+  return createPortal(children, portalRoot);
 }
 
 function useCardSounds() {
@@ -381,6 +414,7 @@ function Shortcut({ children }: { children: ReactNode }) {
 type DockPopoverOptions = {
   containerRef: RefObject<HTMLDivElement | null>;
   isOpen: boolean;
+  popoverRef: RefObject<HTMLElement | null>;
   setIsOpen: Dispatch<SetStateAction<boolean>>;
   triggerRef: RefObject<HTMLButtonElement | null>;
 };
@@ -388,6 +422,7 @@ type DockPopoverOptions = {
 function useDockPopover({
   containerRef,
   isOpen,
+  popoverRef,
   setIsOpen,
   triggerRef,
 }: DockPopoverOptions) {
@@ -397,14 +432,18 @@ function useDockPopover({
     }
 
     const focusTimer = window.requestAnimationFrame(() => {
-      containerRef.current
+      (popoverRef.current ?? containerRef.current)
         ?.querySelector<HTMLElement>(
-          "[role='dialog'] [role='radio'][aria-checked='true'], [role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled), [role='dialog'] input:not(:disabled)"
+          "[role='radio'][aria-checked='true'], button:not(:disabled), select:not(:disabled), input:not(:disabled)"
         )
         ?.focus();
     });
     const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
+      const targetNode = event.target as Node;
+      const isInsideTrigger = containerRef.current?.contains(targetNode);
+      const isInsidePopover = popoverRef.current?.contains(targetNode);
+
+      if (!isInsideTrigger && !isInsidePopover) {
         setIsOpen(false);
 
         const target = event.target;
@@ -440,10 +479,11 @@ function useDockPopover({
       document.removeEventListener("pointerdown", closeOnOutsidePress);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [containerRef, isOpen, setIsOpen, triggerRef]);
+  }, [containerRef, isOpen, popoverRef, setIsOpen, triggerRef]);
 }
 
 export function TarotStudio() {
+  const tarotAppRef = useRef<HTMLElement>(null);
   const canvasShellRef = useRef<HTMLDivElement>(null);
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
@@ -458,18 +498,25 @@ export function TarotStudio() {
   } | null>(null);
   const deckMenuRef = useRef<HTMLDivElement>(null);
   const deckMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const deckPopoverRef = useRef<HTMLDivElement>(null);
   const zoomMenuRef = useRef<HTMLDivElement>(null);
   const zoomMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const zoomPopoverRef = useRef<HTMLDivElement>(null);
   const spreadMenuRef = useRef<HTMLDivElement>(null);
   const spreadMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const spreadPopoverRef = useRef<HTMLElement>(null);
   const arrangeMenuRef = useRef<HTMLDivElement>(null);
   const arrangeMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const arrangePopoverRef = useRef<HTMLDivElement>(null);
   const configMenuRef = useRef<HTMLDivElement>(null);
   const configMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const configPopoverRef = useRef<HTMLElement>(null);
   const languageMenuRef = useRef<HTMLDivElement>(null);
   const languageMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const languagePopoverRef = useRef<HTMLElement>(null);
   const inspectorCollapseRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
+  const inspectorPopoverRef = useRef<HTMLElement>(null);
   const layerWheelRef = useRef({
     accumulatedDelta: 0,
     direction: 0,
@@ -487,6 +534,8 @@ export function TarotStudio() {
   const [isArrangeMenuOpen, setIsArrangeMenuOpen] = useState(false);
   const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
+  const [isFullscreenAvailable, setIsFullscreenAvailable] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const [isDeckMoveMode, setIsDeckMoveMode] = useState(false);
   const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
@@ -499,6 +548,43 @@ export function TarotStudio() {
   const [sceneSettings, setSceneSettings] = useState<SceneSettings>(() => ({
     ...DEFAULT_SCENE_SETTINGS,
   }));
+  const isMobileViewport = useMobileViewport();
+
+  useEffect(() => {
+    const updateFullscreenState = () => {
+      setIsFullscreen(document.fullscreenElement === tarotAppRef.current);
+    };
+    const app = tarotAppRef.current;
+
+    setIsFullscreenAvailable(
+      document.fullscreenEnabled &&
+        typeof app?.requestFullscreen === "function"
+    );
+    updateFullscreenState();
+    document.addEventListener("fullscreenchange", updateFullscreenState);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", updateFullscreenState);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const app = tarotAppRef.current;
+
+    if (!app) {
+      return;
+    }
+
+    try {
+      const fullscreenAction = document.fullscreenElement
+        ? document.exitFullscreen()
+        : app.requestFullscreen();
+
+      void fullscreenAction.catch(() => undefined);
+    } catch {
+      // Fullscreen can be denied by browser or embedding permissions.
+    }
+  }, []);
 
   useEffect(() => {
     viewZoomRef.current = viewZoom;
@@ -636,36 +722,42 @@ export function TarotStudio() {
   useDockPopover({
     containerRef: deckMenuRef,
     isOpen: isDeckMenuOpen,
+    popoverRef: deckPopoverRef,
     setIsOpen: setIsDeckMenuOpen,
     triggerRef: deckMenuTriggerRef,
   });
   useDockPopover({
     containerRef: zoomMenuRef,
     isOpen: isZoomMenuOpen,
+    popoverRef: zoomPopoverRef,
     setIsOpen: setIsZoomMenuOpen,
     triggerRef: zoomMenuTriggerRef,
   });
   useDockPopover({
     containerRef: spreadMenuRef,
     isOpen: isSpreadMenuOpen,
+    popoverRef: spreadPopoverRef,
     setIsOpen: setIsSpreadMenuOpen,
     triggerRef: spreadMenuTriggerRef,
   });
   useDockPopover({
     containerRef: arrangeMenuRef,
     isOpen: isArrangeMenuOpen,
+    popoverRef: arrangePopoverRef,
     setIsOpen: setIsArrangeMenuOpen,
     triggerRef: arrangeMenuTriggerRef,
   });
   useDockPopover({
     containerRef: configMenuRef,
     isOpen: isConfigMenuOpen,
+    popoverRef: configPopoverRef,
     setIsOpen: setIsConfigMenuOpen,
     triggerRef: configMenuTriggerRef,
   });
   useDockPopover({
     containerRef: languageMenuRef,
     isOpen: isLanguageMenuOpen,
+    popoverRef: languagePopoverRef,
     setIsOpen: setIsLanguageMenuOpen,
     triggerRef: languageMenuTriggerRef,
   });
@@ -1477,6 +1569,7 @@ export function TarotStudio() {
   if (!isWorkspaceReady) {
     return (
       <main
+        ref={tarotAppRef}
         className="tarot-app tarot-app--restoring"
         data-scene-theme={sceneSettings.themeId}
       >
@@ -1489,7 +1582,11 @@ export function TarotStudio() {
   }
 
   return (
-    <main className="tarot-app" data-scene-theme={sceneSettings.themeId}>
+    <main
+      ref={tarotAppRef}
+      className="tarot-app"
+      data-scene-theme={sceneSettings.themeId}
+    >
       <div className="tarot-grain" aria-hidden="true" />
       <div
         ref={canvasShellRef}
@@ -1577,47 +1674,51 @@ export function TarotStudio() {
             </svg>
           </button>
           {isDeckMenuOpen && (
-            <div
-              id="deck-actions"
-              className="tarot-set-picker"
-              role="dialog"
-              aria-label={messages.chooseDeck}
+            <MobilePopoverPortal
+              isMobileViewport={isMobileViewport}
+              portalRoot={tarotAppRef.current}
             >
-              <label htmlFor="card-set">{messages.deck}</label>
-              <select
-                id="card-set"
-                name="card-set"
-                autoComplete="off"
-                value={activeCardSetId}
-                onChange={(event) => {
-                  const nextCardSet = getCardSet(event.target.value);
-                  activeArrangementRef.current = null;
-                  setIsDeckMoveMode(false);
-                  setIsSceneLayoutReady(false);
-                  setActiveCardSetId(nextCardSet.id);
-                  playCardSound("shuffle");
-                  dispatch({ type: "new-shuffle", cardSet: nextCardSet });
-                  setViewZoom(1);
-                  setViewPan([0, 0]);
-                  setIsDeckMenuOpen(false);
-                  window.requestAnimationFrame(() =>
-                    deckMenuTriggerRef.current?.focus()
-                  );
-                }}
+              <div
+                ref={deckPopoverRef}
+                id="deck-actions"
+                className="tarot-set-picker tarot-mobile-popover"
+                role="dialog"
+                aria-label={messages.chooseDeck}
               >
-                {cardSets.map((cardSet) => (
-                  <option key={cardSet.id} value={cardSet.id}>
-                    {getCardSetDisplayLabel(cardSet, locale)}
-                  </option>
-                ))}
-              </select>
-              <p className="tarot-set-picker-description">
-                {getCardSetDisplayDescription(activeCardSet, locale)}
-              </p>
-              <span>
-                {messages.cardsInDeck(deckCardCount)}
-              </span>
-            </div>
+                <label htmlFor="card-set">{messages.deck}</label>
+                <select
+                  id="card-set"
+                  name="card-set"
+                  autoComplete="off"
+                  value={activeCardSetId}
+                  onChange={(event) => {
+                    const nextCardSet = getCardSet(event.target.value);
+                    activeArrangementRef.current = null;
+                    setIsDeckMoveMode(false);
+                    setIsSceneLayoutReady(false);
+                    setActiveCardSetId(nextCardSet.id);
+                    playCardSound("shuffle");
+                    dispatch({ type: "new-shuffle", cardSet: nextCardSet });
+                    setViewZoom(1);
+                    setViewPan([0, 0]);
+                    setIsDeckMenuOpen(false);
+                    window.requestAnimationFrame(() =>
+                      deckMenuTriggerRef.current?.focus()
+                    );
+                  }}
+                >
+                  {cardSets.map((cardSet) => (
+                    <option key={cardSet.id} value={cardSet.id}>
+                      {getCardSetDisplayLabel(cardSet, locale)}
+                    </option>
+                  ))}
+                </select>
+                <p className="tarot-set-picker-description">
+                  {getCardSetDisplayDescription(activeCardSet, locale)}
+                </p>
+                <span>{messages.cardsInDeck(deckCardCount)}</span>
+              </div>
+            </MobilePopoverPortal>
           )}
         </div>
         {isDeckMoveMode && (
@@ -1671,35 +1772,42 @@ export function TarotStudio() {
                 </svg>
               </button>
               {isSpreadMenuOpen && (
-                <section
-                  id="spread-actions"
-                  className="tarot-spread-actions"
-                  role="dialog"
-                  aria-label={messages.popularSpreads}
+                <MobilePopoverPortal
+                  isMobileViewport={isMobileViewport}
+                  portalRoot={tarotAppRef.current}
                 >
-                  <span>{messages.chooseASpread}</span>
-                  <div>
-                    {availableSpreads.map((spread) => (
-                      <button
-                        key={spread.id}
-                        type="button"
-                        onClick={() => {
-                          dealSpread(spread);
-                          setIsSpreadMenuOpen(false);
-                          window.requestAnimationFrame(() =>
-                            canvasShellRef.current?.focus()
-                          );
-                        }}
-                        disabled={
-                          !isSceneLayoutReady || deckCount < spread.slots.length
-                        }
-                      >
-                        {messages.spreadLabels[spread.id][0]}
-                        <small>{messages.spreadLabels[spread.id][1]}</small>
-                      </button>
-                    ))}
-                  </div>
-                </section>
+                  <section
+                    ref={spreadPopoverRef}
+                    id="spread-actions"
+                    className="tarot-spread-actions tarot-mobile-popover"
+                    role="dialog"
+                    aria-label={messages.popularSpreads}
+                  >
+                    <span>{messages.chooseASpread}</span>
+                    <div>
+                      {availableSpreads.map((spread) => (
+                        <button
+                          key={spread.id}
+                          type="button"
+                          onClick={() => {
+                            dealSpread(spread);
+                            setIsSpreadMenuOpen(false);
+                            window.requestAnimationFrame(() =>
+                              canvasShellRef.current?.focus()
+                            );
+                          }}
+                          disabled={
+                            !isSceneLayoutReady ||
+                            deckCount < spread.slots.length
+                          }
+                        >
+                          {messages.spreadLabels[spread.id][0]}
+                          <small>{messages.spreadLabels[spread.id][1]}</small>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                </MobilePopoverPortal>
               )}
             </div>
           )}
@@ -1745,14 +1853,19 @@ export function TarotStudio() {
             </svg>
           </button>
           {isArrangeMenuOpen && (
-            <div
-              id="arrange-actions"
-              className="tarot-arrange-popover"
-              role="dialog"
-              aria-label={messages.arrangeAndUndo}
+            <MobilePopoverPortal
+              isMobileViewport={isMobileViewport}
+              portalRoot={tarotAppRef.current}
             >
-              <p>{messages.tableActionsTitle}</p>
-              <div className="tarot-arrange-grid">
+              <div
+                ref={arrangePopoverRef}
+                id="arrange-actions"
+                className="tarot-arrange-popover tarot-mobile-popover"
+                role="dialog"
+                aria-label={messages.arrangeAndUndo}
+              >
+                <p>{messages.tableActionsTitle}</p>
+                <div className="tarot-arrange-grid">
                 {(
                   [
                     ["fan", ...messages.layouts.fan],
@@ -1816,38 +1929,52 @@ export function TarotStudio() {
                   <span>{messages.redo[0]}</span>
                   <small>{messages.redo[1]}</small>
                 </button>
+                  <button
+                    type="button"
+                    className="tarot-mobile-reset-action"
+                    onClick={() => {
+                      resetTable();
+                      closeArrangeMenu();
+                    }}
+                  >
+                    <span>{messages.resetTable}</span>
+                    <small>
+                      {messages.resetTableDescription(activeCardSet.cards.length)}
+                    </small>
+                  </button>
+                </div>
+                {activeCardSet.kind === "tarot" && (
+                  <section
+                    className="tarot-arrange-section"
+                    aria-label={messages.tarotCollectionActions}
+                  >
+                    <h3 className="tarot-arrange-section-title">
+                      {messages.tarotCollection}
+                    </h3>
+                    <div className="tarot-arrange-grid">
+                      {(
+                        ["all", "major", "minor", "court"] as const
+                      ).map((collection) => (
+                        <button
+                          key={collection}
+                          type="button"
+                          onClick={() => {
+                            showTarotCollection(collection);
+                            closeArrangeMenu();
+                          }}
+                          disabled={!isSceneLayoutReady}
+                        >
+                          <span>{messages.tarotCollections[collection][0]}</span>
+                          <small>
+                            {messages.tarotCollections[collection][1]}
+                          </small>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
               </div>
-              {activeCardSet.kind === "tarot" && (
-                <section
-                  className="tarot-arrange-section"
-                  aria-label={messages.tarotCollectionActions}
-                >
-                  <h3 className="tarot-arrange-section-title">
-                    {messages.tarotCollection}
-                  </h3>
-                  <div className="tarot-arrange-grid">
-                    {(
-                      ["all", "major", "minor", "court"] as const
-                    ).map((collection) => (
-                      <button
-                        key={collection}
-                        type="button"
-                        onClick={() => {
-                          showTarotCollection(collection);
-                          closeArrangeMenu();
-                        }}
-                        disabled={!isSceneLayoutReady}
-                      >
-                        <span>{messages.tarotCollections[collection][0]}</span>
-                        <small>
-                          {messages.tarotCollections[collection][1]}
-                        </small>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </div>
+            </MobilePopoverPortal>
           )}
         </div>
         <button
@@ -1900,38 +2027,87 @@ export function TarotStudio() {
               <path d="m8 10 4 4 4-4" />
             </svg>
           </button>
-          <div
-            id="zoom-actions"
-            className={`tarot-zoom-controls${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
-            role={isZoomMenuOpen ? "dialog" : undefined}
-            aria-label={messages.zoom}
+          <MobilePopoverPortal
+            isMobileViewport={isMobileViewport}
+            portalRoot={tarotAppRef.current}
           >
-            <button
-              type="button"
-              aria-label={messages.zoomOut}
-              onClick={() => adjustViewZoom(-0.1)}
-              disabled={viewZoom <= MIN_VIEW_ZOOM}
+            <div
+              ref={zoomPopoverRef}
+              id="zoom-actions"
+              className={`tarot-zoom-controls tarot-mobile-popover${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
+              role={isZoomMenuOpen ? "dialog" : undefined}
+              aria-label={messages.zoom}
             >
-              −
-            </button>
-            <button
-              type="button"
-              aria-label={messages.resetZoom}
-              title={messages.resetZoom}
-              onClick={() => setViewZoom(1)}
-            >
-              {Math.round(viewZoom * 100)}%
-            </button>
-            <button
-              type="button"
-              aria-label={messages.zoomIn}
-              onClick={() => adjustViewZoom(0.1)}
-              disabled={viewZoom >= MAX_VIEW_ZOOM}
-            >
-              +
-            </button>
-          </div>
+              <button
+                type="button"
+                aria-label={messages.zoomOut}
+                onClick={() => adjustViewZoom(-0.1)}
+                disabled={viewZoom <= MIN_VIEW_ZOOM}
+              >
+                −
+              </button>
+              <button
+                type="button"
+                aria-label={messages.resetZoom}
+                title={messages.resetZoom}
+                onClick={() => setViewZoom(1)}
+              >
+                {Math.round(viewZoom * 100)}%
+              </button>
+              <button
+                type="button"
+                aria-label={messages.zoomIn}
+                onClick={() => adjustViewZoom(0.1)}
+                disabled={viewZoom >= MAX_VIEW_ZOOM}
+              >
+                +
+              </button>
+            </div>
+          </MobilePopoverPortal>
         </div>
+        {isFullscreenAvailable && (
+          <button
+            type="button"
+            className="tarot-toolbar-trigger tarot-fullscreen-trigger"
+            aria-label={
+              isFullscreen
+                ? messages.exitFullscreen
+                : messages.enterFullscreen
+            }
+            title={
+              isFullscreen
+                ? messages.exitFullscreen
+                : messages.enterFullscreen
+            }
+            onClick={() => {
+              setIsDeckMenuOpen(false);
+              setIsZoomMenuOpen(false);
+              setIsSpreadMenuOpen(false);
+              setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
+              setIsLanguageMenuOpen(false);
+              setIsInspectorCollapsed(true);
+              toggleFullscreen();
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              {isFullscreen ? (
+                <>
+                  <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+                </>
+              ) : (
+                <>
+                  <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+                </>
+              )}
+            </svg>
+            <span>
+              {isFullscreen
+                ? messages.exitFullscreen
+                : messages.enterFullscreen}
+            </span>
+          </button>
+        )}
         <div className="tarot-config-menu" ref={configMenuRef}>
           <button
             ref={configMenuTriggerRef}
@@ -1962,64 +2138,72 @@ export function TarotStudio() {
             </svg>
           </button>
           {isConfigMenuOpen && (
-            <section
-              id="config-actions"
-              className="tarot-config-popover"
-              role="dialog"
-              aria-label={messages.configureTable}
+            <MobilePopoverPortal
+              isMobileViewport={isMobileViewport}
+              portalRoot={tarotAppRef.current}
             >
-              <h2 className="tarot-config-heading">{messages.configureTable}</h2>
-              <div className="tarot-config-section">
-                <h3 className="tarot-config-section-title">
-                  {messages.background}
-                </h3>
-                <div
-                  className="tarot-config-choice-grid"
-                  role="radiogroup"
-                  aria-label={messages.backgroundOptions}
-                >
-                  {SCENE_THEME_IDS.map((themeId) => (
-                    <button
-                      key={themeId}
-                      type="button"
-                      className="tarot-config-choice"
-                      role="radio"
-                      aria-checked={sceneSettings.themeId === themeId}
-                      data-scene-theme={themeId}
-                      data-scene-theme-option={themeId}
-                      tabIndex={sceneSettings.themeId === themeId ? 0 : -1}
-                      onKeyDown={(event) =>
-                        handleSceneThemeRadioKeyDown(event, themeId)
-                      }
-                      onClick={() => updateSceneTheme(themeId)}
-                    >
-                      <span>{sceneThemeLabels[themeId]}</span>
-                    </button>
-                  ))}
+              <section
+                ref={configPopoverRef}
+                id="config-actions"
+                className="tarot-config-popover tarot-mobile-popover"
+                role="dialog"
+                aria-label={messages.configureTable}
+              >
+                <h2 className="tarot-config-heading">
+                  {messages.configureTable}
+                </h2>
+                <div className="tarot-config-section">
+                  <h3 className="tarot-config-section-title">
+                    {messages.background}
+                  </h3>
+                  <div
+                    className="tarot-config-choice-grid"
+                    role="radiogroup"
+                    aria-label={messages.backgroundOptions}
+                  >
+                    {SCENE_THEME_IDS.map((themeId) => (
+                      <button
+                        key={themeId}
+                        type="button"
+                        className="tarot-config-choice"
+                        role="radio"
+                        aria-checked={sceneSettings.themeId === themeId}
+                        data-scene-theme={themeId}
+                        data-scene-theme-option={themeId}
+                        tabIndex={sceneSettings.themeId === themeId ? 0 : -1}
+                        onKeyDown={(event) =>
+                          handleSceneThemeRadioKeyDown(event, themeId)
+                        }
+                        onClick={() => updateSceneTheme(themeId)}
+                      >
+                        <span>{sceneThemeLabels[themeId]}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="tarot-config-section">
-                <h3 className="tarot-config-section-title">
-                  {messages.cardSounds}
-                </h3>
-                <button
-                  type="button"
-                  className="tarot-config-sound"
-                  role="switch"
-                  aria-checked={!areCardSoundsMuted}
-                  onClick={toggleCardSounds}
-                >
-                  <span>
+                <div className="tarot-config-section">
+                  <h3 className="tarot-config-section-title">
+                    {messages.cardSounds}
+                  </h3>
+                  <button
+                    type="button"
+                    className="tarot-config-sound"
+                    role="switch"
+                    aria-checked={!areCardSoundsMuted}
+                    onClick={toggleCardSounds}
+                  >
                     <span>
-                      {areCardSoundsMuted
-                        ? messages.cardSoundsOff
-                        : messages.cardSoundsOn}
+                      <span>
+                        {areCardSoundsMuted
+                          ? messages.cardSoundsOff
+                          : messages.cardSoundsOn}
+                      </span>
+                      <small>{messages.cardSoundsDescription}</small>
                     </span>
-                    <small>{messages.cardSoundsDescription}</small>
-                  </span>
-                </button>
-              </div>
-            </section>
+                  </button>
+                </div>
+              </section>
+            </MobilePopoverPortal>
           )}
         </div>
         <div className="tarot-language-menu" ref={languageMenuRef}>
@@ -2055,37 +2239,43 @@ export function TarotStudio() {
             </svg>
           </button>
           {isLanguageMenuOpen && (
-            <section
-              id="language-actions"
-              className="tarot-language-popover"
-              role="dialog"
-              aria-label={messages.chooseLanguage}
+            <MobilePopoverPortal
+              isMobileViewport={isMobileViewport}
+              portalRoot={tarotAppRef.current}
             >
-              <span>{messages.language}</span>
-              <div role="radiogroup" aria-label={messages.languageOptions}>
-                {LANGUAGE_OPTIONS.map((optionLocale) => {
-                  const optionMessages = getMessages(optionLocale);
+              <section
+                ref={languagePopoverRef}
+                id="language-actions"
+                className="tarot-language-popover tarot-mobile-popover"
+                role="dialog"
+                aria-label={messages.chooseLanguage}
+              >
+                <span>{messages.language}</span>
+                <div role="radiogroup" aria-label={messages.languageOptions}>
+                  {LANGUAGE_OPTIONS.map((optionLocale) => {
+                    const optionMessages = getMessages(optionLocale);
 
-                  return (
-                    <button
-                      key={optionLocale}
-                      type="button"
-                      role="radio"
-                      aria-checked={locale === optionLocale}
-                      data-locale-option={optionLocale}
-                      tabIndex={locale === optionLocale ? 0 : -1}
-                      onKeyDown={(event) =>
-                        handleLanguageRadioKeyDown(event, optionLocale)
-                      }
-                      onClick={() => updateLocale(optionLocale, true)}
-                    >
-                      <span>{optionMessages.localeShortLabel}</span>
-                      <small>{optionMessages.localeLabel}</small>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
+                    return (
+                      <button
+                        key={optionLocale}
+                        type="button"
+                        role="radio"
+                        aria-checked={locale === optionLocale}
+                        data-locale-option={optionLocale}
+                        tabIndex={locale === optionLocale ? 0 : -1}
+                        onKeyDown={(event) =>
+                          handleLanguageRadioKeyDown(event, optionLocale)
+                        }
+                        onClick={() => updateLocale(optionLocale, true)}
+                      >
+                        <span>{optionMessages.localeShortLabel}</span>
+                        <small>{optionMessages.localeLabel}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            </MobilePopoverPortal>
           )}
         </div>
         <div className="tarot-card-menu">
@@ -2125,11 +2315,16 @@ export function TarotStudio() {
             </svg>
           </button>
           {isInspectorOpen && (
-            <aside
-              id="selected-card-inspector"
-              className={`tarot-inspector${selectedCard?.faceUp ? " tarot-inspector--with-reading" : ""}`}
-              aria-label={messages.selectedCardControls(selectedTitle, true)}
+            <MobilePopoverPortal
+              isMobileViewport={isMobileViewport}
+              portalRoot={tarotAppRef.current}
             >
+              <aside
+                ref={inspectorPopoverRef}
+                id="selected-card-inspector"
+                className={`tarot-inspector tarot-mobile-popover${selectedCard?.faceUp ? " tarot-inspector--with-reading" : ""}`}
+                aria-label={messages.selectedCardControls(selectedTitle, true)}
+              >
               <div className="tarot-inspector-controls">
                 <div className="tarot-inspector-heading">
                   <p className="tarot-eyebrow">{messages.selectedCard}</p>
@@ -2263,7 +2458,8 @@ export function TarotStudio() {
                   )}
                 </section>
               )}
-            </aside>
+              </aside>
+            </MobilePopoverPortal>
           )}
         </div>
       </nav>
