@@ -44,6 +44,7 @@ export type DeckPositionCandidate = {
     | "top-right"
     | "bottom-left"
     | "bottom-right"
+    | "bottom"
     | "left"
     | "right";
   position: TablePoint;
@@ -97,14 +98,16 @@ export function createSceneTableLayout({
   viewportWidth,
   viewportHeight,
   pixelWidth,
+  isMobileViewport,
   cardAspectRatio,
 }: {
   viewportWidth: number;
   viewportHeight: number;
   pixelWidth: number;
+  isMobileViewport?: boolean;
   cardAspectRatio: number;
 }): SceneTableLayout {
-  const isMobile = pixelWidth < 720;
+  const isMobile = isMobileViewport ?? pixelWidth < 720;
   const unscaledRequestedCardWidth = clamp(
     viewportWidth * (isMobile ? 0.66 : 0.36),
     isMobile ? 2.82 : 3.15,
@@ -132,6 +135,8 @@ export function createSceneTableLayout({
     top: viewportHeight / 2,
     bottom: -viewportHeight / 2,
   };
+  const viewportCenterY =
+    (viewportBounds.top + viewportBounds.bottom) / 2;
   const centerX = (tableLeft + tableRight) / 2;
   const centerY = (tableBottom + tableTop) / 2;
   const halfWidth = Math.max((tableRight - tableLeft) / 2, cardWidth / 2);
@@ -188,6 +193,17 @@ export function createSceneTableLayout({
     worldPosition: [x, y],
   });
   const deckPositionCandidates: DeckPositionCandidate[] = [
+    isMobile
+      ? createDeckCandidate(
+          "bottom",
+          centerX,
+          tableBottom + deckHeight / 2 + deckSideInset
+        )
+      : createDeckCandidate(
+          "left",
+          tableLeft + deckWidth / 2 + deckSideInset,
+          viewportCenterY
+        ),
     createDeckCandidate(
       "top-left",
       tableLeft + deckWidth / 2 + deckSideInset,
@@ -208,15 +224,19 @@ export function createSceneTableLayout({
       tableRight - deckWidth / 2 - deckSideInset,
       tableBottom + deckHeight / 2 + deckSideInset
     ),
-    createDeckCandidate(
-      "left",
-      tableLeft + deckWidth / 2 + deckSideInset,
-      centerY
-    ),
+    ...(isMobile
+      ? [
+          createDeckCandidate(
+            "left",
+            tableLeft + deckWidth / 2 + deckSideInset,
+            viewportCenterY
+          ),
+        ]
+      : []),
     createDeckCandidate(
       "right",
       tableRight - deckWidth / 2 - deckSideInset,
-      centerY
+      viewportCenterY
     ),
   ];
   const defaultDeckPosition = deckPositionCandidates[0].position;
