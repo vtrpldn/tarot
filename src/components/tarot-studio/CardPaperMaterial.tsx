@@ -1,11 +1,23 @@
 "use client";
 
-import { memo, useEffect, useMemo } from "react";
+import { useFrame } from "@react-three/fiber";
+import {
+  type MutableRefObject,
+  memo,
+  useEffect,
+  useMemo,
+} from "react";
 import {
   MeshStandardMaterial,
   type ColorRepresentation,
   type Texture,
+  Vector2,
 } from "three";
+
+export type CardPaperMotion = {
+  curlX: number;
+  curlY: number;
+};
 
 type CardPaperMaterialProps = {
   color: ColorRepresentation;
@@ -17,16 +29,40 @@ type CardPaperMaterialProps = {
   toneMapped?: boolean;
   depthTest?: boolean;
   depthWrite?: boolean;
+  attach?: string;
+  cardSize?: readonly [number, number];
+  edgePatina?: number;
+  motionRef?: MutableRefObject<CardPaperMotion>;
 };
+
+type PaperShader = {
+  uniforms: Record<string, { value: unknown }>;
+};
+
+const DEFAULT_CARD_SIZE = [1, 1] as const;
 
 const PAPER_VERTEX_DECLARATION = /* glsl */ `
 #include <common>
 varying vec3 vPaperPosition;
+varying float vPaperEdge;
+uniform vec2 uPaperCurl;
+uniform vec2 uPaperSize;
 `;
 
 const PAPER_VERTEX_POSITION = /* glsl */ `
 #include <begin_vertex>
 vPaperPosition = position;
+vec2 paperSize = max(uPaperSize, vec2(0.001));
+vec2 normalizedPaper = clamp(
+  position.xy / (paperSize * 0.5),
+  vec2(-1.0),
+  vec2(1.0)
+);
+vec2 paperCurve = pow(abs(normalizedPaper), vec2(2.35));
+transformed.z +=
+  uPaperCurl.x * (paperCurve.x - 0.26) +
+  uPaperCurl.y * (paperCurve.y - 0.26);
+vPaperEdge = max(abs(normalizedPaper.x), abs(normalizedPaper.y));
 `;
 
 const PAPER_FRAGMENT_DECLARATION = /* glsl */ `
@@ -34,7 +70,9 @@ const PAPER_FRAGMENT_DECLARATION = /* glsl */ `
 uniform float uPaperSeed;
 uniform float uPaperAlbedoVariation;
 uniform float uPaperRoughnessVariation;
+uniform float uPaperEdgePatina;
 varying vec3 vPaperPosition;
+varying float vPaperEdge;
 
 float paperHash(vec2 point) {
   return fract(
@@ -72,12 +110,24 @@ float paperGrain =
   (paperCloud - 0.5) * 0.62 +
   (paperFiber - 0.5) * 0.38;
 diffuseColor.rgb *= 1.0 + paperGrain * uPaperAlbedoVariation;
+float paperEdgeWear = smoothstep(0.78, 1.0, vPaperEdge);
+vec3 agedPaperEdge = vec3(0.76, 0.67, 0.52);
+diffuseColor.rgb = mix(
+  diffuseColor.rgb,
+  diffuseColor.rgb * agedPaperEdge,
+  paperEdgeWear * uPaperEdgePatina
+);
 `;
 
 const PAPER_FRAGMENT_ROUGHNESS = /* glsl */ `
 #include <roughnessmap_fragment>
 roughnessFactor = clamp(
   roughnessFactor + paperGrain * uPaperRoughnessVariation,
+  0.72,
+  1.0
+);
+roughnessFactor = clamp(
+  roughnessFactor + paperEdgeWear * uPaperEdgePatina * 0.12,
   0.72,
   1.0
 );
@@ -104,7 +154,13 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
   toneMapped = true,
   depthTest = true,
   depthWrite = true,
+  attach = "material",
+  cardSize = DEFAULT_CARD_SIZE,
+  edgePatina = 0.08,
+  motionRef,
 }: CardPaperMaterialProps) {
+  const cardWidth = cardSize[0];
+  const cardHeight = cardSize[1];
   const material = useMemo(() => {
     const nextMaterial = new MeshStandardMaterial({
       color,
@@ -125,6 +181,11 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
       shader.uniforms.uPaperRoughnessVariation = {
         value: roughnessVariation,
       };
+      shader.uniforms.uPaperCurl = { value: new Vector2() };
+      shader.uniforms.uPaperSize = {
+        value: new Vector2(cardWidth, cardHeight),
+      };
+      shader.uniforms.uPaperEdgePatina = { value: edgePatina };
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", PAPER_VERTEX_DECLARATION)
         .replace("#include <begin_vertex>", PAPER_VERTEX_POSITION);
@@ -135,23 +196,39 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
           "#include <roughnessmap_fragment>",
           PAPER_FRAGMENT_ROUGHNESS
         );
+      nextMaterial.userData.paperShader = shader;
     };
-    nextMaterial.customProgramCacheKey = () => "tarot-card-paper-v1";
+    nextMaterial.customProgramCacheKey = () => "tarot-card-paper-v2";
 
     return nextMaterial;
   }, [
     albedoVariation,
+    cardHeight,
+    cardWidth,
     color,
     depthTest,
     depthWrite,
     map,
     paperSeed,
+    edgePatina,
     roughness,
     roughnessVariation,
     toneMapped,
   ]);
 
+  useFrame(() => {
+    const shader = material.userData.paperShader as PaperShader | undefined;
+    const curl = shader?.uniforms.uPaperCurl?.value;
+
+    if (curl instanceof Vector2) {
+      curl.set(
+        motionRef?.current.curlX ?? 0,
+        motionRef?.current.curlY ?? 0
+      );
+    }
+  });
+
   useEffect(() => () => material.dispose(), [material]);
 
-  return <primitive object={material} attach="material" />;
+  return <primitive object={material} attach={attach} />;
 });

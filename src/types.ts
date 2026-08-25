@@ -59,6 +59,26 @@ export const DECK_POINT_LIMIT = 6.4;
 
 export type CardLayerDirection = "forward" | "backward";
 
+export type TarotSpreadId =
+  | "one-card"
+  | "three-card"
+  | "horseshoe"
+  | "celtic-cross";
+
+export type LenormandSpreadId =
+  | "lenormand-three-card"
+  | "lenormand-five-card"
+  | "lenormand-portrait"
+  | "lenormand-grand-tableau";
+
+export type CardSpreadId = TarotSpreadId | LenormandSpreadId;
+
+/** Stable card-to-slot assignment for a dealt spread. */
+export type ActiveSpreadReading = {
+  id: CardSpreadId;
+  cardIds: string[];
+};
+
 export type TableCard = {
   id: string;
   cardId: string;
@@ -71,12 +91,14 @@ export type TableCard = {
 };
 
 export type TableSnapshot = {
+  activeSpread: ActiveSpreadReading | null;
   cards: TableCard[];
   deckPosition: TablePoint | null;
   selectedCardId: string | null;
 };
 
 export type TarotSession = {
+  activeSpread: ActiveSpreadReading | null;
   cardSetId: string;
   cards: TableCard[];
   deckPosition: TablePoint | null;

@@ -1,5 +1,6 @@
 import type { AppLocale } from "./locale";
-import type { CardSpreadId } from "@/lib/tarot-spreads";
+import type { CardSpreadId } from "@/types";
+import type { SpreadRelationshipId } from "@/lib/tarot-spreads";
 
 type CardCategory = "lenormand" | "major" | "minor";
 
@@ -94,6 +95,9 @@ type Messages = {
   emptyDeck: string;
   liveStatus: (deck: Count, table: Count) => string;
   spreadLabels: Readonly<Record<CardSpreadId, [string, string]>>;
+  spreadRelationshipLabels: Readonly<
+    Record<SpreadRelationshipId, string>
+  >;
 };
 
 const cardNoun = (count: number) => (count === 1 ? "card" : "cards");
@@ -218,6 +222,31 @@ const messages: Record<AppLocale, Messages> = {
       "lenormand-portrait": ["Portrait", "9 cards"],
       "lenormand-grand-tableau": ["Grand Tableau", "36 cards"],
     },
+    spreadRelationshipLabels: {
+      "shapes-present": "shapes the present",
+      "guides-future": "guides the future",
+      "arrives-now": "arrives in the now",
+      "reveals-hidden": "reveals the hidden",
+      "meets-obstacle": "meets the obstacle",
+      "draws-support": "draws on support",
+      "informs-counsel": "informs the counsel",
+      "guides-outcome": "guides the outcome",
+      "crowns-present": "crowns the present",
+      "roots-present": "roots the present",
+      "releases-past": "releases the past",
+      "opens-future": "opens the future",
+      "future-meets-context": "future meets context",
+      "self-meets-context": "self meets context",
+      "context-shapes-hopes": "context shapes hopes",
+      "hopes-guide-outcome": "hopes guide outcome",
+      "sets-scene": "sets the scene",
+      "centers-matter": "centers the matter",
+      "shows-turn": "shows the turn",
+      "shows-outcome": "shows the outcome",
+      "guides-view": "guides the view",
+      "frames-past": "frames the past",
+      "grounds-reading": "grounds the reading",
+    },
   },
   "pt-BR": {
     localeLabel: "Português (Brasil)",
@@ -334,6 +363,31 @@ const messages: Record<AppLocale, Messages> = {
       "lenormand-five-card": ["Linha de cinco cartas", "5 cartas"],
       "lenormand-portrait": ["Retrato", "9 cartas"],
       "lenormand-grand-tableau": ["Grande Tableau", "36 cartas"],
+    },
+    spreadRelationshipLabels: {
+      "shapes-present": "molda o presente",
+      "guides-future": "guia o futuro",
+      "arrives-now": "chega ao agora",
+      "reveals-hidden": "revela o oculto",
+      "meets-obstacle": "encontra o obstáculo",
+      "draws-support": "busca apoio",
+      "informs-counsel": "orienta o conselho",
+      "guides-outcome": "guia o desfecho",
+      "crowns-present": "coroa o presente",
+      "roots-present": "enraíza o presente",
+      "releases-past": "libera o passado",
+      "opens-future": "abre o futuro",
+      "future-meets-context": "futuro encontra contexto",
+      "self-meets-context": "você no contexto",
+      "context-shapes-hopes": "contexto molda esperanças",
+      "hopes-guide-outcome": "esperanças guiam desfecho",
+      "sets-scene": "prepara o cenário",
+      "centers-matter": "centra o tema",
+      "shows-turn": "mostra a virada",
+      "shows-outcome": "mostra o desfecho",
+      "guides-view": "guia a visão",
+      "frames-past": "enquadra o passado",
+      "grounds-reading": "firma a leitura",
     },
   },
 };

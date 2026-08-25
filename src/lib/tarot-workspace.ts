@@ -9,6 +9,7 @@ import {
   resolveSceneSettings,
   type SceneSettings,
 } from "@/components/tarot-studio/theme";
+import { getPopularSpreads } from "@/lib/tarot-spreads";
 
 export const TAROT_WORKSPACE_STORAGE_KEY = "tarot-table:workspace:v1";
 
@@ -74,6 +75,42 @@ function isTableCard(value: unknown, cardSet: CardSetDefinition): value is Table
   );
 }
 
+function restoreActiveSpread(
+  value: unknown,
+  cardSet: CardSetDefinition,
+  cardIds: Set<string>
+): TarotSession["activeSpread"] {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const activeSpread = value as {
+    id?: unknown;
+    cardIds?: unknown;
+  };
+  const spread = getPopularSpreads(cardSet.kind).find(
+    (candidate) => candidate.id === activeSpread.id
+  );
+
+  if (
+    !spread ||
+    !Array.isArray(activeSpread.cardIds) ||
+    activeSpread.cardIds.length !== spread.slots.length ||
+    !activeSpread.cardIds.every(
+      (cardId): cardId is string =>
+        typeof cardId === "string" && cardIds.has(cardId)
+    ) ||
+    new Set(activeSpread.cardIds).size !== activeSpread.cardIds.length
+  ) {
+    return null;
+  }
+
+  return {
+    id: spread.id,
+    cardIds: [...activeSpread.cardIds],
+  };
+}
+
 function restoreSession(
   value: unknown,
   cardSet: CardSetDefinition
@@ -114,6 +151,7 @@ function restoreSession(
   }
 
   return {
+    activeSpread: restoreActiveSpread(session.activeSpread, cardSet, cardIds),
     cardSetId: cardSet.id,
     cards,
     deckPosition: session.deckPosition
