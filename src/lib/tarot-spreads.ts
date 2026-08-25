@@ -16,13 +16,46 @@ export type TarotSpreadSlot = {
   rotation: number;
 };
 
+export type SpreadRelationshipId =
+  | "shapes-present"
+  | "guides-future"
+  | "arrives-now"
+  | "reveals-hidden"
+  | "meets-obstacle"
+  | "draws-support"
+  | "informs-counsel"
+  | "guides-outcome"
+  | "crowns-present"
+  | "roots-present"
+  | "releases-past"
+  | "opens-future"
+  | "future-meets-context"
+  | "self-meets-context"
+  | "context-shapes-hopes"
+  | "hopes-guide-outcome"
+  | "sets-scene"
+  | "centers-matter"
+  | "shows-turn"
+  | "shows-outcome"
+  | "guides-view"
+  | "frames-past"
+  | "grounds-reading";
+
+export type SpreadConnection = {
+  from: number;
+  to: number;
+  relationship?: SpreadRelationshipId;
+  /** Selects which side of a crowded relationship line carries its label. */
+  labelSide?: -1 | 1;
+};
+
 export type CardSpread = {
   id: CardSpreadId;
   label: string;
   shortLabel: string;
   slots: TarotSpreadSlot[];
   /** Sparse semantic relationships between zero-based spread slots. */
-  connections: Array<readonly [from: number, to: number]>;
+  connections: SpreadConnection[];
 };
 
 /** A spread whose positions suit the taller tarot card format. */
@@ -52,12 +85,14 @@ export function getSpreadPresentation(
 }
 
 function createPathConnections(
-  length: number
-): Array<readonly [number, number]> {
-  return Array.from({ length: Math.max(0, length - 1) }, (_, index) => [
-    index,
-    index + 1,
-  ]);
+  relationships: SpreadRelationshipId[]
+): SpreadConnection[] {
+  return relationships.map((relationship, index) => ({
+    from: index,
+    to: index + 1,
+    relationship,
+    labelSide: index % 2 === 0 ? 1 : -1,
+  }));
 }
 
 export const popularTarotSpreads: TarotSpread[] = [
@@ -77,7 +112,10 @@ export const popularTarotSpreads: TarotSpread[] = [
       { position: [0, 0.03], rotation: 0 },
       { position: [0.52, -0.04], rotation: 5 },
     ],
-    connections: createPathConnections(3),
+    connections: createPathConnections([
+      "shapes-present",
+      "guides-future",
+    ]),
   },
   {
     id: "horseshoe",
@@ -92,7 +130,14 @@ export const popularTarotSpreads: TarotSpread[] = [
       { position: [0.98, 0.32], rotation: 10 },
       { position: [1.08, -0.85], rotation: 14 },
     ],
-    connections: createPathConnections(7),
+    connections: createPathConnections([
+      "arrives-now",
+      "reveals-hidden",
+      "meets-obstacle",
+      "draws-support",
+      "informs-counsel",
+      "guides-outcome",
+    ]),
   },
   {
     id: "celtic-cross",
@@ -111,14 +156,14 @@ export const popularTarotSpreads: TarotSpread[] = [
       { position: [0.98, 1.84], rotation: 0 },
     ],
     connections: [
-      [0, 2],
-      [0, 3],
-      [0, 4],
-      [0, 5],
-      [5, 7],
-      [6, 7],
-      [7, 8],
-      [8, 9],
+      { from: 0, to: 2, relationship: "crowns-present", labelSide: 1 },
+      { from: 0, to: 3, relationship: "roots-present", labelSide: -1 },
+      { from: 0, to: 4, relationship: "releases-past", labelSide: 1 },
+      { from: 0, to: 5, relationship: "opens-future", labelSide: -1 },
+      { from: 5, to: 7, relationship: "future-meets-context", labelSide: 1 },
+      { from: 6, to: 7, relationship: "self-meets-context", labelSide: -1 },
+      { from: 7, to: 8, relationship: "context-shapes-hopes", labelSide: 1 },
+      { from: 8, to: 9, relationship: "hopes-guide-outcome", labelSide: -1 },
     ],
   },
 ];
@@ -133,7 +178,10 @@ export const popularLenormandSpreads: LenormandSpread[] = [
       { position: [0, 0], rotation: 0 },
       { position: [0.5, 0], rotation: 0 },
     ],
-    connections: createPathConnections(3),
+    connections: createPathConnections([
+      "sets-scene",
+      "shows-outcome",
+    ]),
   },
   {
     id: "lenormand-five-card",
@@ -146,7 +194,12 @@ export const popularLenormandSpreads: LenormandSpread[] = [
       { position: [0.5, 0], rotation: 0 },
       { position: [1, 0], rotation: 0 },
     ],
-    connections: createPathConnections(5),
+    connections: createPathConnections([
+      "sets-scene",
+      "centers-matter",
+      "shows-turn",
+      "shows-outcome",
+    ]),
   },
   {
     id: "lenormand-portrait",
@@ -164,18 +217,18 @@ export const popularLenormandSpreads: LenormandSpread[] = [
       { position: [0.55, -0.94], rotation: 0 },
     ],
     connections: [
-      [0, 1],
-      [1, 2],
-      [2, 5],
-      [5, 8],
-      [8, 7],
-      [7, 6],
-      [6, 3],
-      [3, 0],
-      [4, 1],
-      [4, 3],
-      [4, 5],
-      [4, 7],
+      { from: 0, to: 1 },
+      { from: 1, to: 2 },
+      { from: 2, to: 5 },
+      { from: 5, to: 8 },
+      { from: 8, to: 7 },
+      { from: 7, to: 6 },
+      { from: 6, to: 3 },
+      { from: 3, to: 0 },
+      { from: 4, to: 1, relationship: "guides-view", labelSide: 1 },
+      { from: 4, to: 3, relationship: "frames-past", labelSide: -1 },
+      { from: 4, to: 5, relationship: "opens-future", labelSide: 1 },
+      { from: 4, to: 7, relationship: "grounds-reading", labelSide: -1 },
     ],
   },
   {

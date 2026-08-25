@@ -46,6 +46,7 @@ import type {
 import { getCardStackOffset } from "@/lib/card-stack-layout";
 import { getDeckCards } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
+import type { SpreadRelationshipId } from "@/lib/tarot-spreads";
 import {
   CARD_THICKNESS,
   CardMesh,
@@ -521,6 +522,9 @@ type TarotSceneProps = {
    */
   viewPan?: TablePoint;
   deckMoveMode: boolean;
+  spreadRelationshipLabels: Readonly<
+    Record<SpreadRelationshipId, string>
+  >;
   onLayoutChange: (layout: SceneTableLayout) => void;
   onSelect: (cardId: string | null) => void;
   onDraw: (
@@ -1612,6 +1616,7 @@ function TarotTable({
   viewZoom,
   viewPan,
   deckMoveMode,
+  spreadRelationshipLabels,
   onSelect,
   onDraw,
   onMoveDeck,
@@ -1819,6 +1824,7 @@ function TarotTable({
         palette={palette}
         reducedMotion={reducedMotion}
         selectedCardId={session.selectedCardId}
+        relationshipLabels={spreadRelationshipLabels}
         surfaceZ={TABLE_SURFACE_Z + 0.006}
       />
       <Suspense fallback={null}>

@@ -1639,6 +1639,7 @@ export function TarotStudio() {
           viewZoom={viewZoom}
           viewPan={viewPan}
           deckMoveMode={isDeckMoveMode}
+          spreadRelationshipLabels={messages.spreadRelationshipLabels}
           onLayoutChange={handleLayoutChange}
           onSelect={handleSelect}
           onDraw={handleDraw}

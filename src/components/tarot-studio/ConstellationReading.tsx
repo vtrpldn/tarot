@@ -10,14 +10,20 @@ import {
 } from "react";
 import {
   BufferGeometry,
+  CanvasTexture,
   Float32BufferAttribute,
   InstancedMesh,
+  LinearFilter,
   LineBasicMaterial,
   MathUtils,
   MeshBasicMaterial,
   Object3D,
+  SRGBColorSpace,
 } from "three";
-import { getSpreadById } from "@/lib/tarot-spreads";
+import {
+  getSpreadById,
+  type SpreadRelationshipId,
+} from "@/lib/tarot-spreads";
 import type {
   ActiveSpreadReading,
   TableCard,
@@ -36,7 +42,153 @@ type ConstellationEdge = {
   toCardId: string;
   start: readonly [number, number, number];
   end: readonly [number, number, number];
+  relationship?: SpreadRelationshipId;
+  label?: string;
+  labelSide: -1 | 1;
 };
+
+type RelationshipLabelPlacement = {
+  edge: ConstellationEdge;
+  key: string;
+  label: string;
+  position: readonly [number, number, number];
+  selected: boolean;
+};
+
+type RelationshipLabelTexture = {
+  aspect: number;
+  texture: CanvasTexture;
+};
+
+function traceRoundedRectangle(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  const resolvedRadius = Math.min(radius, width / 2, height / 2);
+
+  context.beginPath();
+  context.moveTo(x + resolvedRadius, y);
+  context.lineTo(x + width - resolvedRadius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + resolvedRadius);
+  context.lineTo(x + width, y + height - resolvedRadius);
+  context.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - resolvedRadius,
+    y + height
+  );
+  context.lineTo(x + resolvedRadius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - resolvedRadius);
+  context.lineTo(x, y + resolvedRadius);
+  context.quadraticCurveTo(x, y, x + resolvedRadius, y);
+  context.closePath();
+}
+
+function createRelationshipLabelTexture(
+  label: string,
+  palette: ScenePalette
+): RelationshipLabelTexture | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  const font = 'italic 500 38px "Iowan Old Style", Baskerville, Georgia, serif';
+  const horizontalPadding = 34;
+  const height = 88;
+  context.font = font;
+  const measuredWidth = Math.ceil(context.measureText(label).width);
+  canvas.width = measuredWidth + horizontalPadding * 2;
+  canvas.height = height;
+
+  context.font = font;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.globalAlpha = 0.88;
+  context.fillStyle = palette.tableEmissive;
+  traceRoundedRectangle(context, 2, 7, canvas.width - 4, height - 14, 24);
+  context.fill();
+  context.globalAlpha = 0.5;
+  context.strokeStyle = palette.celestialGold;
+  context.lineWidth = 1.5;
+  context.stroke();
+  context.globalAlpha = 1;
+  context.fillStyle = palette.celestialGold;
+  context.fillText(label, canvas.width / 2, height / 2 + 1);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  texture.generateMipmaps = false;
+  texture.magFilter = LinearFilter;
+  texture.minFilter = LinearFilter;
+  texture.name = `spread-relationship:${label}`;
+  texture.needsUpdate = true;
+
+  return {
+    aspect: canvas.width / canvas.height,
+    texture,
+  };
+}
+
+const RelationshipLabel = memo(function RelationshipLabel({
+  label,
+  materialRef,
+  palette,
+  position,
+  height,
+}: {
+  label: string;
+  materialRef: (material: MeshBasicMaterial | null) => void;
+  palette: ScenePalette;
+  position: readonly [number, number, number];
+  height: number;
+}) {
+  const labelTexture = useMemo(
+    () => createRelationshipLabelTexture(label, palette),
+    [label, palette]
+  );
+
+  useEffect(
+    () => () => {
+      labelTexture?.texture.dispose();
+    },
+    [labelTexture]
+  );
+
+  if (!labelTexture) {
+    return null;
+  }
+
+  return (
+    <mesh
+      position={position}
+      renderOrder={4}
+      raycast={() => undefined}
+    >
+      <planeGeometry args={[height * labelTexture.aspect, height]} />
+      <meshBasicMaterial
+        ref={materialRef}
+        alphaTest={0.015}
+        depthTest
+        depthWrite={false}
+        map={labelTexture.texture}
+        opacity={0}
+        toneMapped={false}
+        transparent
+      />
+    </mesh>
+  );
+});
 
 function createLineGeometry(edgeCount: number): BufferGeometry {
   const geometry = new BufferGeometry();
@@ -77,6 +229,7 @@ export const ConstellationReading = memo(function ConstellationReading({
   layout,
   palette,
   reducedMotion,
+  relationshipLabels,
   selectedCardId,
   surfaceZ,
 }: {
@@ -86,6 +239,7 @@ export const ConstellationReading = memo(function ConstellationReading({
   layout: SceneTableLayout;
   palette: ScenePalette;
   reducedMotion: boolean;
+  relationshipLabels: Readonly<Record<SpreadRelationshipId, string>>;
   selectedCardId: string | null;
   surfaceZ: number;
 }) {
@@ -97,6 +251,7 @@ export const ConstellationReading = memo(function ConstellationReading({
   const ringMaterialRef = useRef<MeshBasicMaterial>(null);
   const dotMaterialRef = useRef<MeshBasicMaterial>(null);
   const selectedRingMaterialRef = useRef<MeshBasicMaterial>(null);
+  const labelMaterialRefs = useRef<Array<MeshBasicMaterial | null>>([]);
   const revealProgressRef = useRef(reducedMotion ? 1 : 0);
   const instanceDummy = useMemo(() => new Object3D(), []);
   const cardById = useMemo(
@@ -138,13 +293,13 @@ export const ConstellationReading = memo(function ConstellationReading({
   );
   const edges = useMemo<ConstellationEdge[]>(
     () =>
-      spread?.connections.flatMap(([fromIndex, toIndex]) => {
+      spread?.connections.flatMap((connection) => {
         if (!activeSpread) {
           return [];
         }
 
-        const fromCardId = activeSpread.cardIds[fromIndex];
-        const toCardId = activeSpread.cardIds[toIndex];
+        const fromCardId = activeSpread.cardIds[connection.from];
+        const toCardId = activeSpread.cardIds[connection.to];
         const from = nodeByCardId.get(fromCardId);
         const to = nodeByCardId.get(toCardId);
 
@@ -164,11 +319,16 @@ export const ConstellationReading = memo(function ConstellationReading({
                 toCardId,
                 start: from.position,
                 end: to.position,
+                relationship: connection.relationship,
+                label: connection.relationship
+                  ? relationshipLabels[connection.relationship]
+                  : undefined,
+                labelSide: connection.labelSide ?? 1,
               },
             ]
           : [];
       }) ?? [],
-    [activeSpread, nodeByCardId, spread]
+    [activeSpread, nodeByCardId, relationshipLabels, spread]
   );
   const selectedEdges = useMemo(
     () =>
@@ -193,6 +353,89 @@ export const ConstellationReading = memo(function ConstellationReading({
     ? nodeByCardId.get(selectedCardId)
     : undefined;
   const selectedHaloRadius = layout.cardWidth * 0.56;
+  const relationshipLabelHeight =
+    layout.cardWidth * (isMobileViewport ? 0.17 : 0.115);
+  const visibleRelationshipLabels = useMemo<
+    RelationshipLabelPlacement[]
+  >(() => {
+    const labelledEdges = edges
+      .filter(
+        (edge): edge is ConstellationEdge & { label: string } =>
+          Boolean(edge.label)
+      )
+      .map((edge) => ({
+        edge,
+        selected:
+          edge.fromCardId === selectedCardId ||
+          edge.toCardId === selectedCardId,
+      }))
+      .sort((first, second) => Number(second.selected) - Number(first.selected));
+    const candidates = isMobileViewport
+      ? labelledEdges.filter((candidate) => candidate.selected).slice(0, 2)
+      : labelledEdges;
+    const accepted: RelationshipLabelPlacement[] = [];
+
+    candidates.forEach(({ edge, selected }) => {
+      const deltaX = edge.end[0] - edge.start[0];
+      const deltaY = edge.end[1] - edge.start[1];
+      const distance = Math.hypot(deltaX, deltaY);
+
+      if (distance < layout.cardWidth * 0.24) {
+        return;
+      }
+
+      const normalX = -deltaY / distance;
+      const normalY = deltaX / distance;
+      const approximateLabelWidth = relationshipLabelHeight * MathUtils.clamp(
+        2.8 + edge.label.length * 0.115,
+        3.4,
+        6.6
+      );
+      const clearGap = distance - layout.cardWidth * 1.08;
+      const crowded = clearGap < approximateLabelWidth;
+      const cardClearance =
+        Math.abs(normalX) * (layout.cardWidth / 2) +
+        Math.abs(normalY) * (layout.cardHeight / 2);
+      const offset = crowded
+        ? cardClearance + relationshipLabelHeight * 0.9
+        : relationshipLabelHeight * 0.72;
+      const midpointX = (edge.start[0] + edge.end[0]) / 2;
+      const midpointY = (edge.start[1] + edge.end[1]) / 2;
+      const position = [
+        midpointX + normalX * offset * edge.labelSide,
+        midpointY + normalY * offset * edge.labelSide,
+        surfaceZ + 0.0015,
+      ] as const;
+      const collidesWithAccepted = accepted.some((placement) => {
+        const labelDistance = Math.hypot(
+          placement.position[0] - position[0],
+          placement.position[1] - position[1]
+        );
+
+        return labelDistance < layout.cardWidth * 0.38;
+      });
+
+      if (!collidesWithAccepted) {
+        accepted.push({
+          edge,
+          key: `${edge.fromCardId}:${edge.toCardId}:${edge.relationship}`,
+          label: edge.label,
+          position,
+          selected,
+        });
+      }
+    });
+
+    return accepted;
+  }, [
+    edges,
+    isMobileViewport,
+    layout.cardHeight,
+    layout.cardWidth,
+    relationshipLabelHeight,
+    selectedCardId,
+    surfaceZ,
+  ]);
   const revealSignature = nodes
     .map(
       (node) =>
@@ -244,11 +487,6 @@ export const ConstellationReading = memo(function ConstellationReading({
       edges,
       revealProgressRef.current
     );
-    updateLineGeometry(
-      selectedLineGeometry,
-      selectedEdges,
-      revealProgressRef.current
-    );
     invalidate();
   }, [
     edges,
@@ -256,9 +494,26 @@ export const ConstellationReading = memo(function ConstellationReading({
     lineGeometry,
     reducedMotion,
     revealSignature,
+  ]);
+
+  useEffect(() => {
+    const progress = revealProgressRef.current;
+    const easedProgress = 1 - Math.pow(1 - progress, 3);
+    updateLineGeometry(
+      selectedLineGeometry,
+      selectedEdges,
+      easedProgress
+    );
+    invalidate();
+  }, [
+    invalidate,
     selectedEdges,
     selectedLineGeometry,
   ]);
+
+  useEffect(() => {
+    labelMaterialRefs.current.length = visibleRelationshipLabels.length;
+  }, [visibleRelationshipLabels.length]);
 
   useFrame((_, delta) => {
     const currentProgress = revealProgressRef.current;
@@ -267,6 +522,7 @@ export const ConstellationReading = memo(function ConstellationReading({
       : MathUtils.damp(currentProgress, 1, 7.5, delta);
     const easedProgress = 1 - Math.pow(1 - nextProgress, 3);
     const fade = MathUtils.smoothstep(nextProgress, 0, 0.72);
+    const labelFade = MathUtils.smoothstep(nextProgress, 0.58, 0.9);
 
     revealProgressRef.current = nextProgress;
     updateLineGeometry(lineGeometry, edges, easedProgress);
@@ -288,6 +544,15 @@ export const ConstellationReading = memo(function ConstellationReading({
     if (selectedRingMaterialRef.current) {
       selectedRingMaterialRef.current.opacity = fade * 0.68;
     }
+    visibleRelationshipLabels.forEach((placement, index) => {
+      const material = labelMaterialRefs.current[index];
+
+      if (material) {
+        material.opacity =
+          labelFade *
+          (placement.selected ? 1 : isMobileViewport ? 0.78 : 0.86);
+      }
+    });
 
     if (Math.abs(1 - nextProgress) > 0.001) {
       invalidate();
@@ -332,6 +597,18 @@ export const ConstellationReading = memo(function ConstellationReading({
           transparent
         />
       </lineSegments>
+      {visibleRelationshipLabels.map((placement, index) => (
+        <RelationshipLabel
+          key={placement.key}
+          height={relationshipLabelHeight}
+          label={placement.label}
+          materialRef={(material) => {
+            labelMaterialRefs.current[index] = material;
+          }}
+          palette={palette}
+          position={placement.position}
+        />
+      ))}
       <instancedMesh
         ref={ringInstancesRef}
         args={[undefined, undefined, nodes.length]}
