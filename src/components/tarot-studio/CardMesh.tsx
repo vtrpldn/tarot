@@ -3,6 +3,7 @@
 import { RoundedBox, useTexture } from "@react-three/drei";
 import { ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import {
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -131,6 +132,7 @@ type CardMeshProps = {
   dragRenderOrder: number;
   selected: boolean;
   reducedMotion: boolean;
+  deckMoveMode: boolean;
   onSelect: (cardId: string | null) => void;
   onDraw: (
     cardId: string,
@@ -339,7 +341,7 @@ function getThrownRotation({
   return rotation + rotationDelta;
 }
 
-export function CardMesh({
+export const CardMesh = memo(function CardMesh({
   card,
   definition,
   cardSet,
@@ -352,6 +354,7 @@ export function CardMesh({
   dragRenderOrder,
   selected,
   reducedMotion,
+  deckMoveMode,
   onSelect,
   onDraw,
   onMoveDeck,
@@ -745,8 +748,9 @@ export function CardMesh({
 
     const movesDeck =
       card.zone === "deck" &&
-      event.nativeEvent.pointerType !== "touch" &&
-      (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey);
+      (deckMoveMode ||
+        (event.nativeEvent.pointerType !== "touch" &&
+          (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey)));
     const mode: DragState["mode"] = movesDeck
       ? "move-deck"
       : card.zone === "table" &&
@@ -841,7 +845,9 @@ export function CardMesh({
       if (event.nativeEvent.pointerType !== "touch") {
         const deckMoveReady =
           card.zone === "deck" &&
-          (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey);
+          (deckMoveMode ||
+            event.nativeEvent.ctrlKey ||
+            event.nativeEvent.metaKey);
         const ready =
           card.zone === "table" && selected && isNearCardEdge(event);
         canvas.style.cursor = deckMoveReady
@@ -1056,7 +1062,9 @@ export function CardMesh({
             onHover(card.zone === "table" ? card.id : null);
             const deckMoveReady =
               card.zone === "deck" &&
-              (event.nativeEvent.ctrlKey || event.nativeEvent.metaKey);
+              (deckMoveMode ||
+                event.nativeEvent.ctrlKey ||
+                event.nativeEvent.metaKey);
             const ready =
               card.zone === "table" && selected && isNearCardEdge(event);
             canvas.style.cursor = deckMoveReady
@@ -1095,4 +1103,4 @@ export function CardMesh({
       </mesh>
     </group>
   );
-}
+});

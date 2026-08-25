@@ -4,6 +4,7 @@ import { RoundedBox, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
+  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -63,6 +64,7 @@ type TarotSceneProps = {
   session: TarotSession;
   reducedMotion: boolean;
   viewZoom: number;
+  deckMoveMode: boolean;
   onLayoutChange: (layout: SceneTableLayout) => void;
   onSelect: (cardId: string | null) => void;
   onDraw: (
@@ -391,6 +393,7 @@ function TarotTable({
   cardSet,
   session,
   reducedMotion,
+  deckMoveMode,
   onSelect,
   onDraw,
   onMoveDeck,
@@ -558,6 +561,7 @@ function TarotTable({
             dragRenderOrder={DRAG_RENDER_ORDER}
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}
+            deckMoveMode={deckMoveMode}
             onSelect={onSelect}
             onDraw={onDraw}
             onMoveDeck={onMoveDeck}
@@ -573,7 +577,7 @@ function TarotTable({
   );
 }
 
-export function TarotScene(props: TarotSceneProps) {
+export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
   return (
     <Canvas
       className="tarot-canvas"
@@ -600,4 +604,4 @@ export function TarotScene(props: TarotSceneProps) {
       <TarotTable {...props} />
     </Canvas>
   );
-}
+});
