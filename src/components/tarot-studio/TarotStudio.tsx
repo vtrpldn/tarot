@@ -37,6 +37,10 @@ import {
   type CardSoundPlayOptions,
 } from "@/lib/card-sounds";
 import {
+  getArrangementPresentation,
+  type AutomaticCardPlacement,
+} from "@/lib/card-arrangement";
+import {
   createLayout,
   createTarotSession,
   getRemainingDeckCount,
@@ -55,10 +59,18 @@ import {
 } from "@/lib/tarot-workspace";
 import type { CardLayerDirection, TableLayout, TablePoint } from "@/types";
 import {
+  clampViewPan,
   MAX_VIEW_ZOOM,
   MIN_VIEW_ZOOM,
   type SceneTableLayout,
 } from "./table-layout";
+import {
+  DEFAULT_SCENE_SETTINGS,
+  resolveSceneSettings,
+  SCENE_THEME_IDS,
+  type SceneSettings,
+  type SceneThemeId,
+} from "./theme";
 
 const WHEEL_LAYER_COOLDOWN = 110;
 const WHEEL_LAYER_THRESHOLD = 36;
@@ -70,11 +82,11 @@ const COURT_RANKS = new Set(["page", "knight", "queen", "king"]);
 
 type TarotCollectionId = "all" | "major" | "minor" | "court";
 
-const COLLECTION_ZOOM: Record<TarotCollectionId, number> = {
-  all: MIN_VIEW_ZOOM,
-  major: 0.48,
-  minor: 0.35,
-  court: 0.48,
+type ActiveAutomaticArrangement = {
+  adjustZoom: boolean;
+  deckPosition: TablePoint;
+  includeDeck: boolean;
+  placements: AutomaticCardPlacement[];
 };
 
 function getCollectionColumnCount(
@@ -124,6 +136,15 @@ function createCollectionPlacements(
       ] as const;
     })
   );
+}
+
+function copyAutomaticPlacements(
+  placements: Iterable<AutomaticCardPlacement>
+): AutomaticCardPlacement[] {
+  return Array.from(placements, (placement) => ({
+    position: [...placement.position] as TablePoint,
+    rotation: placement.rotation,
+  }));
 }
 
 const TarotScene = dynamic(
@@ -378,7 +399,7 @@ function useDockPopover({
     const focusTimer = window.requestAnimationFrame(() => {
       containerRef.current
         ?.querySelector<HTMLElement>(
-          "[role='dialog'] [role='radio'][aria-checked='true'], [role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled)"
+          "[role='dialog'] [role='radio'][aria-checked='true'], [role='dialog'] button:not(:disabled), [role='dialog'] select:not(:disabled), [role='dialog'] input:not(:disabled)"
         )
         ?.focus();
     });
@@ -426,7 +447,8 @@ export function TarotStudio() {
   const canvasShellRef = useRef<HTMLDivElement>(null);
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
-  const activeSpreadRef = useRef<CardSpread | null>(null);
+  const viewZoomRef = useRef(1);
+  const activeArrangementRef = useRef<ActiveAutomaticArrangement | null>(null);
   const spacePressedRef = useRef(false);
   const panGestureRef = useRef<{
     pointerId: number;
@@ -442,6 +464,8 @@ export function TarotStudio() {
   const spreadMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const arrangeMenuRef = useRef<HTMLDivElement>(null);
   const arrangeMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const configMenuRef = useRef<HTMLDivElement>(null);
+  const configMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const languageMenuRef = useRef<HTMLDivElement>(null);
   const languageMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const inspectorCollapseRef = useRef<HTMLButtonElement>(null);
@@ -461,6 +485,7 @@ export function TarotStudio() {
   const [isZoomMenuOpen, setIsZoomMenuOpen] = useState(false);
   const [isSpreadMenuOpen, setIsSpreadMenuOpen] = useState(false);
   const [isArrangeMenuOpen, setIsArrangeMenuOpen] = useState(false);
+  const [isConfigMenuOpen, setIsConfigMenuOpen] = useState(false);
   const [isLanguageMenuOpen, setIsLanguageMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const [isDeckMoveMode, setIsDeckMoveMode] = useState(false);
@@ -471,7 +496,37 @@ export function TarotStudio() {
   );
   const [isReadingLoading, setIsReadingLoading] = useState(false);
   const [locale, setLocale] = useState<AppLocale>("en");
+  const [sceneSettings, setSceneSettings] = useState<SceneSettings>(() => ({
+    ...DEFAULT_SCENE_SETTINGS,
+  }));
+
+  useEffect(() => {
+    viewZoomRef.current = viewZoom;
+    const layout = sceneLayoutRef.current;
+
+    if (!layout) {
+      return;
+    }
+
+    setViewPan((current) => {
+      const next = clampViewPan(
+        current,
+        layout.viewportBounds,
+        viewZoom
+      );
+
+      return next[0] === current[0] && next[1] === current[1]
+        ? current
+        : next;
+    });
+  }, [viewZoom]);
+
   const messages = getMessages(locale);
+  const sceneThemeLabels: Record<SceneThemeId, string> = {
+    constellation: messages.backgroundConstellation,
+    "solar-temple": messages.backgroundSolarTemple,
+    "moonlit-grove": messages.backgroundMoonlitGrove,
+  };
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -506,6 +561,7 @@ export function TarotStudio() {
     isZoomMenuOpen ||
     isSpreadMenuOpen ||
     isArrangeMenuOpen ||
+    isConfigMenuOpen ||
     isLanguageMenuOpen ||
     isInspectorOpen ||
     isDeckMoveMode;
@@ -544,6 +600,7 @@ export function TarotStudio() {
       setViewZoom(
         Math.min(MAX_VIEW_ZOOM, Math.max(MIN_VIEW_ZOOM, workspace.viewZoom))
       );
+      setSceneSettings(resolveSceneSettings(workspace.sceneSettings));
       setIsInspectorCollapsed(true);
       dispatch({ type: "restore", session: workspace.session });
     }
@@ -560,6 +617,7 @@ export function TarotStudio() {
       saveTarotWorkspace({
         activeCardSetId,
         isInspectorCollapsed,
+        sceneSettings,
         session,
         viewZoom,
       });
@@ -570,6 +628,7 @@ export function TarotStudio() {
     activeCardSetId,
     isInspectorCollapsed,
     isWorkspaceReady,
+    sceneSettings,
     session,
     viewZoom,
   ]);
@@ -597,6 +656,12 @@ export function TarotStudio() {
     isOpen: isArrangeMenuOpen,
     setIsOpen: setIsArrangeMenuOpen,
     triggerRef: arrangeMenuTriggerRef,
+  });
+  useDockPopover({
+    containerRef: configMenuRef,
+    isOpen: isConfigMenuOpen,
+    setIsOpen: setIsConfigMenuOpen,
+    triggerRef: configMenuTriggerRef,
   });
   useDockPopover({
     containerRef: languageMenuRef,
@@ -673,19 +738,51 @@ export function TarotStudio() {
   }, []);
 
   const arrangeCards = useCallback(
-    (layout: TableLayout) => {
-      if (tableCards.length === 0) {
+    (tableLayout: TableLayout) => {
+      const layout = sceneLayoutRef.current;
+
+      if (tableCards.length === 0 || !layout) {
         return;
       }
 
-      activeSpreadRef.current = null;
+      const placements = createLayout(
+        tableCards,
+        activeCardSet,
+        tableLayout
+      );
+      const automaticPlacements = copyAutomaticPlacements(
+        placements.values()
+      );
+      const includeDeck = deckCount > 0;
+      const presentation = getArrangementPresentation(
+        automaticPlacements,
+        layout,
+        {
+          includeDeck,
+          preferredDeckPosition: session.deckPosition,
+        }
+      );
+
+      activeArrangementRef.current = {
+        adjustZoom: false,
+        deckPosition: presentation.deckPosition,
+        includeDeck,
+        placements: automaticPlacements,
+      };
       playCardSound("arrange");
       dispatch({
         type: "layout",
-        placements: createLayout(tableCards, activeCardSet, layout),
+        deckPosition: presentation.deckPosition,
+        placements,
       });
     },
-    [activeCardSet, playCardSound, tableCards]
+    [
+      activeCardSet,
+      deckCount,
+      playCardSound,
+      session.deckPosition,
+      tableCards,
+    ]
   );
 
   const dealSpread = useCallback(
@@ -696,8 +793,17 @@ export function TarotStudio() {
         return;
       }
 
-      const presentation = getSpreadPresentation(spread, layout);
-      activeSpreadRef.current = spread;
+      const includeDeck = deckCount > spread.slots.length;
+      const presentation = getSpreadPresentation(spread, layout, {
+        includeDeck,
+        preferredDeckPosition: session.deckPosition,
+      });
+      activeArrangementRef.current = {
+        adjustZoom: true,
+        deckPosition: presentation.deckPosition,
+        includeDeck,
+        placements: copyAutomaticPlacements(spread.slots),
+      };
       setViewPan([0, 0]);
       setViewZoom(presentation.zoom);
       playCardSound("arrange");
@@ -708,7 +814,7 @@ export function TarotStudio() {
         deckPosition: presentation.deckPosition,
       });
     },
-    [playCardSound]
+    [deckCount, playCardSound, session.deckPosition]
   );
 
   const flipSelected = useCallback(() => {
@@ -720,7 +826,7 @@ export function TarotStudio() {
 
   const turnSelected = useCallback((degrees: number) => {
     if (selectedCard?.zone === "table") {
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("rotate");
       dispatch({ type: "rotate", cardId: selectedCard.id, degrees });
     }
@@ -739,16 +845,42 @@ export function TarotStudio() {
   const handleLayoutChange = useCallback((layout: SceneTableLayout) => {
     sceneLayoutRef.current = layout;
     setIsSceneLayoutReady(true);
+    setViewPan((current) => {
+      const next = clampViewPan(
+        current,
+        layout.viewportBounds,
+        viewZoomRef.current
+      );
 
-    const spread = activeSpreadRef.current;
+      return next[0] === current[0] && next[1] === current[1]
+        ? current
+        : next;
+    });
 
-    if (spread) {
-      const presentation = getSpreadPresentation(spread, layout);
-      setViewZoom(presentation.zoom);
-      dispatch({
-        type: "sync-deck-position",
-        position: presentation.deckPosition,
-      });
+    const arrangement = activeArrangementRef.current;
+
+    if (arrangement) {
+      const presentation = getArrangementPresentation(
+        arrangement.placements,
+        layout,
+        {
+          includeDeck: arrangement.includeDeck,
+          preferredDeckPosition: arrangement.deckPosition,
+        }
+      );
+
+      arrangement.deckPosition = presentation.deckPosition;
+
+      if (arrangement.adjustZoom) {
+        setViewZoom(presentation.zoom);
+      }
+
+      if (arrangement.includeDeck) {
+        dispatch({
+          type: "sync-deck-position",
+          position: presentation.deckPosition,
+        });
+      }
     }
   }, []);
 
@@ -758,7 +890,7 @@ export function TarotStudio() {
 
   const handleDraw = useCallback(
     (cardId: string, position: TablePoint, rotation?: number) => {
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("draw");
       dispatch({ type: "draw", cardId, position, rotation });
     },
@@ -766,7 +898,7 @@ export function TarotStudio() {
   );
 
   const handleMoveDeck = useCallback((position: TablePoint) => {
-    activeSpreadRef.current = null;
+    activeArrangementRef.current = null;
     setIsDeckMoveMode(false);
     playCardSound("drop");
     dispatch({ type: "move-deck", position });
@@ -774,7 +906,7 @@ export function TarotStudio() {
 
   const handleMove = useCallback(
     (cardId: string, position: TablePoint, rotation?: number) => {
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("drop");
       dispatch({ type: "move", cardId, position, rotation });
     },
@@ -787,7 +919,7 @@ export function TarotStudio() {
   }, [playCardSound]);
 
   const handleRotate = useCallback((cardId: string, degrees: number) => {
-    activeSpreadRef.current = null;
+    activeArrangementRef.current = null;
     playCardSound("rotate");
     dispatch({ type: "rotate", cardId, degrees });
   }, [playCardSound]);
@@ -853,6 +985,57 @@ export function TarotStudio() {
     [updateLocale]
   );
 
+  const updateSceneTheme = useCallback(
+    (themeId: SceneThemeId, restoreFocus = false) => {
+      setSceneSettings((current) =>
+        resolveSceneSettings({ ...current, themeId })
+      );
+
+      if (restoreFocus) {
+        window.requestAnimationFrame(() =>
+          configMenuRef.current
+            ?.querySelector<HTMLButtonElement>(
+              `[data-scene-theme-option="${themeId}"]`
+            )
+            ?.focus()
+        );
+      }
+    },
+    []
+  );
+
+  const handleSceneThemeRadioKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>, currentTheme: SceneThemeId) => {
+      const currentIndex = SCENE_THEME_IDS.indexOf(currentTheme);
+      let nextIndex: number;
+
+      switch (event.key) {
+        case "ArrowLeft":
+        case "ArrowUp":
+          nextIndex =
+            (currentIndex - 1 + SCENE_THEME_IDS.length) %
+            SCENE_THEME_IDS.length;
+          break;
+        case "ArrowRight":
+        case "ArrowDown":
+          nextIndex = (currentIndex + 1) % SCENE_THEME_IDS.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = SCENE_THEME_IDS.length - 1;
+          break;
+        default:
+          return;
+      }
+
+      event.preventDefault();
+      updateSceneTheme(SCENE_THEME_IDS[nextIndex], true);
+    },
+    [updateSceneTheme]
+  );
+
   const undoLastAction = useCallback(() => {
     const previous = session.history[session.history.length - 1];
 
@@ -860,10 +1043,7 @@ export function TarotStudio() {
       return;
     }
 
-    if (previous.cards.every((card) => card.zone === "deck")) {
-      activeSpreadRef.current = null;
-    }
-
+    activeArrangementRef.current = null;
     playCardSound("arrange");
     dispatch({ type: "undo" });
   }, [playCardSound, session.history]);
@@ -875,12 +1055,13 @@ export function TarotStudio() {
       return;
     }
 
+    activeArrangementRef.current = null;
     playCardSound("arrange");
     dispatch({ type: "redo" });
   }, [playCardSound, session.redo]);
 
   const resetTable = useCallback(() => {
-    activeSpreadRef.current = null;
+    activeArrangementRef.current = null;
     setIsDeckMoveMode(false);
     setIsInspectorCollapsed(true);
     setViewPan([0, 0]);
@@ -922,20 +1103,43 @@ export function TarotStudio() {
       );
       const layout = sceneLayoutRef.current;
 
-      activeSpreadRef.current = null;
+      if (!layout) {
+        return;
+      }
+
+      const placements = createCollectionPlacements(cardIds, collection);
+      const automaticPlacements = copyAutomaticPlacements(
+        placements.values()
+      );
+      const includeDeck = cardIds.length < activeCardSet.cards.length;
+      const presentation = getArrangementPresentation(
+        automaticPlacements,
+        layout,
+        {
+          includeDeck,
+          preferredDeckPosition: session.deckPosition,
+        }
+      );
+
+      activeArrangementRef.current = {
+        adjustZoom: true,
+        deckPosition: presentation.deckPosition,
+        includeDeck,
+        placements: automaticPlacements,
+      };
       setIsDeckMoveMode(false);
       setIsInspectorCollapsed(true);
       setViewPan([0, 0]);
-      setViewZoom(COLLECTION_ZOOM[collection]);
+      setViewZoom(presentation.zoom);
       playCardSound("arrange");
       dispatch({
         type: "show-collection",
         cardIds,
-        placements: createCollectionPlacements(cardIds, collection),
-        deckPosition: layout?.deckPositionCandidates[0]?.position,
+        placements,
+        deckPosition: presentation.deckPosition,
       });
     },
-    [activeCardSet, playCardSound]
+    [activeCardSet, playCardSound, session.deckPosition]
   );
 
   const adjustViewZoom = useCallback((delta: number) => {
@@ -1071,10 +1275,16 @@ export function TarotStudio() {
       const deltaX = event.clientX - gesture.startX;
       const deltaY = event.clientY - gesture.startY;
 
-      setViewPan([
-        gesture.startPan[0] - deltaX * unitsPerPixel,
-        gesture.startPan[1] + deltaY * unitsPerPixel,
-      ]);
+      setViewPan(
+        clampViewPan(
+          [
+            gesture.startPan[0] - deltaX * unitsPerPixel,
+            gesture.startPan[1] + deltaY * unitsPerPixel,
+          ],
+          layout.viewportBounds,
+          viewZoom
+        )
+      );
     },
     [viewZoom]
   );
@@ -1223,7 +1433,7 @@ export function TarotStudio() {
 
     if (nudge && selectedCard?.zone === "table") {
       event.preventDefault();
-      activeSpreadRef.current = null;
+      activeArrangementRef.current = null;
       playCardSound("move", { intensity: 0.6 });
       dispatch({
         type: "nudge",
@@ -1266,7 +1476,10 @@ export function TarotStudio() {
 
   if (!isWorkspaceReady) {
     return (
-      <main className="tarot-app tarot-app--restoring">
+      <main
+        className="tarot-app tarot-app--restoring"
+        data-scene-theme={sceneSettings.themeId}
+      >
         <div className="tarot-grain" aria-hidden="true" />
         <div className="tarot-workspace-loading" role="status">
           {messages.loadingTable}
@@ -1276,7 +1489,7 @@ export function TarotStudio() {
   }
 
   return (
-    <main className="tarot-app">
+    <main className="tarot-app" data-scene-theme={sceneSettings.themeId}>
       <div className="tarot-grain" aria-hidden="true" />
       <div
         ref={canvasShellRef}
@@ -1296,6 +1509,7 @@ export function TarotStudio() {
           cardSet={activeCardSet}
           session={session}
           reducedMotion={reducedMotion}
+          sceneSettings={sceneSettings}
           viewZoom={viewZoom}
           viewPan={viewPan}
           deckMoveMode={isDeckMoveMode}
@@ -1344,6 +1558,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
               setIsLanguageMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
@@ -1376,7 +1591,7 @@ export function TarotStudio() {
                 value={activeCardSetId}
                 onChange={(event) => {
                   const nextCardSet = getCardSet(event.target.value);
-                  activeSpreadRef.current = null;
+                  activeArrangementRef.current = null;
                   setIsDeckMoveMode(false);
                   setIsSceneLayoutReady(false);
                   setActiveCardSetId(nextCardSet.id);
@@ -1404,66 +1619,6 @@ export function TarotStudio() {
               </span>
             </div>
           )}
-        </div>
-        <div className="tarot-zoom-menu" ref={zoomMenuRef}>
-          <button
-            ref={zoomMenuTriggerRef}
-            type="button"
-            className="tarot-toolbar-trigger tarot-zoom-trigger"
-            aria-label={messages.tableZoom(Math.round(viewZoom * 100))}
-            aria-controls="zoom-actions"
-            aria-expanded={isZoomMenuOpen}
-            aria-haspopup="dialog"
-            onClick={() => {
-              const willOpen = !isZoomMenuOpen;
-              setIsDeckMenuOpen(false);
-              setIsSpreadMenuOpen(false);
-              setIsArrangeMenuOpen(false);
-              setIsLanguageMenuOpen(false);
-              setIsInspectorCollapsed(true);
-              setIsZoomMenuOpen(willOpen);
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="10.5" cy="10.5" r="5.5" />
-              <path d="m14.5 14.5 5 5M8 10.5h5M10.5 8v5" />
-            </svg>
-            <span>{messages.zoom}</span>
-            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="m8 10 4 4 4-4" />
-            </svg>
-          </button>
-          <div
-            id="zoom-actions"
-            className={`tarot-zoom-controls${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
-            role={isZoomMenuOpen ? "dialog" : undefined}
-            aria-label={messages.zoom}
-          >
-            <button
-              type="button"
-              aria-label={messages.zoomOut}
-              onClick={() => adjustViewZoom(-0.1)}
-              disabled={viewZoom <= MIN_VIEW_ZOOM}
-            >
-              −
-            </button>
-            <button
-              type="button"
-              aria-label={messages.resetZoom}
-              title={messages.resetZoom}
-              onClick={() => setViewZoom(1)}
-            >
-              {Math.round(viewZoom * 100)}%
-            </button>
-            <button
-              type="button"
-              aria-label={messages.zoomIn}
-              onClick={() => adjustViewZoom(0.1)}
-              disabled={viewZoom >= MAX_VIEW_ZOOM}
-            >
-              +
-            </button>
-          </div>
         </div>
         {isDeckMoveMode && (
           <button
@@ -1500,6 +1655,7 @@ export function TarotStudio() {
                   setIsDeckMenuOpen(false);
                   setIsZoomMenuOpen(false);
                   setIsArrangeMenuOpen(false);
+                  setIsConfigMenuOpen(false);
                   setIsLanguageMenuOpen(false);
                   setIsSpreadMenuOpen(willOpen);
                 }}
@@ -1561,6 +1717,7 @@ export function TarotStudio() {
               setIsDeckMenuOpen(false);
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
+              setIsConfigMenuOpen(false);
               setIsLanguageMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
@@ -1611,7 +1768,7 @@ export function TarotStudio() {
                       arrangeCards(layout);
                       closeArrangeMenu();
                     }}
-                    disabled={!tableCards.length}
+                    disabled={!tableCards.length || !isSceneLayoutReady}
                   >
                     <span>{label}</span>
                     <small>{hint}</small>
@@ -1624,6 +1781,7 @@ export function TarotStudio() {
                     setIsDeckMenuOpen(false);
                     setIsZoomMenuOpen(false);
                     setIsSpreadMenuOpen(false);
+                    setIsConfigMenuOpen(false);
                     setIsLanguageMenuOpen(false);
                     setIsDeckMoveMode(true);
                     setIsArrangeMenuOpen(false);
@@ -1678,6 +1836,7 @@ export function TarotStudio() {
                           showTarotCollection(collection);
                           closeArrangeMenu();
                         }}
+                        disabled={!isSceneLayoutReady}
                       >
                         <span>{messages.tarotCollections[collection][0]}</span>
                         <small>
@@ -1701,6 +1860,7 @@ export function TarotStudio() {
             setIsZoomMenuOpen(false);
             setIsSpreadMenuOpen(false);
             setIsArrangeMenuOpen(false);
+            setIsConfigMenuOpen(false);
             setIsLanguageMenuOpen(false);
             resetTable();
           }}
@@ -1711,24 +1871,157 @@ export function TarotStudio() {
           </svg>
           <span>{messages.resetTable}</span>
         </button>
-        <button
-          type="button"
-          className="tarot-toolbar-trigger tarot-sound-toggle"
-          aria-label={messages.cardSounds}
-          aria-pressed={!areCardSoundsMuted}
-          title={areCardSoundsMuted ? messages.cardSoundsOff : messages.cardSoundsOn}
-          onClick={toggleCardSounds}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 10h3.2L13 6.2v11.6L8.2 14H5z" />
-            {areCardSoundsMuted ? (
-              <path d="m16.5 9.2 4.3 5.6m0-5.6-4.3 5.6" />
-            ) : (
-              <path d="M16.5 9.2a4 4 0 0 1 0 5.6M18.8 7a7 7 0 0 1 0 10" />
-            )}
-          </svg>
-          <span>{messages.cardSounds}</span>
-        </button>
+        <div className="tarot-zoom-menu" ref={zoomMenuRef}>
+          <button
+            ref={zoomMenuTriggerRef}
+            type="button"
+            className="tarot-toolbar-trigger tarot-zoom-trigger"
+            aria-label={messages.tableZoom(Math.round(viewZoom * 100))}
+            aria-controls="zoom-actions"
+            aria-expanded={isZoomMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              const willOpen = !isZoomMenuOpen;
+              setIsDeckMenuOpen(false);
+              setIsSpreadMenuOpen(false);
+              setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
+              setIsLanguageMenuOpen(false);
+              setIsInspectorCollapsed(true);
+              setIsZoomMenuOpen(willOpen);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="5.5" />
+              <path d="m14.5 14.5 5 5M8 10.5h5M10.5 8v5" />
+            </svg>
+            <span>{messages.zoom}</span>
+            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 10 4 4 4-4" />
+            </svg>
+          </button>
+          <div
+            id="zoom-actions"
+            className={`tarot-zoom-controls${isZoomMenuOpen ? " tarot-zoom-controls--open" : ""}`}
+            role={isZoomMenuOpen ? "dialog" : undefined}
+            aria-label={messages.zoom}
+          >
+            <button
+              type="button"
+              aria-label={messages.zoomOut}
+              onClick={() => adjustViewZoom(-0.1)}
+              disabled={viewZoom <= MIN_VIEW_ZOOM}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              aria-label={messages.resetZoom}
+              title={messages.resetZoom}
+              onClick={() => setViewZoom(1)}
+            >
+              {Math.round(viewZoom * 100)}%
+            </button>
+            <button
+              type="button"
+              aria-label={messages.zoomIn}
+              onClick={() => adjustViewZoom(0.1)}
+              disabled={viewZoom >= MAX_VIEW_ZOOM}
+            >
+              +
+            </button>
+          </div>
+        </div>
+        <div className="tarot-config-menu" ref={configMenuRef}>
+          <button
+            ref={configMenuTriggerRef}
+            type="button"
+            className="tarot-toolbar-trigger tarot-config-trigger"
+            aria-label={messages.configureTable}
+            aria-controls="config-actions"
+            aria-expanded={isConfigMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              const willOpen = !isConfigMenuOpen;
+
+              setIsDeckMenuOpen(false);
+              setIsZoomMenuOpen(false);
+              setIsSpreadMenuOpen(false);
+              setIsArrangeMenuOpen(false);
+              setIsLanguageMenuOpen(false);
+              setIsInspectorCollapsed(true);
+              setIsConfigMenuOpen(willOpen);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M6 14v6" />
+            </svg>
+            <span>{messages.config}</span>
+            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m8 10 4 4 4-4" />
+            </svg>
+          </button>
+          {isConfigMenuOpen && (
+            <section
+              id="config-actions"
+              className="tarot-config-popover"
+              role="dialog"
+              aria-label={messages.configureTable}
+            >
+              <h2 className="tarot-config-heading">{messages.configureTable}</h2>
+              <div className="tarot-config-section">
+                <h3 className="tarot-config-section-title">
+                  {messages.background}
+                </h3>
+                <div
+                  className="tarot-config-choice-grid"
+                  role="radiogroup"
+                  aria-label={messages.backgroundOptions}
+                >
+                  {SCENE_THEME_IDS.map((themeId) => (
+                    <button
+                      key={themeId}
+                      type="button"
+                      className="tarot-config-choice"
+                      role="radio"
+                      aria-checked={sceneSettings.themeId === themeId}
+                      data-scene-theme={themeId}
+                      data-scene-theme-option={themeId}
+                      tabIndex={sceneSettings.themeId === themeId ? 0 : -1}
+                      onKeyDown={(event) =>
+                        handleSceneThemeRadioKeyDown(event, themeId)
+                      }
+                      onClick={() => updateSceneTheme(themeId)}
+                    >
+                      <span>{sceneThemeLabels[themeId]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="tarot-config-section">
+                <h3 className="tarot-config-section-title">
+                  {messages.cardSounds}
+                </h3>
+                <button
+                  type="button"
+                  className="tarot-config-sound"
+                  role="switch"
+                  aria-checked={!areCardSoundsMuted}
+                  onClick={toggleCardSounds}
+                >
+                  <span>
+                    <span>
+                      {areCardSoundsMuted
+                        ? messages.cardSoundsOff
+                        : messages.cardSoundsOn}
+                    </span>
+                    <small>{messages.cardSoundsDescription}</small>
+                  </span>
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
         <div className="tarot-language-menu" ref={languageMenuRef}>
           <button
             ref={languageMenuTriggerRef}
@@ -1745,6 +2038,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
               if (selectedCard?.zone === "table") {
                 setIsInspectorCollapsed(true);
               }
@@ -1812,6 +2106,7 @@ export function TarotStudio() {
               setIsZoomMenuOpen(false);
               setIsSpreadMenuOpen(false);
               setIsArrangeMenuOpen(false);
+              setIsConfigMenuOpen(false);
               setIsLanguageMenuOpen(false);
               if (isInspectorOpen) {
                 collapseInspector();
@@ -1946,12 +2241,6 @@ export function TarotStudio() {
                         <p className="tarot-tradition-note">
                           {selectedReading.traditionNote}
                         </p>
-                      )}
-                      {selectedReading.perspective && (
-                        <div className="tarot-card-perspective">
-                          <span>{selectedReading.perspective.label}</span>
-                          <p>{selectedReading.perspective.text}</p>
-                        </div>
                       )}
                       <div className="tarot-card-sources">
                         <span>{messages.sources}</span>

@@ -15,6 +15,8 @@ type CardPaperMaterialProps = {
   albedoVariation?: number;
   roughnessVariation?: number;
   toneMapped?: boolean;
+  depthTest?: boolean;
+  depthWrite?: boolean;
 };
 
 const PAPER_VERTEX_DECLARATION = /* glsl */ `
@@ -100,6 +102,8 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
   albedoVariation = 0.035,
   roughnessVariation = 0.12,
   toneMapped = true,
+  depthTest = true,
+  depthWrite = true,
 }: CardPaperMaterialProps) {
   const material = useMemo(() => {
     const nextMaterial = new MeshStandardMaterial({
@@ -107,6 +111,8 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
       metalness: 0,
       roughness,
       toneMapped,
+      depthTest,
+      depthWrite,
       ...(map ? { map } : {}),
     });
 
@@ -136,6 +142,8 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
   }, [
     albedoVariation,
     color,
+    depthTest,
+    depthWrite,
     map,
     paperSeed,
     roughness,

@@ -3,6 +3,7 @@
 import { useTexture } from "@react-three/drei";
 import { ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import {
+  type MutableRefObject,
   memo,
   Suspense,
   useCallback,
@@ -105,6 +106,11 @@ type PointerEndFallbackBinding = {
   pointerCancelHandler: (event: PointerEvent) => void;
 };
 
+export type ExternalCardDrag = {
+  cardId: string;
+  position: TablePoint;
+};
+
 function sampleDragVelocity(
   drag: DragState,
   point: Vector3,
@@ -150,7 +156,18 @@ type CardMeshProps = {
   definition: CardDefinition;
   cardSet: CardSetDefinition;
   layout: SceneTableLayout;
+  /** Stable world-space anchor for the bottom card in the deck. */
   deckPosition: TablePoint;
+  /** World-space resting position for this physical card in the deck. */
+  deckCardPosition: TablePoint;
+  /** World-space offset from the deck anchor for whole-deck movement. */
+  deckOffset: TablePoint;
+  /** Compressed paper thickness while this card remains in the deck. */
+  deckDepthScale: number;
+  deckPreviewPositionRef: MutableRefObject<TablePoint | null>;
+  externalDragRef: MutableRefObject<ExternalCardDrag | null>;
+  peeked: boolean;
+  slabGeometry: ExtrudeGeometry;
   restingZ: number;
   interactionZ: number;
   draggingZ: number;
@@ -203,6 +220,8 @@ export function CardArtwork({
   height,
   renderOrder = 3,
   paperSeed = 0,
+  depthTest = true,
+  depthWrite = true,
 }: {
   url: string;
   crop?: CardArtworkCrop;
@@ -212,6 +231,8 @@ export function CardArtwork({
   height: number;
   renderOrder?: number;
   paperSeed?: number;
+  depthTest?: boolean;
+  depthWrite?: boolean;
 }) {
   const texture = useTextureForCard(url);
   const geometry = useMemo(() => {
@@ -251,6 +272,8 @@ export function CardArtwork({
         roughness={0.9}
         paperSeed={paperSeed}
         toneMapped={false}
+        depthTest={depthTest}
+        depthWrite={depthWrite}
       />
     </mesh>
   );
@@ -263,6 +286,8 @@ function CardFaceLayers({
   cardHeight,
   reverse = false,
   paperSeed,
+  depthTest = true,
+  depthWrite = true,
 }: {
   artworkUrl: string;
   artworkCrop?: CardArtworkCrop;
@@ -270,6 +295,8 @@ function CardFaceLayers({
   cardHeight: number;
   reverse?: boolean;
   paperSeed: number;
+  depthTest?: boolean;
+  depthWrite?: boolean;
 }) {
   const direction = reverse ? -1 : 1;
   const rotation: [number, number, number] | undefined = reverse
@@ -290,12 +317,14 @@ function CardFaceLayers({
         height={artworkHeight}
         renderOrder={1}
         paperSeed={paperSeed}
+        depthTest={depthTest}
+        depthWrite={depthWrite}
       />
     </Suspense>
   );
 }
 
-function createCardSlabGeometry(width: number, height: number) {
+export function createCardSlabGeometry(width: number, height: number) {
   const radius = Math.min(
     CARD_CORNER_RADIUS,
     width * 0.08,
@@ -426,6 +455,13 @@ export const CardMesh = memo(function CardMesh({
   cardSet,
   layout,
   deckPosition,
+  deckCardPosition,
+  deckOffset,
+  deckDepthScale,
+  deckPreviewPositionRef,
+  externalDragRef,
+  peeked,
+  slabGeometry,
   restingZ,
   interactionZ,
   draggingZ,
@@ -446,7 +482,6 @@ export const CardMesh = memo(function CardMesh({
 }: CardMeshProps) {
   const groupRef = useRef<Group>(null);
   const flipRef = useRef<Group>(null);
-  const slabRef = useRef<Mesh>(null);
   const parentRotationRef = useRef(new Euler());
   const parentRotationMatrixRef = useRef(new Matrix4());
   const flipRotationMatrixRef = useRef(new Matrix4());
@@ -472,19 +507,21 @@ export const CardMesh = memo(function CardMesh({
   const pointerRaycasterRef = useRef(new Raycaster());
   const pointerNdcRef = useRef(new Vector2());
   const targetPosition =
-    card.zone === "deck" ? deckPosition : layout.toWorld(card.position);
+    card.zone === "deck" ? deckCardPosition : layout.toWorld(card.position);
   const targetPositionX = targetPosition[0];
   const targetPositionY = targetPosition[1];
   const cardWidth = layout.cardWidth;
   const cardHeight = layout.cardHeight;
-  const slabGeometry = useMemo(
-    () => createCardSlabGeometry(cardWidth, cardHeight),
-    [cardHeight, cardWidth]
-  );
   const frontTexture = definition.image.preview;
   const paperSeed = useMemo(() => getPaperSeed(card.id), [card.id]);
-
-  useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
+  const slabColor =
+    card.zone === "deck"
+      ? paperSeed > 0.66
+        ? "#e8dcc5"
+        : paperSeed > 0.33
+          ? "#e5d8c0"
+          : TAROT_SCENE_PALETTE.cardPaper
+      : TAROT_SCENE_PALETTE.cardPaper;
 
   const clearPendingReconciliationTimeout = useCallback(() => {
     if (pendingReconciliationTimeoutRef.current === null) {
@@ -645,11 +682,24 @@ export const CardMesh = memo(function CardMesh({
     group.position.set(initialPosition[0], initialPosition[1], restingZ);
     group.rotation.set(0, 0, 0);
     group.scale.set(1, 1, 1);
+    flippingCard.scale.set(
+      1,
+      1,
+      card.zone === "deck" ? deckDepthScale : 1
+    );
     flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
     flipAnimationRef.current = null;
     hasPositionedRef.current = true;
     cardIdentityRef.current = card.id;
-  }, [card.faceUp, card.id, card.zone, deckPosition, restingZ, targetPosition]);
+  }, [
+    card.faceUp,
+    card.id,
+    card.zone,
+    deckDepthScale,
+    deckPosition,
+    restingZ,
+    targetPosition,
+  ]);
 
   useEffect(() => {
     const flippingCard = flipRef.current;
@@ -790,7 +840,7 @@ export const CardMesh = memo(function CardMesh({
       const nextY = point.y - drag.offset.y;
       const [deltaX, deltaY] = sampleDragVelocity(drag, point, timestamp);
 
-      if (point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
+      if (!drag.moved && point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
         drag.moved = true;
       }
 
@@ -866,11 +916,21 @@ export const CardMesh = memo(function CardMesh({
             glideY *= glideScale;
           }
 
-          const nextPoint = layout.toPoint(
-            releaseX + glideX,
-            releaseY + glideY
-          );
-          const nextWorldPosition = layout.toWorld(nextPoint);
+          const nextPoint =
+            drag.mode === "move-deck"
+              ? layout.toDeckPoint(
+                  releaseX + glideX - deckOffset[0],
+                  releaseY + glideY - deckOffset[1]
+                )
+              : layout.toPoint(releaseX + glideX, releaseY + glideY);
+          const nextWorldAnchor = layout.toWorld(nextPoint);
+          const nextWorldPosition: TablePoint =
+            drag.mode === "move-deck"
+              ? [
+                  nextWorldAnchor[0] + deckOffset[0],
+                  nextWorldAnchor[1] + deckOffset[1],
+                ]
+              : nextWorldAnchor;
 
           if (drag.mode === "move-deck") {
             pendingPositionRef.current = nextWorldPosition;
@@ -907,7 +967,6 @@ export const CardMesh = memo(function CardMesh({
       }
 
       dragRef.current = null;
-
       if (drag.mode === "move-deck") {
         setDeckPreview(null);
       }
@@ -923,6 +982,7 @@ export const CardMesh = memo(function CardMesh({
       cardHeight,
       cardWidth,
       clearPendingRelease,
+      deckOffset,
       invalidate,
       layout,
       onDraw,
@@ -940,22 +1000,29 @@ export const CardMesh = memo(function CardMesh({
   useFrame((_, delta) => {
     const group = groupRef.current;
     const flippingCard = flipRef.current;
-    const slab = slabRef.current;
-
     if (!group || !flippingCard) {
       return;
     }
 
     const drag = dragRef.current;
+    const externalDrag =
+      externalDragRef.current?.cardId === card.id
+        ? externalDragRef.current
+        : null;
     const pendingPosition = pendingPositionRef.current;
     const pendingRotation = pendingRotationRef.current;
-    const rendersOnTop = Boolean(drag?.moved) || pendingTopLayerRef.current;
+    const rendersOnTop =
+      Boolean(drag?.moved) ||
+      Boolean(externalDrag) ||
+      peeked ||
+      pendingTopLayerRef.current;
     const activeRenderOrder = rendersOnTop
       ? dragRenderOrder
       : renderOrder;
     group.renderOrder = activeRenderOrder;
     flippingCard.renderOrder = activeRenderOrder;
-    const moving = drag && drag.mode !== "rotate";
+    const pointerMoving = Boolean(drag && drag.mode !== "rotate");
+    const moving = pointerMoving || Boolean(externalDrag);
     const rotationDegrees =
       drag?.mode === "rotate"
         ? drag.previewRotation
@@ -965,9 +1032,14 @@ export const CardMesh = memo(function CardMesh({
       drag?.mode === "move" ? drag.tiltX : 0;
     const tiltYTarget =
       drag?.mode === "move" ? drag.tiltY : 0;
-    const scaleTarget = drag?.mode === "move" && drag.moved ? DRAG_SCALE : 1;
+    const scaleTarget =
+      (drag?.mode === "move" && drag.moved) || externalDrag
+        ? DRAG_SCALE
+        : 1;
     const flipAnimation = flipAnimationRef.current;
     let flipIsActive = false;
+    let flipScaleX = 1;
+    let flipScaleY = 1;
 
     if (reducedMotion) {
       flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
@@ -983,36 +1055,49 @@ export const CardMesh = memo(function CardMesh({
           ? 4 * progress * progress * progress
           : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
-      flippingCard.rotation.y = MathUtils.lerp(
-        flipAnimation.from,
-        flipAnimation.to,
-        easedProgress
+      const squeeze = Math.sin(Math.PI * easedProgress);
+
+      flipScaleX = Math.max(
+        0.018,
+        Math.abs(Math.cos(Math.PI * easedProgress))
       );
-      flippingCard.rotation.x = Math.sin(Math.PI * progress) * 0.025;
+      flipScaleY = 1 - squeeze * 0.012;
+      flippingCard.rotation.y =
+        easedProgress < 0.5 ? flipAnimation.from : flipAnimation.to;
+      flippingCard.rotation.x = 0;
       flipIsActive = progress < 1;
 
       if (!flipIsActive) {
         flippingCard.rotation.set(0, flipAnimation.to, 0);
         flipAnimationRef.current = null;
+        flipScaleX = 1;
+        flipScaleY = 1;
       }
     }
 
-    // Face layers use painter ordering rather than physical depth. Keeping
-    // them out of the shadow pass prevents another card's shadow from reading
-    // as transparency, while the slab still gives placed cards a stable shadow.
-    if (slab) {
-      slab.castShadow = !flipIsActive;
-    }
-
-    const positionXTarget = moving
-      ? drag.target.x
-      : pendingPosition?.[0] ?? targetPositionX;
-    const positionYTarget = moving
-      ? drag.target.y
-      : pendingPosition?.[1] ?? targetPositionY;
+    const previewDeckPosition =
+      card.zone === "deck" ? deckPreviewPositionRef.current : null;
+    const restingPositionX = previewDeckPosition
+      ? previewDeckPosition[0] + deckOffset[0]
+      : targetPositionX;
+    const restingPositionY = previewDeckPosition
+      ? previewDeckPosition[1] + deckOffset[1]
+      : targetPositionY;
+    const positionXTarget = externalDrag
+      ? externalDrag.position[0]
+      : pointerMoving && drag
+        ? drag.target.x
+      : pendingPosition?.[0] ?? restingPositionX;
+    const positionYTarget = externalDrag
+      ? externalDrag.position[1]
+      : pointerMoving && drag
+        ? drag.target.y
+      : pendingPosition?.[1] ?? restingPositionY;
     const positionLambda = moving
       ? DRAG_FOLLOW_LAMBDA
-      : POSITION_SETTLE_LAMBDA;
+      : card.zone === "deck"
+        ? 24
+        : POSITION_SETTLE_LAMBDA;
     const nextTiltX = reducedMotion
       ? 0
       : MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
@@ -1022,7 +1107,9 @@ export const CardMesh = memo(function CardMesh({
     const nextRotation = reducedMotion
       ? rotationTarget
       : MathUtils.damp(group.rotation.z, rotationTarget, 14, delta);
-    const nextX = reducedMotion
+    const followsDeckPreview =
+      Boolean(previewDeckPosition) && card.zone === "deck" && !moving;
+    const nextX = reducedMotion || followsDeckPreview
       ? positionXTarget
       : MathUtils.damp(
           group.position.x,
@@ -1030,7 +1117,7 @@ export const CardMesh = memo(function CardMesh({
           positionLambda,
           delta
         );
-    const nextY = reducedMotion
+    const nextY = reducedMotion || followsDeckPreview
       ? positionYTarget
       : MathUtils.damp(
           group.position.y,
@@ -1041,9 +1128,25 @@ export const CardMesh = memo(function CardMesh({
     const nextScale = reducedMotion
       ? scaleTarget
       : MathUtils.damp(group.scale.x, scaleTarget, 17, delta);
-    let flipLift = 0;
+    const isLiftedDrag =
+      (drag?.moved && drag.mode === "move") || Boolean(externalDrag);
+    const expandsToCardThickness =
+      card.zone === "table" ||
+      isLiftedDrag ||
+      peeked ||
+      pendingTopLayerRef.current;
+    const depthScaleTarget = expandsToCardThickness ? 1 : deckDepthScale;
+    const nextDepthScale = reducedMotion
+      ? depthScaleTarget
+      : MathUtils.damp(
+          flippingCard.scale.z,
+          depthScaleTarget,
+          17,
+          delta
+        );
+    let projectedSurfaceLift = 0;
 
-    if (flipIsActive) {
+    if (isLiftedDrag) {
       const parentRotation = parentRotationRef.current.set(
         nextTiltX,
         nextTiltY,
@@ -1058,24 +1161,25 @@ export const CardMesh = memo(function CardMesh({
       );
       const rotationElements = combinedRotation.elements;
       const projectedHalfDepth =
-        nextScale *
-        (Math.abs(rotationElements[2]) * (cardWidth / 2) +
-          Math.abs(rotationElements[6]) * (cardHeight / 2) +
-          Math.abs(rotationElements[10]) * CARD_VISIBLE_HALF_DEPTH);
+        Math.abs(rotationElements[2]) * (cardWidth / 2) * nextScale +
+        Math.abs(rotationElements[6]) * (cardHeight / 2) * nextScale +
+        Math.abs(rotationElements[10]) *
+          CARD_VISIBLE_HALF_DEPTH *
+          nextDepthScale;
 
-      // Keep the lowest visible corner on or above the surface throughout the
-      // turn. A fixed cosmetic lift lets most of a wide card pass through the
-      // table when the card approaches edge-on.
-      flipLift =
+      // Keep the lowest visible corner on or above the surface during a
+      // tilted drag. Flips use a flat squeeze-and-swap animation so each card
+      // can stay in its existing layer without intersecting its neighbours.
+      projectedSurfaceLift =
         Math.max(0, projectedHalfDepth - CARD_VISIBLE_HALF_DEPTH) +
         FLIP_SURFACE_CLEARANCE;
     }
 
     const zBase =
-      drag?.moved && drag.mode !== "move-deck"
+      externalDrag || (drag?.moved && drag.mode !== "move-deck")
         ? draggingZ
         : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0);
-    const zTarget = zBase + flipLift;
+    const zTarget = zBase + projectedSurfaceLift;
 
     if (reducedMotion) {
       group.rotation.x = 0;
@@ -1084,14 +1188,18 @@ export const CardMesh = memo(function CardMesh({
       group.position.x = positionXTarget;
       group.position.y = positionYTarget;
       group.position.z = zTarget;
-      group.scale.set(scaleTarget, scaleTarget, scaleTarget);
+      group.scale.set(scaleTarget, scaleTarget, 1);
+      flippingCard.scale.set(flipScaleX, flipScaleY, depthScaleTarget);
       if (drag?.mode === "move-deck") {
-        setDeckPreview([positionXTarget, positionYTarget]);
+        setDeckPreview([
+          positionXTarget - deckOffset[0],
+          positionYTarget - deckOffset[1],
+        ]);
       }
       return;
     }
 
-    const nextZ = flipIsActive
+    const nextZ = isLiftedDrag
       ? Math.max(
           MathUtils.damp(group.position.z, zTarget, 18, delta),
           zTarget
@@ -1106,7 +1214,8 @@ export const CardMesh = memo(function CardMesh({
       Math.abs(nextX - positionXTarget) > 0.0008 ||
       Math.abs(nextY - positionYTarget) > 0.0008 ||
       Math.abs(nextZ - zTarget) > 0.0008 ||
-      Math.abs(nextScale - scaleTarget) > 0.0008;
+      Math.abs(nextScale - scaleTarget) > 0.0008 ||
+      Math.abs(nextDepthScale - depthScaleTarget) > 0.0008;
 
     group.rotation.x = nextTiltX;
     group.rotation.y = nextTiltY;
@@ -1114,10 +1223,14 @@ export const CardMesh = memo(function CardMesh({
     group.position.x = nextX;
     group.position.y = nextY;
     group.position.z = nextZ;
-    group.scale.set(nextScale, nextScale, nextScale);
+    group.scale.set(nextScale, nextScale, 1);
+    flippingCard.scale.set(flipScaleX, flipScaleY, nextDepthScale);
 
     if (drag?.mode === "move-deck") {
-      setDeckPreview([nextX, nextY]);
+      setDeckPreview([
+        nextX - deckOffset[0],
+        nextY - deckOffset[1],
+      ]);
     }
 
     if (needsAnotherFrame) {
@@ -1217,7 +1330,10 @@ export const CardMesh = memo(function CardMesh({
     };
     onSound("pickup");
     if (mode === "move-deck") {
-      setDeckPreview([group.position.x, group.position.y]);
+      setDeckPreview([
+        group.position.x - deckOffset[0],
+        group.position.y - deckOffset[1],
+      ]);
     }
 
     const handlePointerMoveFallback = (nativeEvent: PointerEvent) => {
@@ -1347,16 +1463,16 @@ export const CardMesh = memo(function CardMesh({
     <group ref={groupRef} renderOrder={renderOrder}>
       <group ref={flipRef} renderOrder={renderOrder}>
         <mesh
-          ref={slabRef}
           geometry={slabGeometry}
           castShadow
           receiveShadow
           renderOrder={0}
         >
           <CardPaperMaterial
-            color={TAROT_SCENE_PALETTE.cardPaper}
+            color={slabColor}
             roughness={0.94}
             paperSeed={paperSeed}
+            depthTest
           />
         </mesh>
         {hasRevealed && (
@@ -1366,6 +1482,7 @@ export const CardMesh = memo(function CardMesh({
             cardWidth={cardWidth}
             cardHeight={cardHeight}
             paperSeed={paperSeed}
+            depthTest
           />
         )}
         <CardFaceLayers
@@ -1374,6 +1491,7 @@ export const CardMesh = memo(function CardMesh({
           cardWidth={cardWidth}
           cardHeight={cardHeight}
           paperSeed={paperSeed + 0.417}
+          depthTest
           reverse
         />
       </group>

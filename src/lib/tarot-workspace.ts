@@ -4,7 +4,11 @@ import type {
   TablePoint,
   TarotSession,
 } from "@/types";
-import { TABLE_POINT_LIMIT } from "@/types";
+import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
+import {
+  resolveSceneSettings,
+  type SceneSettings,
+} from "@/components/tarot-studio/theme";
 
 export const TAROT_WORKSPACE_STORAGE_KEY = "tarot-table:workspace:v1";
 
@@ -13,11 +17,14 @@ const WORKSPACE_VERSION = 1;
 export type TarotWorkspace = {
   activeCardSetId: string;
   isInspectorCollapsed: boolean;
+  sceneSettings: SceneSettings;
   session: TarotSession;
   viewZoom: number;
 };
 
-type StoredWorkspace = TarotWorkspace & {
+type StoredWorkspace = Omit<TarotWorkspace, "sceneSettings"> & {
+  /** Absent in version-one workspaces; it then resolves to the default scene. */
+  sceneSettings?: SceneSettings;
   version: typeof WORKSPACE_VERSION;
 };
 
@@ -25,17 +32,25 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function isTablePoint(value: unknown): value is TablePoint {
+function isPointWithinLimit(
+  value: unknown,
+  limit: number
+): value is TablePoint {
   return (
     Array.isArray(value) &&
     value.length === 2 &&
     value.every(
       (coordinate) =>
-        isFiniteNumber(coordinate) &&
-        Math.abs(coordinate) <= TABLE_POINT_LIMIT
+        isFiniteNumber(coordinate) && Math.abs(coordinate) <= limit
     )
   );
 }
+
+const isTablePoint = (value: unknown): value is TablePoint =>
+  isPointWithinLimit(value, TABLE_POINT_LIMIT);
+
+const isDeckPoint = (value: unknown): value is TablePoint =>
+  isPointWithinLimit(value, DECK_POINT_LIMIT);
 
 function isTableCard(value: unknown, cardSet: CardSetDefinition): value is TableCard {
   if (!value || typeof value !== "object") {
@@ -75,7 +90,7 @@ function restoreSession(
     session.cards.length !== cardSet.cards.length ||
     !session.cards.every((card) => isTableCard(card, cardSet)) ||
     !(
-      session.deckPosition === null || isTablePoint(session.deckPosition)
+      session.deckPosition === null || isDeckPoint(session.deckPosition)
     ) ||
     !(
       session.selectedCardId === null ||
@@ -140,6 +155,7 @@ export function loadTarotWorkspace(
       ? {
           activeCardSetId: cardSet.id,
           isInspectorCollapsed: stored.isInspectorCollapsed,
+          sceneSettings: resolveSceneSettings(stored.sceneSettings),
           session,
           viewZoom: stored.viewZoom,
         }
@@ -155,6 +171,7 @@ export function saveTarotWorkspace(workspace: TarotWorkspace): void {
       version: WORKSPACE_VERSION,
       activeCardSetId: workspace.activeCardSetId,
       isInspectorCollapsed: workspace.isInspectorCollapsed,
+      sceneSettings: resolveSceneSettings(workspace.sceneSettings),
       session: {
         ...workspace.session,
         history: [],

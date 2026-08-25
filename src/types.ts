@@ -55,6 +55,7 @@ export type TableZone = "deck" | "table";
 export type TablePoint = [number, number];
 
 export const TABLE_POINT_LIMIT = 2.6;
+export const DECK_POINT_LIMIT = 6.4;
 
 export type CardLayerDirection = "forward" | "backward";
 

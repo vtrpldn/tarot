@@ -7,13 +7,16 @@ import type {
   TableSnapshot,
   TarotSession,
 } from "@/types";
-import { TABLE_POINT_LIMIT } from "@/types";
+import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
 import type { CardSpread } from "@/lib/tarot-spreads";
+import { getCardStackOffset } from "@/lib/card-stack-layout";
 
 const HISTORY_LIMIT = 24;
 
 const clampTablePoint = (value: number) =>
   Math.min(TABLE_POINT_LIMIT, Math.max(-TABLE_POINT_LIMIT, value));
+const clampDeckPoint = (value: number) =>
+  Math.min(DECK_POINT_LIMIT, Math.max(-DECK_POINT_LIMIT, value));
 
 function shuffle<T>(items: T[]): T[] {
   const shuffled = [...items];
@@ -102,12 +105,19 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
   };
 }
 
-export function getTopDeckCard(session: TarotSession): TableCard | undefined {
-  const deckCards = session.cards
+export function getDeckCards(session: TarotSession): TableCard[] {
+  return session.cards
     .filter((card) => card.zone === "deck")
-    .sort((first, second) => first.zIndex - second.zIndex);
+    .sort(
+      (first, second) =>
+        first.zIndex - second.zIndex || first.id.localeCompare(second.id)
+    );
+}
 
-  return deckCards[deckCards.length - 1];
+export function getTopDeckCard(session: TarotSession): TableCard | undefined {
+  const deckCards = getDeckCards(session);
+
+  return deckCards.at(-1);
 }
 
 export function getTableCards(session: TarotSession): TableCard[] {
@@ -147,16 +157,14 @@ export function createLayout(
       : cards;
 
   if (layout === "stack") {
-    const stackIntervals = Math.max(1, orderedCards.length - 1);
-    const horizontalStep = Math.min(0.008, 0.08 / stackIntervals);
-    const verticalStep = Math.min(0.01, 0.1 / stackIntervals);
-
     orderedCards.forEach((card, index) => {
+      const [offsetX, offsetY] = getCardStackOffset(
+        index,
+        orderedCards.length
+      );
+
       placements.set(card.id, {
-        position: [
-          0.3 + index * horizontalStep,
-          index * verticalStep,
-        ],
+        position: [0.3 + offsetX, offsetY],
         rotation: alignedRotation(card),
         zIndex: index + 1,
       });
@@ -235,6 +243,7 @@ export type TarotSessionAction =
     }
   | {
       type: "layout";
+      deckPosition?: TablePoint;
       placements: Map<
         string,
         Pick<TableCard, "position" | "rotation" | "zIndex">
@@ -330,8 +339,8 @@ export function tarotSessionReducer(
 
   if (action.type === "move-deck") {
     const deckPosition: TablePoint = [
-      clampTablePoint(action.position[0]),
-      clampTablePoint(action.position[1]),
+      clampDeckPoint(action.position[0]),
+      clampDeckPoint(action.position[1]),
     ];
 
     if (
@@ -347,8 +356,8 @@ export function tarotSessionReducer(
 
   if (action.type === "sync-deck-position") {
     const deckPosition: TablePoint = [
-      clampTablePoint(action.position[0]),
-      clampTablePoint(action.position[1]),
+      clampDeckPoint(action.position[0]),
+      clampDeckPoint(action.position[1]),
     ];
 
     if (
@@ -372,7 +381,12 @@ export function tarotSessionReducer(
       return placement ? { ...card, ...placement } : card;
     });
 
-    return commit(session, cards);
+    return commit(
+      session,
+      cards,
+      session.selectedCardId,
+      action.deckPosition ?? session.deckPosition
+    );
   }
 
   if (action.type === "deal-spread") {
@@ -380,9 +394,8 @@ export function tarotSessionReducer(
       return session;
     }
 
-    const deckCards = session.cards
-      .filter((card) => card.zone === "deck")
-      .sort((first, second) => second.zIndex - first.zIndex)
+    const deckCards = getDeckCards(session)
+      .reverse()
       .slice(0, action.spread.slots.length);
 
     if (deckCards.length < action.spread.slots.length) {
@@ -498,7 +511,7 @@ export function tarotSessionReducer(
   }
 
   if (action.type === "draw") {
-    if (card.zone !== "deck" || card.id !== getTopDeckCard(session)?.id) {
+    if (card.zone !== "deck") {
       return session;
     }
 

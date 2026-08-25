@@ -13,10 +13,6 @@ export type CardReading = {
     locator?: string;
   }>;
   traditionNote?: string;
-  perspective?: {
-    label: string;
-    text: string;
-  };
 };
 
 const WAITE_SOURCE = {
@@ -29,12 +25,6 @@ const BOOK_T_SOURCE = {
   label: "Golden Dawn attributions · The Equinox",
   href: "https://www.100thmonkeypress.com/biblio/acrowley/books/equinox_1_8_1912/equinox_1_8_1912.htm",
   locator: "Vol. I, No. VIII, 1912",
-} as const;
-
-const POLLACK_SOURCE = {
-  label: "Rachel Pollack · Seventy-Eight Degrees of Wisdom",
-  href: "https://redwheelweiser.com/book/seventy-eight-degrees-of-wisdom-9781578636655/",
-  locator: "Publisher overview; picture-led psychological tarot method",
 } as const;
 
 const DODAL_SOURCE = {
@@ -746,19 +736,9 @@ function getMajorReading(
         { label: "Astrology", value: reading.goldenDawn },
         { label: "Hebrew path", value: reading.hebrew },
       ],
-      sources: [WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE],
+      sources: [WAITE_SOURCE, BOOK_T_SOURCE],
       traditionNote:
         "The image note follows Waite’s companion text; astrology and Hebrew letters are labeled Golden Dawn correspondences.",
-      perspective:
-        majorKey === "fool"
-          ? {
-              label: "Rachel Pollack lens",
-              text: "A picture-led psychological reading can meet the Fool as the self at the threshold: open to experience, not yet fixed, and invited to discover itself through the journey. This is an original synopsis, not a quotation.",
-            }
-          : {
-              label: "Rachel Pollack lens",
-              text: "A picture-led psychological reading asks what in this scene is becoming conscious. Use the card as a prompt for self-discovery rather than a fixed prediction; this is a general methodology note, not a card-by-card paraphrase.",
-            },
     };
   }
 
@@ -802,13 +782,7 @@ function getMinorReading(
         { label: "Number or role", value: rankReading.correspondence },
         { label: "Esoteric theme", value: theme },
       ],
-      sources: [WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE],
-      traditionNote:
-        "Smith’s image and Waite’s companion text ground the card; the elemental and number synthesis is presented as an editorial esoteric reading framework.",
-      perspective: {
-        label: "Rachel Pollack lens",
-        text: "A picture-led psychological reading asks what in this scene is becoming conscious. Use the card as a prompt for self-discovery rather than a fixed prediction; this is a general methodology note, not a card-by-card paraphrase.",
-      },
+      sources: [WAITE_SOURCE, BOOK_T_SOURCE],
     };
   }
 
@@ -840,8 +814,6 @@ function getLenormandReading(definition: CardDefinition): CardReading | undefine
       { label: "System", value: `Petit Lenormand · Card ${definition.order + 1}` },
     ],
     sources: [STRALSUND_SOURCE, GAME_OF_HOPE_SOURCE],
-    traditionNote:
-      "The linked deck and museum sources establish the image, number, inset, and history. Per-card themes are a concise editorial reading, not a canonical text from the 1890 deck.",
   };
 }
 
@@ -967,10 +939,6 @@ const PORTUGUESE_SOURCE_METADATA: Record<
     label: "Atribuições da Golden Dawn · The Equinox",
     locator: "Vol. I, n.º VIII, 1912",
   },
-  [POLLACK_SOURCE.href]: {
-    label: "Rachel Pollack · Seventy-Eight Degrees of Wisdom",
-    locator: "Página da editora; método pictórico e psicológico",
-  },
   [DODAL_SOURCE.href]: {
     label: "Tarô de Jean Dodal · Biblioteca Nacional da França",
     locator: "Lyon, c. 1701–1715",
@@ -1040,20 +1008,6 @@ function localizeAstrology(value: string): string {
   return [names[name] ?? name, ...symbol].join(" ");
 }
 
-function getPortuguesePollackPerspective(majorKey?: MajorKey): NonNullable<CardReading["perspective"]> {
-  if (majorKey === "fool") {
-    return {
-      label: "Perspectiva de Rachel Pollack",
-      text: "Uma leitura psicológica orientada pela imagem pode encontrar o Louco como o eu no limiar: aberto à experiência, ainda não fixado e convidado a se descobrir pela jornada. Esta é uma síntese original, não uma citação.",
-    };
-  }
-
-  return {
-    label: "Perspectiva de Rachel Pollack",
-    text: "Uma leitura psicológica orientada pela imagem pergunta o que está se tornando consciente na cena. Use a carta como convite à autodescoberta, não como previsão fixa; esta é uma nota metodológica geral, não uma paráfrase carta a carta.",
-  };
-}
-
 function getPortugueseMajorReading(
   cardSetId: "rider-waite-smith" | "tarot-de-marseille",
   definition: CardDefinition
@@ -1078,10 +1032,9 @@ function getPortugueseMajorReading(
         { label: "Astrologia", value: localizeAstrology(reading.goldenDawn) },
         { label: "Caminho hebraico", value: reading.hebrew },
       ],
-      sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE]),
+      sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE]),
       traditionNote:
         "A imagem é contextualizada pelo texto de Waite; astrologia e letras hebraicas são correspondências identificadas como Golden Dawn.",
-      perspective: getPortuguesePollackPerspective(majorKey),
     };
   }
 
@@ -1130,10 +1083,7 @@ function getPortugueseMinorReading(
         { label: "Número ou figura", value: rankReading.correspondence },
         { label: "Domínio do naipe", value: suitReading.domain },
       ],
-      sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE, POLLACK_SOURCE]),
-      traditionNote:
-        "A imagem de Smith e o texto de Waite fundamentam a carta; a síntese elemental e numérica é apresentada como uma estrutura editorial de leitura esotérica.",
-      perspective: getPortuguesePollackPerspective(),
+      sources: localizeSources([WAITE_SOURCE, BOOK_T_SOURCE]),
     };
   }
 
@@ -1195,8 +1145,6 @@ function getPortugueseLenormandReading(
       { label: "Sistema", value: `Petit Lenormand · Carta ${definition.order + 1}` },
     ],
     sources: localizeSources([STRALSUND_SOURCE, GAME_OF_HOPE_SOURCE]),
-    traditionNote:
-      "As fontes do baralho e do museu estabelecem imagem, número, inserto e história. Os temas carta a carta são uma leitura editorial concisa, não um texto canônico do baralho de 1890.",
   };
 }
 

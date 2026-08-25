@@ -47,6 +47,14 @@ type Messages = {
   cardSounds: string;
   cardSoundsOn: string;
   cardSoundsOff: string;
+  cardSoundsDescription: string;
+  config: string;
+  configureTable: string;
+  background: string;
+  backgroundOptions: string;
+  backgroundConstellation: string;
+  backgroundSolarTemple: string;
+  backgroundMoonlitGrove: string;
   language: string;
   chooseLanguage: string;
   languageOptions: string;
@@ -97,7 +105,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "EN",
     loadingTable: "Opening the table…",
     tableDescription:
-      "Interactive card table. Drag the top card to draw it and drag table cards to arrange them. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
+      "Interactive card table. Pull any exposed card from the deck to draw it and drag table cards to arrange them. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
     tableActions: "Table actions",
     deckTrigger: (deckLabel, deck) =>
       `Choose deck. ${deckLabel}, ${deck.count} ${deck.noun} remaining`,
@@ -141,6 +149,14 @@ const messages: Record<AppLocale, Messages> = {
     cardSounds: "Card sounds",
     cardSoundsOn: "Card sounds on",
     cardSoundsOff: "Card sounds off",
+    cardSoundsDescription: "Atmospheric sounds while you handle cards",
+    config: "Config",
+    configureTable: "Configure table",
+    background: "Background",
+    backgroundOptions: "Background options",
+    backgroundConstellation: "Constellation",
+    backgroundSolarTemple: "Solar temple",
+    backgroundMoonlitGrove: "Moonlit grove",
     language: "Language",
     chooseLanguage: "Choose language",
     languageOptions: "Language options",
@@ -204,7 +220,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "PT",
     loadingTable: "Abrindo a mesa…",
     tableDescription:
-      "Mesa de cartas interativa. Arraste a carta do topo para tirá-la e arraste as cartas na mesa para organizá-las. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
+      "Mesa de cartas interativa. Puxe qualquer carta exposta do monte para tirá-la e arraste as cartas na mesa para organizá-las. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
     tableActions: "Ações da mesa",
     deckTrigger: (deckLabel, deck) =>
       `Escolher baralho. ${deckLabel}, restam ${deck.count} ${deck.noun}`,
@@ -248,6 +264,14 @@ const messages: Record<AppLocale, Messages> = {
     cardSounds: "Sons das cartas",
     cardSoundsOn: "Sons das cartas ativados",
     cardSoundsOff: "Sons das cartas desativados",
+    cardSoundsDescription: "Sons atmosféricos ao interagir com as cartas",
+    config: "Configurações",
+    configureTable: "Configurar mesa",
+    background: "Fundo",
+    backgroundOptions: "Opções de fundo",
+    backgroundConstellation: "Constelação",
+    backgroundSolarTemple: "Templo solar",
+    backgroundMoonlitGrove: "Bosque ao luar",
     language: "Idioma",
     chooseLanguage: "Escolher idioma",
     languageOptions: "Opções de idioma",

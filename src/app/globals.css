@@ -103,6 +103,54 @@ button {
   transform: rotate(-7deg);
 }
 
+.tarot-app[data-scene-theme="solar-temple"] {
+  background:
+    radial-gradient(circle at 14% 74%, rgba(226, 151, 70, 0.18), transparent 28rem),
+    radial-gradient(circle at 86% 16%, rgba(186, 72, 53, 0.2), transparent 25rem),
+    radial-gradient(circle at 56% 48%, rgba(125, 39, 39, 0.18), transparent 34rem),
+    linear-gradient(135deg, #1a090b 0%, #48201d 47%, #210c0d 100%);
+}
+
+.tarot-app[data-scene-theme="solar-temple"]::before {
+  opacity: 0.4;
+  background-image:
+    radial-gradient(circle at 18% 28%, rgba(255, 224, 163, 0.76) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 72% 16%, rgba(238, 151, 94, 0.62) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 44% 76%, rgba(255, 205, 118, 0.5) 0 0.8px, transparent 1.4px),
+    radial-gradient(circle at 88% 64%, rgba(227, 124, 86, 0.44) 0 0.8px, transparent 1.4px);
+}
+
+.tarot-app[data-scene-theme="solar-temple"]::after {
+  border-color: rgba(255, 207, 129, 0.055);
+  box-shadow:
+    0 0 8rem rgba(185, 72, 49, 0.14),
+    inset 0 0 7rem rgba(255, 208, 127, 0.04);
+}
+
+.tarot-app[data-scene-theme="moonlit-grove"] {
+  background:
+    radial-gradient(circle at 16% 77%, rgba(102, 163, 132, 0.14), transparent 29rem),
+    radial-gradient(circle at 84% 16%, rgba(103, 153, 175, 0.14), transparent 25rem),
+    radial-gradient(circle at 57% 45%, rgba(42, 102, 89, 0.18), transparent 35rem),
+    linear-gradient(135deg, #071212 0%, #153631 47%, #0a1918 100%);
+}
+
+.tarot-app[data-scene-theme="moonlit-grove"]::before {
+  opacity: 0.42;
+  background-image:
+    radial-gradient(circle at 18% 28%, rgba(210, 239, 214, 0.7) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 72% 16%, rgba(154, 211, 205, 0.58) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 44% 76%, rgba(175, 223, 181, 0.48) 0 0.8px, transparent 1.4px),
+    radial-gradient(circle at 88% 64%, rgba(120, 185, 178, 0.42) 0 0.8px, transparent 1.4px);
+}
+
+.tarot-app[data-scene-theme="moonlit-grove"]::after {
+  border-color: rgba(172, 219, 190, 0.05);
+  box-shadow:
+    0 0 8rem rgba(70, 138, 119, 0.12),
+    inset 0 0 7rem rgba(188, 230, 201, 0.035);
+}
+
 @keyframes tarot-constellation-drift {
   from {
     transform: translate3d(-0.3rem, 0.15rem, 0) rotate(-0.15deg);
@@ -743,6 +791,7 @@ button {
 .tarot-deck-menu,
 .tarot-zoom-menu,
 .tarot-card-menu,
+.tarot-config-menu,
 .tarot-language-menu,
 .tarot-spread-menu,
 .tarot-arrange-menu {
@@ -815,6 +864,174 @@ button {
   color: var(--faint-ink);
 }
 
+.tarot-config-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.58rem);
+  z-index: 4;
+  display: grid;
+  gap: 0.7rem;
+  width: min(20rem, calc(100vw - 2rem));
+  max-height: min(34rem, calc(100dvh - 7rem));
+  padding: 0.76rem 0.8rem 0.8rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--panel-edge);
+  border-radius: 0.82rem;
+  background: rgba(20, 11, 29, 0.98);
+  box-shadow: 0 0.9rem 2.8rem rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px);
+  animation: tarot-popover-enter 150ms ease-out both;
+}
+
+.tarot-config-heading,
+.tarot-config-section-title {
+  margin: 0;
+  color: var(--faint-ink);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.tarot-config-section {
+  display: grid;
+  gap: 0.44rem;
+}
+
+.tarot-config-section + .tarot-config-section {
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(234, 212, 155, 0.14);
+}
+
+.tarot-config-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.32rem;
+}
+
+.tarot-config-choice,
+.tarot-config-popover [role="radio"] {
+  display: grid;
+  gap: 0.2rem;
+  min-height: 4.55rem;
+  padding: 0.5rem 0.44rem;
+  border: 1px solid rgba(247, 239, 217, 0.15);
+  border-radius: 0.52rem;
+  background: rgba(48, 28, 59, 0.58);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease,
+    color 160ms ease, transform 160ms ease;
+}
+
+.tarot-config-choice::before,
+.tarot-config-popover [role="radio"]::before {
+  content: "";
+  display: block;
+  width: 1.1rem;
+  height: 0.24rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #c9a563, #8f6ba3);
+  box-shadow: 0 0 0.65rem rgba(234, 212, 155, 0.2);
+}
+
+.tarot-config-choice[data-scene-theme="solar-temple"]::before,
+.tarot-config-popover [role="radio"][data-scene-theme="solar-temple"]::before {
+  background: linear-gradient(90deg, #e5b15a, #9a4036);
+}
+
+.tarot-config-choice[data-scene-theme="moonlit-grove"]::before,
+.tarot-config-popover [role="radio"][data-scene-theme="moonlit-grove"]::before {
+  background: linear-gradient(90deg, #c5e3c9, #4a8f82);
+}
+
+.tarot-config-choice:hover,
+.tarot-config-choice[aria-checked="true"],
+.tarot-config-popover [role="radio"]:hover,
+.tarot-config-popover [role="radio"][aria-checked="true"] {
+  border-color: rgba(234, 212, 155, 0.58);
+  background: var(--control-hover);
+  color: #fff9e8;
+}
+
+.tarot-config-choice:hover,
+.tarot-config-popover [role="radio"]:hover {
+  transform: translateY(-1px);
+}
+
+.tarot-config-choice span,
+.tarot-config-popover [role="radio"] span {
+  align-self: end;
+  font-size: 0.72rem;
+  line-height: 1.08;
+}
+
+.tarot-config-sound {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.54rem 0.62rem;
+  border: 1px solid rgba(247, 239, 217, 0.16);
+  border-radius: 0.52rem;
+  background: rgba(48, 28, 59, 0.58);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease,
+    color 160ms ease;
+}
+
+.tarot-config-sound:hover,
+.tarot-config-sound[aria-checked="true"],
+.tarot-config-sound[aria-pressed="true"] {
+  border-color: rgba(234, 212, 155, 0.48);
+  background: var(--control-hover);
+  color: #fff9e8;
+}
+
+.tarot-config-sound > span {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.tarot-config-sound small {
+  color: var(--faint-ink);
+  font-family: var(--font-mono);
+  font-size: 0.59rem;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.tarot-config-sound::after {
+  content: "";
+  width: 2rem;
+  height: 1.14rem;
+  flex: 0 0 auto;
+  border: 1px solid rgba(247, 239, 217, 0.28);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 0.54rem 50%, #d8cdb6 0 0.3rem, transparent 0.33rem),
+    rgba(9, 5, 13, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.tarot-config-sound[aria-checked="true"]::after,
+.tarot-config-sound[aria-pressed="true"]::after {
+  border-color: rgba(234, 212, 155, 0.68);
+  background:
+    radial-gradient(circle at calc(100% - 0.54rem) 50%, #fff5d9 0 0.3rem, transparent 0.33rem),
+    linear-gradient(90deg, #896337, #d7b46f);
+}
+
 .tarot-language-popover {
   position: absolute;
   right: 0;
@@ -883,24 +1100,6 @@ button {
 .tarot-language-popover button small {
   color: var(--faint-ink);
   font-size: 0.74rem;
-}
-
-.tarot-card-perspective {
-  margin-top: 0.72rem;
-  padding-top: 0.72rem;
-  border-top: 1px solid rgba(234, 212, 155, 0.12);
-}
-
-.tarot-card-perspective > span {
-  color: var(--faint-ink);
-  font-family: var(--font-mono);
-  font-size: 0.625rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.tarot-card-perspective p {
-  margin: 0.3rem 0 0;
 }
 
 @media (min-width: 768px) and (hover: hover) and (pointer: fine) {
@@ -1018,7 +1217,8 @@ button {
 }
 
 button:focus-visible,
-select:focus-visible {
+select:focus-visible,
+input:focus-visible {
   outline: 2px solid var(--accent-bright);
   outline-offset: 3px;
 }
@@ -1271,6 +1471,28 @@ select:focus-visible {
     width: min(12.4rem, calc(100vw - 1.25rem));
   }
 
+  .tarot-config-popover {
+    right: auto;
+    bottom: calc(100% + 0.42rem);
+    left: 50%;
+    width: min(20rem, calc(100vw - 1.25rem));
+    max-height: calc(100dvh - 7.5rem);
+    padding: 0.68rem 0.72rem 0.74rem;
+    transform: translateX(-50%);
+    animation-name: tarot-arrange-popover-enter;
+  }
+
+  .tarot-config-choice,
+  .tarot-config-popover [role="radio"] {
+    min-height: 4.25rem;
+    padding: 0.42rem 0.38rem;
+  }
+
+  .tarot-config-choice span,
+  .tarot-config-popover [role="radio"] span {
+    font-size: 0.68rem;
+  }
+
   .tarot-toolbar-trigger svg,
   .tarot-reset-trigger svg,
   .tarot-mode-cancel svg {
@@ -1331,6 +1553,17 @@ select:focus-visible {
     bottom: calc(max(0.65rem, var(--safe-bottom)) + 3rem);
     left: 0.625rem;
     width: auto;
+    transform: none;
+    animation-name: tarot-popover-enter;
+  }
+
+  .tarot-config-popover {
+    position: fixed;
+    right: 0.625rem;
+    bottom: calc(max(0.65rem, var(--safe-bottom)) + 3rem);
+    left: 0.625rem;
+    width: auto;
+    max-height: calc(100dvh - 4.6rem);
     transform: none;
     animation-name: tarot-popover-enter;
   }
