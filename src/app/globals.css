@@ -18,6 +18,15 @@
   --panel-edge: rgba(224, 197, 145, 0.28);
   --control: rgba(45, 26, 56, 0.68);
   --control-hover: rgba(75, 45, 88, 0.9);
+  --dock-surface: rgba(15, 8, 22, 0.97);
+  --dock-surface-raised: #1b0f24;
+  --dock-control: rgba(73, 45, 82, 0.28);
+  --dock-control-hover: rgba(96, 60, 107, 0.46);
+  --dock-divider: rgba(234, 212, 155, 0.16);
+  --dock-edge: rgba(234, 212, 155, 0.28);
+  --dock-radius: 0.72rem;
+  --popover-radius: 0.78rem;
+  --popover-shadow: 0 1.35rem 3.4rem -1.15rem rgba(0, 0, 0, 0.76);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -264,9 +273,9 @@ button {
   left: 0;
   z-index: 4;
   display: grid;
-  gap: 0.52rem;
-  width: min(20rem, calc(100vw - 2rem));
-  padding: 0.76rem 0.8rem 0.8rem;
+  gap: 0.64rem;
+  width: min(21rem, calc(100vw - 2rem));
+  padding: 0.88rem 0.92rem 0.92rem;
   border: 1px solid var(--panel-edge);
   border-radius: 0.82rem;
   background: rgba(20, 11, 29, 0.98);
@@ -289,11 +298,11 @@ button {
   width: 100%;
   min-height: 3rem;
   padding: 0.62rem 2.35rem 0.62rem 0.72rem;
-  border: 1px solid rgba(247, 239, 217, 0.2);
-  border-radius: 0.55rem;
+  border: 1px solid rgba(247, 239, 217, 0.16);
+  border-radius: 0.52rem;
   color: var(--ink);
   appearance: none;
-  background-color: rgba(48, 28, 59, 0.72);
+  background-color: rgba(58, 34, 68, 0.48);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23ead49b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
   background-position: right 0.62rem center;
   background-repeat: no-repeat;
@@ -314,7 +323,7 @@ button {
   margin: 0.08rem 0 0;
   color: var(--muted-ink);
   font-family: var(--font-serif);
-  font-size: 0.82rem;
+  font-size: 0.87rem;
   letter-spacing: 0;
   line-height: 1.45;
   text-transform: none;
@@ -592,17 +601,15 @@ button {
 .tarot-mode-cancel {
   min-height: 2.75rem;
   padding: 0.42rem 0.7rem;
-  border: 1px solid rgba(247, 239, 217, 0.22);
-  border-radius: 999px;
-  background: var(--control);
+  border: 1px solid transparent;
+  border-radius: 0.48rem;
+  background: var(--dock-control);
   color: var(--ink);
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease, color 160ms ease,
-    transform 160ms ease;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
 }
 
 .tarot-inspector-actions button:hover:not(:disabled),
@@ -610,11 +617,9 @@ button {
 .tarot-toolbar-trigger:hover:not(:disabled),
 .tarot-reset-trigger:hover:not(:disabled),
 .tarot-mode-cancel:hover:not(:disabled) {
-  border-color: var(--accent-bright);
-  background: var(--control-hover);
+  border-color: rgba(234, 212, 155, 0.2);
+  background: var(--dock-control-hover);
   color: #fff9e8;
-  box-shadow: 0 0 1rem rgba(234, 212, 155, 0.12);
-  transform: translateY(-1px);
 }
 
 .tarot-inspector-actions button:disabled,
@@ -638,10 +643,10 @@ button {
   left: 50%;
   z-index: 4;
   display: grid;
-  gap: 0.42rem;
-  width: min(22rem, calc(100vw - 2rem));
+  gap: 0.58rem;
+  width: min(23rem, calc(100vw - 2rem));
   max-height: min(24rem, calc(100dvh - 7rem));
-  padding: 0.62rem;
+  padding: 0.76rem;
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--panel-edge);
@@ -654,7 +659,7 @@ button {
 }
 
 .tarot-spread-actions > span {
-  padding: 0.06rem 0.2rem 0.12rem;
+  padding: 0.06rem 0.16rem 0.04rem;
   color: var(--faint-ink);
   font-family: var(--font-mono);
   font-size: 0.625rem;
@@ -665,19 +670,19 @@ button {
 .tarot-spread-actions > div {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.3rem;
+  gap: 0.42rem;
 }
 
 .tarot-spread-actions button {
   display: grid;
   gap: 0.08rem;
-  min-height: 3.3rem;
-  padding: 0.52rem 0.66rem;
+  min-height: 3.45rem;
+  padding: 0.58rem 0.7rem;
   border: 1px solid rgba(247, 239, 217, 0.2);
   border-radius: 0.48rem;
   background: var(--control);
   color: var(--ink);
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   line-height: 1.05;
   text-align: left;
   cursor: pointer;
@@ -709,15 +714,17 @@ button {
   left: 50%;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.18rem;
   width: max-content;
   max-width: calc(100vw - 2rem);
-  padding: 0.45rem;
-  border: 1px solid var(--panel-edge);
-  border-radius: 0.88rem;
-  background: rgba(16, 9, 24, 0.84);
-  box-shadow: 0 0.8rem 2.8rem rgba(0, 0, 0, 0.26);
-  backdrop-filter: blur(18px);
+  padding: 0.32rem 0.38rem;
+  border: 1px solid var(--dock-edge);
+  border-radius: var(--dock-radius);
+  background:
+    linear-gradient(180deg, rgba(35, 20, 43, 0.98), var(--dock-surface));
+  box-shadow:
+    0 1rem 2.4rem -0.9rem rgba(0, 0, 0, 0.76),
+    inset 0 1px 0 rgba(255, 249, 232, 0.045);
   transform: translateX(-50%);
   animation: tarot-toolbar-enter 260ms ease-out backwards;
   transition: opacity 260ms ease;
@@ -727,20 +734,20 @@ button {
 .tarot-toolbar-sigil {
   display: inline-grid;
   place-items: center;
-  width: 1.55rem;
+  width: 1.8rem;
   height: 2.75rem;
-  color: rgba(234, 212, 155, 0.68);
+  color: rgba(234, 212, 155, 0.76);
   font-family: var(--font-display);
-  font-size: 1rem;
+  font-size: 1.05rem;
   line-height: 1;
-  text-shadow: 0 0 0.85rem rgba(234, 212, 155, 0.2);
+  text-shadow: 0 0 1rem rgba(234, 212, 155, 0.16);
 }
 
 .tarot-toolbar-sigil::after {
   content: "✦";
-  margin: -0.38rem -0.52rem 0 0;
+  margin: -0.4rem -0.56rem 0 0;
   color: rgba(221, 189, 240, 0.52);
-  font-size: 0.42rem;
+  font-size: 0.38rem;
 }
 
 .tarot-mode-cancel {
@@ -773,24 +780,31 @@ button {
 
 .tarot-zoom-controls {
   display: grid;
-  grid-template-columns: 2.75rem minmax(4rem, auto) 2.75rem;
-  gap: 0.22rem;
+  grid-template-columns: 2.45rem minmax(3.7rem, auto) 2.45rem;
+  gap: 0;
   flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(247, 239, 217, 0.12);
+  border-radius: 0.48rem;
+  background: var(--dock-control);
 }
 
 .tarot-zoom-controls button {
   min-width: 0;
   min-height: 2.75rem;
   padding: 0.38rem 0.35rem;
-  border: 1px solid rgba(247, 239, 217, 0.2);
-  border-radius: 999px;
-  background: var(--control);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   cursor: pointer;
-  transition: border-color 160ms ease, background 160ms ease,
-    transform 160ms ease;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.tarot-zoom-controls button + button {
+  border-left: 1px solid var(--dock-divider);
 }
 
 .tarot-deck-menu,
@@ -804,13 +818,37 @@ button {
   flex: 0 0 auto;
 }
 
+.tarot-reset-trigger,
+.tarot-config-menu,
+.tarot-card-menu {
+  margin-left: 0.24rem;
+}
+
+.tarot-reset-trigger::before,
+.tarot-config-menu::before,
+.tarot-card-menu::before {
+  content: "";
+  position: absolute;
+  top: 0.48rem;
+  bottom: 0.48rem;
+  left: -0.22rem;
+  width: 1px;
+  background: var(--dock-divider);
+  pointer-events: none;
+}
+
+.tarot-reset-trigger {
+  position: relative;
+}
+
 .tarot-toolbar-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.34rem;
-  padding-inline: 0.62rem;
-  border-color: rgba(247, 239, 217, 0.18);
+  padding-inline: 0.7rem;
+  border-color: transparent;
+  background: transparent;
   color: var(--muted-ink);
 }
 
@@ -820,8 +858,9 @@ button {
   justify-content: center;
   gap: 0.34rem;
   flex: 0 0 auto;
-  padding-inline: 0.62rem;
-  border-color: rgba(247, 239, 217, 0.18);
+  padding-inline: 0.7rem;
+  border-color: transparent;
+  background: transparent;
   color: var(--muted-ink);
 }
 
@@ -862,9 +901,10 @@ button {
 }
 
 .tarot-toolbar-trigger[aria-expanded="true"] {
-  border-color: var(--accent-bright);
-  background: var(--control-hover);
+  border-color: rgba(234, 212, 155, 0.24);
+  background: var(--dock-control-hover);
   color: #fff9e8;
+  box-shadow: inset 0 -2px 0 rgba(234, 212, 155, 0.62);
 }
 
 .tarot-toolbar-trigger[aria-expanded="true"] .tarot-menu-chevron {
@@ -881,10 +921,10 @@ button {
   bottom: calc(100% + 0.58rem);
   z-index: 4;
   display: grid;
-  gap: 0.7rem;
-  width: min(20rem, calc(100vw - 2rem));
+  gap: 0.82rem;
+  width: min(21.5rem, calc(100vw - 2rem));
   max-height: min(34rem, calc(100dvh - 7rem));
-  padding: 0.76rem 0.8rem 0.8rem;
+  padding: 0.88rem 0.92rem 0.92rem;
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--panel-edge);
@@ -907,9 +947,13 @@ button {
   text-transform: uppercase;
 }
 
+.tarot-config-heading {
+  padding-bottom: 0.04rem;
+}
+
 .tarot-config-section {
   display: grid;
-  gap: 0.44rem;
+  gap: 0.52rem;
 }
 
 .tarot-config-section + .tarot-config-section {
@@ -920,15 +964,15 @@ button {
 .tarot-config-choice-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.32rem;
+  gap: 0.4rem;
 }
 
 .tarot-config-choice,
 .tarot-config-popover [role="radio"] {
   display: grid;
   gap: 0.2rem;
-  min-height: 4.55rem;
-  padding: 0.5rem 0.44rem;
+  min-height: 5.1rem;
+  padding: 0.5rem;
   border: 1px solid rgba(247, 239, 217, 0.15);
   border-radius: 0.52rem;
   background: rgba(48, 28, 59, 0.58);
@@ -943,9 +987,9 @@ button {
 .tarot-config-popover [role="radio"]::before {
   content: "";
   display: block;
-  width: 1.1rem;
-  height: 0.24rem;
-  border-radius: 999px;
+  width: 100%;
+  height: 1.35rem;
+  border-radius: 0.34rem;
   background: linear-gradient(90deg, #c9a563, #8f6ba3);
   box-shadow: 0 0 0.65rem rgba(234, 212, 155, 0.2);
 }
@@ -977,7 +1021,7 @@ button {
 .tarot-config-choice span,
 .tarot-config-popover [role="radio"] span {
   align-self: end;
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   line-height: 1.08;
 }
 
@@ -1043,13 +1087,46 @@ button {
     linear-gradient(90deg, #896337, #d7b46f);
 }
 
+.tarot-config-action {
+  display: flex;
+  align-items: center;
+  gap: 0.58rem;
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.56rem 0.64rem;
+  border: 1px solid rgba(247, 239, 217, 0.11);
+  border-radius: 0.52rem;
+  background: rgba(58, 34, 68, 0.42);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.tarot-config-action:hover {
+  border-color: rgba(234, 212, 155, 0.32);
+  background: rgba(82, 49, 92, 0.62);
+  box-shadow: inset 2px 0 0 rgba(234, 212, 155, 0.52);
+}
+
+.tarot-config-action svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+
 .tarot-language-popover {
   position: absolute;
   right: 0;
   bottom: calc(100% + 0.58rem);
   z-index: 4;
-  width: 12.4rem;
-  padding: 0.52rem;
+  width: 13rem;
+  padding: 0.66rem;
   border: 1px solid var(--panel-edge);
   border-radius: 0.82rem;
   background: rgba(20, 11, 29, 0.98);
@@ -1060,7 +1137,7 @@ button {
 
 .tarot-language-popover > span {
   display: block;
-  margin: 0.14rem 0.38rem 0.38rem;
+  margin: 0.08rem 0.3rem 0.52rem;
   color: var(--faint-ink);
   font-family: var(--font-mono);
   font-size: 0.625rem;
@@ -1070,7 +1147,7 @@ button {
 
 .tarot-language-popover [role="radiogroup"] {
   display: grid;
-  gap: 0.28rem;
+  gap: 0.34rem;
 }
 
 .tarot-language-popover button {
@@ -1079,8 +1156,8 @@ button {
   justify-content: space-between;
   gap: 0.6rem;
   width: 100%;
-  min-height: 2.8rem;
-  padding: 0.48rem 0.58rem;
+  min-height: 3rem;
+  padding: 0.54rem 0.62rem;
   border: 1px solid rgba(247, 239, 217, 0.12);
   border-radius: 0.45rem;
   background: rgba(48, 28, 59, 0.58);
@@ -1125,9 +1202,9 @@ button {
   right: 0;
   bottom: calc(100% + 0.58rem);
   z-index: 4;
-  width: min(19rem, calc(100vw - 2rem));
+  width: min(20.5rem, calc(100vw - 2rem));
   max-height: min(36rem, calc(100dvh - 7rem));
-  padding: 0.68rem;
+  padding: 0.78rem;
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--panel-edge);
@@ -1144,7 +1221,7 @@ button {
 }
 
 .tarot-arrange-popover > p {
-  margin: 0.08rem 0.2rem 0.48rem;
+  margin: 0.04rem 0.16rem 0.6rem;
   color: var(--faint-ink);
   font-family: var(--font-mono);
   font-size: 0.625rem;
@@ -1156,7 +1233,7 @@ button {
 .tarot-arrange-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.38rem;
+  gap: 0.42rem;
 }
 
 .tarot-arrange-section {
@@ -1185,8 +1262,8 @@ button {
 .tarot-arrange-popover button {
   display: grid;
   gap: 0.1rem;
-  min-height: 3.45rem;
-  padding: 0.54rem 0.62rem;
+  min-height: 3.55rem;
+  padding: 0.58rem 0.66rem;
   border: 1px solid rgba(247, 239, 217, 0.12);
   border-radius: 0.42rem;
   background: rgba(48, 28, 59, 0.58);
@@ -1214,6 +1291,73 @@ button {
   font-size: 0.625rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* A single material language for every control surface in the ritual rail. */
+.tarot-set-picker,
+.tarot-spread-actions,
+.tarot-arrange-popover,
+.tarot-config-popover,
+.tarot-language-popover,
+.tarot-inspector {
+  border: 1px solid var(--dock-edge);
+  border-radius: var(--popover-radius);
+  background:
+    linear-gradient(155deg, #201129 0%, var(--dock-surface-raised) 54%, #120919 100%);
+  box-shadow:
+    var(--popover-shadow),
+    inset 0 2px 0 rgba(234, 212, 155, 0.22),
+    inset 0 1px 0 rgba(255, 249, 232, 0.05);
+  backdrop-filter: none;
+}
+
+.tarot-set-picker label,
+.tarot-spread-actions > span,
+.tarot-arrange-popover > p,
+.tarot-config-heading,
+.tarot-language-popover > span {
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  text-transform: none;
+}
+
+.tarot-spread-actions button,
+.tarot-arrange-popover button,
+.tarot-language-popover button,
+.tarot-config-choice,
+.tarot-config-popover [role="radio"],
+.tarot-config-sound,
+.tarot-inspector-actions button {
+  border-color: rgba(247, 239, 217, 0.11);
+  border-radius: 0.52rem;
+  background: rgba(58, 34, 68, 0.42);
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.tarot-spread-actions button:hover:not(:disabled),
+.tarot-arrange-popover button:hover:not(:disabled),
+.tarot-language-popover button:hover,
+.tarot-config-choice:hover,
+.tarot-config-popover [role="radio"]:hover,
+.tarot-config-sound:hover,
+.tarot-inspector-actions button:hover:not(:disabled) {
+  border-color: rgba(234, 212, 155, 0.32);
+  background: rgba(82, 49, 92, 0.62);
+  box-shadow: inset 2px 0 0 rgba(234, 212, 155, 0.52);
+  transform: none;
+}
+
+.tarot-config-choice[aria-checked="true"],
+.tarot-config-popover [role="radio"][aria-checked="true"],
+.tarot-language-popover button[aria-checked="true"] {
+  border-color: rgba(234, 212, 155, 0.42);
+  background: rgba(83, 51, 94, 0.58);
+  box-shadow: inset 2px 0 0 var(--accent-bright);
 }
 
 .tarot-live-status {
@@ -1408,22 +1552,22 @@ input:focus-visible {
 
   .tarot-toolbar {
     bottom: max(0.65rem, var(--safe-bottom));
-    right: max(0.625rem, var(--safe-right));
-    left: max(0.625rem, var(--safe-left));
+    right: max(0.5rem, var(--safe-right));
+    left: max(0.5rem, var(--safe-left));
     display: flex;
-    gap: 0.22rem;
+    gap: 0.12rem;
     width: max-content;
     max-width: calc(
-      100vw - max(0.625rem, var(--safe-left)) -
-        max(0.625rem, var(--safe-right))
+      100vw - max(0.5rem, var(--safe-left)) -
+        max(0.5rem, var(--safe-right))
     );
     margin-inline: auto;
-    padding: 0.35rem;
+    padding: 0.28rem;
+    border-radius: 0.65rem;
     transform: none;
   }
 
-  .tarot-zoom-trigger,
-  .tarot-fullscreen-trigger {
+  .tarot-zoom-trigger {
     display: inline-flex;
   }
 
@@ -1469,8 +1613,24 @@ input:focus-visible {
     width: 2.75rem;
     min-height: 2.75rem;
     padding: 0.24rem;
+    border-radius: 0.44rem;
     font-size: 0.625rem;
     letter-spacing: 0.02em;
+  }
+
+  .tarot-config-menu,
+  .tarot-card-menu {
+    margin-left: 0;
+  }
+
+  .tarot-config-menu::before {
+    display: none;
+  }
+
+  .tarot-card-menu::before {
+    top: 0.42rem;
+    bottom: 0.42rem;
+    left: -0.08rem;
   }
 
   .tarot-toolbar-trigger > span,
@@ -1538,35 +1698,25 @@ input:focus-visible {
 
   .tarot-mobile-popover {
     --mobile-popover-bottom: calc(
-      max(0.65rem, var(--safe-bottom)) + 3.9rem
+      max(0.65rem, var(--safe-bottom)) + 3.72rem
     );
     position: fixed;
     z-index: 20;
-    right: max(0.625rem, var(--safe-right));
+    right: max(0.5rem, var(--safe-right));
     bottom: var(--mobile-popover-bottom);
-    left: max(0.625rem, var(--safe-left));
-    width: min(
-      var(--mobile-popover-width, 20rem),
-      calc(
-        100vw - max(0.625rem, var(--safe-left)) -
-          max(0.625rem, var(--safe-right))
-      )
-    );
+    left: max(0.5rem, var(--safe-left));
+    width: auto;
     max-width: none;
     max-height: calc(
       100dvh - var(--mobile-popover-bottom) -
-        max(0.625rem, var(--safe-top))
+        max(0.5rem, var(--safe-top))
     );
-    margin-inline: auto;
+    margin-inline: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
+    border-radius: 0.86rem 0.86rem 0.62rem 0.62rem;
     transform: none;
     animation-name: tarot-popover-enter;
-  }
-
-  .tarot-language-popover,
-  .tarot-zoom-controls {
-    --mobile-popover-width: 18rem;
   }
 
   .tarot-zoom-controls {
@@ -1578,11 +1728,11 @@ input:focus-visible {
   }
 }
 
-@media (max-width: 419px) {
+@media (max-width: 339px) {
   .tarot-toolbar {
     display: grid;
-    grid-template-columns: repeat(4, 2.75rem);
-    gap: 0.22rem;
+    grid-template-columns: repeat(4, 2.55rem);
+    gap: 0.12rem;
     max-width: none;
   }
 
@@ -1593,14 +1743,14 @@ input:focus-visible {
 
   .tarot-mobile-toolbar-spacer {
     display: block;
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 2.55rem;
+    height: 2.55rem;
     pointer-events: none;
   }
 
   .tarot-mobile-popover {
     --mobile-popover-bottom: calc(
-      max(0.65rem, var(--safe-bottom)) + 6.85rem
+      max(0.65rem, var(--safe-bottom)) + 6.75rem
     );
   }
 }
@@ -1611,6 +1761,12 @@ input:focus-visible {
     padding: 0.28rem;
   }
 
+  .tarot-toolbar-trigger,
+  .tarot-mode-cancel,
+  .tarot-language-trigger {
+    width: 2.55rem;
+    min-height: 2.55rem;
+  }
 }
 
 @media (max-height: 660px) and (min-width: 720px) and (hover: hover) and (pointer: fine) {

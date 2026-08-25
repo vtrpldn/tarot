@@ -441,7 +441,7 @@ function useDockPopover({
         ?.querySelector<HTMLElement>(
           "[role='radio'][aria-checked='true'], button:not(:disabled), select:not(:disabled), input:not(:disabled)"
         )
-        ?.focus();
+        ?.focus({ preventScroll: true });
     });
     const closeOnOutsidePress = (event: PointerEvent) => {
       const targetNode = event.target as Node;
@@ -462,9 +462,13 @@ function useDockPopover({
           );
 
           if (tableRegion) {
-            window.requestAnimationFrame(() => tableRegion.focus());
+            window.requestAnimationFrame(() =>
+              tableRegion.focus({ preventScroll: true })
+            );
           } else if (!isFocusableControl) {
-            window.requestAnimationFrame(() => triggerRef.current?.focus());
+            window.requestAnimationFrame(() =>
+              triggerRef.current?.focus({ preventScroll: true })
+            );
           }
         }
       }
@@ -472,7 +476,7 @@ function useDockPopover({
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setIsOpen(false);
-        triggerRef.current?.focus();
+        triggerRef.current?.focus({ preventScroll: true });
       }
     };
 
@@ -2093,49 +2097,6 @@ export function TarotStudio() {
             </div>
           </MobilePopoverPortal>
         </div>
-        {isFullscreenAvailable && (
-          <button
-            type="button"
-            className="tarot-toolbar-trigger tarot-fullscreen-trigger"
-            aria-label={
-              isFullscreen
-                ? messages.exitFullscreen
-                : messages.enterFullscreen
-            }
-            title={
-              isFullscreen
-                ? messages.exitFullscreen
-                : messages.enterFullscreen
-            }
-            onClick={() => {
-              setIsDeckMenuOpen(false);
-              setIsZoomMenuOpen(false);
-              setIsSpreadMenuOpen(false);
-              setIsArrangeMenuOpen(false);
-              setIsConfigMenuOpen(false);
-              setIsLanguageMenuOpen(false);
-              setIsInspectorCollapsed(true);
-              toggleFullscreen();
-            }}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              {isFullscreen ? (
-                <>
-                  <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
-                </>
-              ) : (
-                <>
-                  <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
-                </>
-              )}
-            </svg>
-            <span>
-              {isFullscreen
-                ? messages.exitFullscreen
-                : messages.enterFullscreen}
-            </span>
-          </button>
-        )}
         <div className="tarot-config-menu" ref={configMenuRef}>
           <button
             ref={configMenuTriggerRef}
@@ -2230,6 +2191,31 @@ export function TarotStudio() {
                     </span>
                   </button>
                 </div>
+                {isFullscreenAvailable && (
+                  <div className="tarot-config-section">
+                    <button
+                      type="button"
+                      className="tarot-config-action"
+                      onClick={() => {
+                        setIsConfigMenuOpen(false);
+                        toggleFullscreen();
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        {isFullscreen ? (
+                          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+                        ) : (
+                          <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" />
+                        )}
+                      </svg>
+                      <span>
+                        {isFullscreen
+                          ? messages.exitFullscreen
+                          : messages.enterFullscreen}
+                      </span>
+                    </button>
+                  </div>
+                )}
               </section>
             </MobilePopoverPortal>
           )}
