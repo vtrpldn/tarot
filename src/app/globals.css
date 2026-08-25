@@ -90,6 +90,30 @@ button {
   text-transform: uppercase;
 }
 
+.tarot-workspace-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  color: var(--muted-ink);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  animation: tarot-workspace-breathe 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes tarot-workspace-breathe {
+  from {
+    opacity: 0.48;
+  }
+
+  to {
+    opacity: 0.9;
+  }
+}
+
 .tarot-grain {
   position: absolute;
   z-index: 2;

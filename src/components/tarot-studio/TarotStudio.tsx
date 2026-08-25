@@ -26,6 +26,10 @@ import {
   popularTarotSpreads,
   type TarotSpread,
 } from "@/lib/tarot-spreads";
+import {
+  loadTarotWorkspace,
+  saveTarotWorkspace,
+} from "@/lib/tarot-workspace";
 import type { CardLayerDirection, TableLayout } from "@/types";
 import {
   MAX_VIEW_ZOOM,
@@ -80,6 +84,7 @@ export function TarotStudio() {
   const [isShuffleMenuOpen, setIsShuffleMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
+  const [isWorkspaceReady, setIsWorkspaceReady] = useState(false);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -107,6 +112,44 @@ export function TarotStudio() {
   const deckCount = getRemainingDeckCount(session);
   const deckCardNoun = deckCount === 1 ? "card" : "cards";
   const tableCardNoun = tableCards.length === 1 ? "card" : "cards";
+
+  useEffect(() => {
+    const workspace = loadTarotWorkspace(cardSets);
+
+    if (workspace) {
+      setActiveCardSetId(workspace.activeCardSetId);
+      setViewZoom(
+        Math.min(MAX_VIEW_ZOOM, Math.max(MIN_VIEW_ZOOM, workspace.viewZoom))
+      );
+      setIsInspectorCollapsed(workspace.isInspectorCollapsed);
+      dispatch({ type: "restore", session: workspace.session });
+    }
+
+    setIsWorkspaceReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isWorkspaceReady) {
+      return;
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      saveTarotWorkspace({
+        activeCardSetId,
+        isInspectorCollapsed,
+        session,
+        viewZoom,
+      });
+    }, 160);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [
+    activeCardSetId,
+    isInspectorCollapsed,
+    isWorkspaceReady,
+    session,
+    viewZoom,
+  ]);
 
   useEffect(() => {
     if (!isShuffleMenuOpen) {
@@ -394,6 +437,17 @@ export function TarotStudio() {
     : selectedCard
       ? `Face down · Layer ${selectedTableIndex + 1} of ${tableCards.length}. Scroll over it to restack.`
       : "Draw a card or tap one on the table.";
+
+  if (!isWorkspaceReady) {
+    return (
+      <main className="tarot-app tarot-app--restoring">
+        <div className="tarot-grain" aria-hidden="true" />
+        <div className="tarot-workspace-loading" role="status">
+          Opening the table…
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="tarot-app">

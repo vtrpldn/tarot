@@ -187,6 +187,7 @@ export function createLayout(
 }
 
 export type TarotSessionAction =
+  | { type: "restore"; session: TarotSession }
   | { type: "select"; cardId: string | null }
   | {
       type: "draw";
@@ -229,6 +230,19 @@ export function tarotSessionReducer(
   session: TarotSession,
   action: TarotSessionAction
 ): TarotSession {
+  if (action.type === "restore") {
+    return {
+      ...action.session,
+      cards: cloneCards(action.session.cards),
+      deckPosition: cloneDeckPosition(action.session.deckPosition),
+      history: action.session.history.map((entry) => ({
+        cards: cloneCards(entry.cards),
+        deckPosition: cloneDeckPosition(entry.deckPosition),
+        selectedCardId: entry.selectedCardId,
+      })),
+    };
+  }
+
   if (action.type === "select") {
     return { ...session, selectedCardId: action.cardId };
   }
