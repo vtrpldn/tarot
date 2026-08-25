@@ -13,7 +13,8 @@
     "build:marseille-assets": "node scripts/build-marseille-assets.mjs",
     "validate:marseille-assets": "node scripts/validate-marseille-assets.mjs",
     "validate:locales": "node scripts/validate-locales.mjs",
-    "validate:card-readings": "node scripts/validate-card-readings.mjs"
+    "validate:card-readings": "node scripts/validate-card-readings.mjs",
+    "validate:card-balance": "node scripts/validate-card-balance.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",
