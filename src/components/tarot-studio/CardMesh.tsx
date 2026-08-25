@@ -56,8 +56,9 @@ const RELEASE_GLIDE_SECONDS = 0.06;
 const MAX_RELEASE_GLIDE = 0.32;
 const MIN_THROW_SPEED = 0.7;
 const MAX_THROW_ROTATION = 11;
-const FLIP_DURATION_SECONDS = 0.52;
+const FLIP_DURATION_SECONDS = 0.46;
 const FLIP_SURFACE_CLEARANCE = 0.0005;
+const FLIP_MIN_WIDTH_SCALE = 0.12;
 const DRAG_SCALE = 1.035;
 
 export const CARD_THICKNESS = 0.018;
@@ -700,6 +701,7 @@ export const CardMesh = memo(function CardMesh({
       1,
       card.zone === "deck" ? deckDepthScale : 1
     );
+    flippingCard.position.set(0, 0, 0);
     flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
     flipAnimationRef.current = null;
     hasPositionedRef.current = true;
@@ -722,10 +724,28 @@ export const CardMesh = memo(function CardMesh({
     }
 
     const target = card.faceUp ? 0 : Math.PI;
+    const activeFlip = flipAnimationRef.current;
 
     if (reducedMotion) {
+      flippingCard.position.set(0, 0, 0);
       flippingCard.rotation.set(0, target, 0);
       flipAnimationRef.current = null;
+      invalidate();
+      return;
+    }
+
+    if (
+      activeFlip &&
+      Math.abs(activeFlip.from - target) <= 0.0008
+    ) {
+      flipAnimationRef.current = {
+        from: activeFlip.to,
+        to: activeFlip.from,
+        elapsed: Math.max(
+          0,
+          FLIP_DURATION_SECONDS - activeFlip.elapsed
+        ),
+      };
       invalidate();
       return;
     }
@@ -1053,9 +1073,9 @@ export const CardMesh = memo(function CardMesh({
     let flipIsActive = false;
     let flipScaleX = 1;
     let flipScaleY = 1;
-    let flipSqueeze = 0;
 
     if (reducedMotion) {
+      flippingCard.position.set(0, 0, 0);
       flippingCard.rotation.set(0, card.faceUp ? 0 : Math.PI, 0);
       flipAnimationRef.current = null;
     } else if (flipAnimation) {
@@ -1069,20 +1089,20 @@ export const CardMesh = memo(function CardMesh({
           ? 4 * progress * progress * progress
           : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
-      const squeeze = Math.sin(Math.PI * easedProgress);
-      flipSqueeze = squeeze;
+      const turnEnvelope = Math.sin(Math.PI * easedProgress);
 
       flipScaleX = Math.max(
-        0.018,
+        FLIP_MIN_WIDTH_SCALE,
         Math.abs(Math.cos(Math.PI * easedProgress))
       );
-      flipScaleY = 1 - squeeze * 0.012;
+      flipScaleY = 1 - turnEnvelope * 0.006;
       flippingCard.rotation.y =
         easedProgress < 0.5 ? flipAnimation.from : flipAnimation.to;
       flippingCard.rotation.x = 0;
       flipIsActive = progress < 1;
 
       if (!flipIsActive) {
+        flippingCard.position.set(0, 0, 0);
         flippingCard.rotation.set(0, flipAnimation.to, 0);
         flipAnimationRef.current = null;
         flipScaleX = 1;
@@ -1147,12 +1167,12 @@ export const CardMesh = memo(function CardMesh({
       ? 0
       : moving
         ? tiltYTarget * 0.036
-        : flipSqueeze * (card.faceUp ? 0.006 : -0.006);
+        : 0;
     const curlYTarget = reducedMotion
       ? 0
       : moving
         ? -tiltXTarget * 0.03
-        : -flipSqueeze * 0.0035;
+        : 0;
     const paperMotion = paperMotionRef.current;
     const nextCurlX = reducedMotion
       ? 0
@@ -1221,6 +1241,7 @@ export const CardMesh = memo(function CardMesh({
       group.position.y = positionYTarget;
       group.position.z = zTarget;
       group.scale.set(scaleTarget, scaleTarget, 1);
+      flippingCard.position.set(0, 0, 0);
       flippingCard.scale.set(flipScaleX, flipScaleY, depthScaleTarget);
       paperMotion.curlX = 0;
       paperMotion.curlY = 0;
@@ -1260,6 +1281,7 @@ export const CardMesh = memo(function CardMesh({
     group.position.y = nextY;
     group.position.z = nextZ;
     group.scale.set(nextScale, nextScale, 1);
+    flippingCard.position.set(0, 0, 0);
     flippingCard.scale.set(flipScaleX, flipScaleY, nextDepthScale);
     paperMotion.curlX = nextCurlX;
     paperMotion.curlY = nextCurlY;
