@@ -105,12 +105,19 @@ export function createTarotSession(cardSet: CardSetDefinition): TarotSession {
   };
 }
 
-export function getTopDeckCard(session: TarotSession): TableCard | undefined {
-  const deckCards = session.cards
+export function getDeckCards(session: TarotSession): TableCard[] {
+  return session.cards
     .filter((card) => card.zone === "deck")
-    .sort((first, second) => first.zIndex - second.zIndex);
+    .sort(
+      (first, second) =>
+        first.zIndex - second.zIndex || first.id.localeCompare(second.id)
+    );
+}
 
-  return deckCards[deckCards.length - 1];
+export function getTopDeckCard(session: TarotSession): TableCard | undefined {
+  const deckCards = getDeckCards(session);
+
+  return deckCards.at(-1);
 }
 
 export function getTableCards(session: TarotSession): TableCard[] {
@@ -387,9 +394,8 @@ export function tarotSessionReducer(
       return session;
     }
 
-    const deckCards = session.cards
-      .filter((card) => card.zone === "deck")
-      .sort((first, second) => second.zIndex - first.zIndex)
+    const deckCards = getDeckCards(session)
+      .reverse()
       .slice(0, action.spread.slots.length);
 
     if (deckCards.length < action.spread.slots.length) {
@@ -505,7 +511,7 @@ export function tarotSessionReducer(
   }
 
   if (action.type === "draw") {
-    if (card.zone !== "deck" || card.id !== getTopDeckCard(session)?.id) {
+    if (card.zone !== "deck") {
       return session;
     }
 

@@ -50,28 +50,11 @@ type Messages = {
   cardSoundsDescription: string;
   config: string;
   configureTable: string;
-  configOptions: string;
-  appearance: string;
   background: string;
   backgroundOptions: string;
   backgroundConstellation: string;
   backgroundSolarTemple: string;
   backgroundMoonlitGrove: string;
-  lighting: string;
-  lightIntensity: string;
-  lightIntensityValue: (value: number) => string;
-  lightCount: string;
-  lightCountOne: string;
-  lightCountTwo: string;
-  lightCountThree: string;
-  lightArrangement: string;
-  lightArrangementCentered: string;
-  lightArrangementCross: string;
-  lightArrangementTriangle: string;
-  spotlightSize: string;
-  spotlightSizeValue: (value: number) => string;
-  shadowDepth: string;
-  shadowDepthValue: (value: number) => string;
   language: string;
   chooseLanguage: string;
   languageOptions: string;
@@ -122,7 +105,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "EN",
     loadingTable: "Opening the table…",
     tableDescription:
-      "Interactive card table. Drag the top card to draw it and drag table cards to arrange them. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
+      "Interactive card table. Pull any exposed card from the deck to draw it and drag table cards to arrange them. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
     tableActions: "Table actions",
     deckTrigger: (deckLabel, deck) =>
       `Choose deck. ${deckLabel}, ${deck.count} ${deck.noun} remaining`,
@@ -169,28 +152,11 @@ const messages: Record<AppLocale, Messages> = {
     cardSoundsDescription: "Atmospheric sounds while you handle cards",
     config: "Config",
     configureTable: "Configure table",
-    configOptions: "Configuration options",
-    appearance: "Appearance",
     background: "Background",
     backgroundOptions: "Background options",
     backgroundConstellation: "Constellation",
     backgroundSolarTemple: "Solar temple",
     backgroundMoonlitGrove: "Moonlit grove",
-    lighting: "Lighting",
-    lightIntensity: "Light intensity",
-    lightIntensityValue: (value) => `${Math.round(value * 100)}%`,
-    lightCount: "Lights",
-    lightCountOne: "One",
-    lightCountTwo: "Two",
-    lightCountThree: "Three",
-    lightArrangement: "Arrangement",
-    lightArrangementCentered: "Centered",
-    lightArrangementCross: "Cross",
-    lightArrangementTriangle: "Triangle",
-    spotlightSize: "Spotlight size",
-    spotlightSizeValue: (value) => `${Math.round(value * 100)}%`,
-    shadowDepth: "Shadow depth",
-    shadowDepthValue: (value) => `${Math.round(value * 100)}%`,
     language: "Language",
     chooseLanguage: "Choose language",
     languageOptions: "Language options",
@@ -254,7 +220,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "PT",
     loadingTable: "Abrindo a mesa…",
     tableDescription:
-      "Mesa de cartas interativa. Arraste a carta do topo para tirá-la e arraste as cartas na mesa para organizá-las. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
+      "Mesa de cartas interativa. Puxe qualquer carta exposta do monte para tirá-la e arraste as cartas na mesa para organizá-las. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
     tableActions: "Ações da mesa",
     deckTrigger: (deckLabel, deck) =>
       `Escolher baralho. ${deckLabel}, restam ${deck.count} ${deck.noun}`,
@@ -301,28 +267,11 @@ const messages: Record<AppLocale, Messages> = {
     cardSoundsDescription: "Sons atmosféricos ao interagir com as cartas",
     config: "Configurações",
     configureTable: "Configurar mesa",
-    configOptions: "Opções de configuração",
-    appearance: "Aparência",
     background: "Fundo",
     backgroundOptions: "Opções de fundo",
     backgroundConstellation: "Constelação",
     backgroundSolarTemple: "Templo solar",
     backgroundMoonlitGrove: "Bosque ao luar",
-    lighting: "Iluminação",
-    lightIntensity: "Intensidade da luz",
-    lightIntensityValue: (value) => `${Math.round(value * 100)}%`,
-    lightCount: "Luzes",
-    lightCountOne: "Uma",
-    lightCountTwo: "Duas",
-    lightCountThree: "Três",
-    lightArrangement: "Disposição",
-    lightArrangementCentered: "Central",
-    lightArrangementCross: "Cruz",
-    lightArrangementTriangle: "Triângulo",
-    spotlightSize: "Tamanho do holofote",
-    spotlightSizeValue: (value) => `${Math.round(value * 100)}%`,
-    shadowDepth: "Profundidade das sombras",
-    shadowDepthValue: (value) => `${Math.round(value * 100)}%`,
     language: "Idioma",
     chooseLanguage: "Escolher idioma",
     languageOptions: "Opções de idioma",

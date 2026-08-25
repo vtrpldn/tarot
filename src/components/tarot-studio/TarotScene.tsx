@@ -1,39 +1,40 @@
 "use client";
 
-import { Line, RoundedBox, useTexture } from "@react-three/drei";
+import { Line, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
   type RefCallback,
   memo,
-  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import {
   Group,
   MathUtils,
+  Object3D,
   OrthographicCamera,
   Shape,
+  SpotLight as ThreeSpotLight,
   SRGBColorSpace,
 } from "three";
 import type {
-  CardArtworkCrop,
   CardSetDefinition,
   TablePoint,
   TarotSession,
 } from "@/types";
 import { getCardStackOffset } from "@/lib/card-stack-layout";
-import {
-  getRemainingDeckCount,
-  getTopDeckCard,
-} from "@/lib/tarot-session";
+import { getDeckCards } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
-import { CardArtwork, CARD_THICKNESS, CardMesh } from "./CardMesh";
-import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
+import {
+  CARD_THICKNESS,
+  CardMesh,
+  createCardSlabGeometry,
+} from "./CardMesh";
 import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
@@ -47,8 +48,6 @@ import {
 } from "./table-layout";
 import {
   getSceneTheme,
-  MAX_SCENE_LIGHT_INTENSITY,
-  MIN_SCENE_LIGHT_INTENSITY,
   type ScenePalette,
   type SceneSettings,
 } from "./theme";
@@ -63,8 +62,12 @@ const DECK_CARD_RENDER_ORDER = 2_000;
 const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
-const MAX_DECK_VISUAL_LAYERS = 12;
 const MAX_DECK_STACK_HEIGHT = 0.21;
+const DECK_CASCADE_SCALE = 0.24;
+const EXPANDED_DECK_CASCADE_SCALE = 2.65;
+const SPOTLIGHT_ANGLE = 0.78 * 1.5;
+const SPOTLIGHT_INTENSITY = 92 * 1.3;
+const SPOTLIGHT_SHADOW_RADIUS = 8;
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
   [-0.29, 0.18, 0.011],
@@ -581,57 +584,52 @@ function CameraPan({
   return null;
 }
 
-function getDeckMetrics(lowerCardCount: number, deckCapacity: number) {
-  const layerCount = Math.min(
-    MAX_DECK_VISUAL_LAYERS,
-    Math.max(0, lowerCardCount)
-  );
-  const drawableCardCount = Math.max(1, deckCapacity - 1);
+function getDeckMetrics(cardCount: number, deckCapacity: number) {
+  const safeCount = Math.max(0, cardCount);
+  const safeCapacity = Math.max(1, deckCapacity);
+  const fullness =
+    safeCapacity <= 1 ? 1 : Math.max(0, (safeCount - 1) / (safeCapacity - 1));
   const stackHeight =
-    layerCount > 0
-      ? (Math.min(lowerCardCount, drawableCardCount) / drawableCardCount) *
-        MAX_DECK_STACK_HEIGHT
-      : 0;
-  const layerThickness = layerCount ? stackHeight / layerCount : 0;
-  const layerStep = layerThickness;
-  const firstCenter =
-    DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + layerThickness / 2;
-  const topSurface = layerCount
-    ? DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + stackHeight
-    : DECK_MAT_SURFACE_Z;
+    safeCount === 0
+      ? 0
+      : MathUtils.lerp(
+          CARD_THICKNESS,
+          MAX_DECK_STACK_HEIGHT,
+          fullness
+        );
+  const cardThickness = safeCount > 0 ? stackHeight / safeCount : 0;
+  const bottomCardCenter =
+    DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + cardThickness / 2;
+  const topSurface =
+    DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + stackHeight;
 
   return {
-    firstCenter,
-    layerCount,
-    layerStep,
-    layerThickness,
+    bottomCardCenter,
+    cardThickness,
+    depthScale:
+      safeCount > 0 ? Math.min(1, cardThickness / CARD_THICKNESS) : 1,
     stackHeight,
-    stackHeightRatio: stackHeight / MAX_DECK_STACK_HEIGHT,
-    topSurface,
     topCardCenter:
-      topSurface + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE,
+      safeCount > 0 ? topSurface - cardThickness / 2 : topSurface,
+    topSurface,
   };
 }
 
 function getDeckLayerOffset(
   index: number,
-  layerCount: number,
-  stackHeightRatio: number,
-  layout: SceneTableLayout
+  cardCount: number,
+  layout: SceneTableLayout,
+  cascadeScale = DECK_CASCADE_SCALE
 ): TablePoint {
-  if (layerCount <= 1 || stackHeightRatio <= 0) {
+  if (cardCount <= 1) {
     return [0, 0];
   }
 
-  const depth = index / (layerCount - 1);
-  const [topX, topY] = getCardStackOffset(
-    MAX_DECK_VISUAL_LAYERS,
-    MAX_DECK_VISUAL_LAYERS + 1
-  );
+  const [offsetX, offsetY] = getCardStackOffset(index, cardCount);
   const origin = layout.toWorld([0, 0]);
   const layer = layout.toWorld([
-    (depth - 1) * topX * stackHeightRatio,
-    (depth - 1) * topY * stackHeightRatio,
+    offsetX * cascadeScale,
+    -offsetY * cascadeScale,
   ]);
 
   return [layer[0] - origin[0], layer[1] - origin[1]];
@@ -711,37 +709,30 @@ function DeckMat({
   );
 }
 
-function DeckStack({
-  count,
-  deckCapacity,
+function DeckBase({
+  cardCount,
   palette,
-  showMat,
   position,
-  layout,
   width,
   height,
-  backUrl,
-  artworkCrop,
+  topOffset,
+  stackHeight,
   reducedMotion,
   previewPositionRef,
 }: {
-  count: number;
-  deckCapacity: number;
+  cardCount: number;
   palette: ScenePalette;
-  showMat: boolean;
   position: TablePoint;
-  layout: SceneTableLayout;
   width: number;
   height: number;
-  backUrl: string;
-  artworkCrop?: CardArtworkCrop;
+  topOffset: TablePoint;
+  stackHeight: number;
   reducedMotion: boolean;
   previewPositionRef: MutableRefObject<TablePoint | null>;
 }) {
   const groupRef = useRef<Group>(null);
   const hasPositionedRef = useRef(false);
   const invalidate = useThree((state) => state.invalidate);
-  const metrics = getDeckMetrics(count, deckCapacity);
 
   useLayoutEffect(() => {
     const group = groupRef.current;
@@ -752,15 +743,15 @@ function DeckStack({
 
     group.position.set(position[0], position[1], 0);
     hasPositionedRef.current = true;
-  }, [metrics.layerCount, position]);
+  }, [position]);
 
   useEffect(() => {
-    if (metrics.layerCount === 0) {
+    if (cardCount === 0) {
       hasPositionedRef.current = false;
     }
 
     invalidate();
-  }, [invalidate, metrics.layerCount, metrics.stackHeight, position]);
+  }, [cardCount, invalidate, position, stackHeight, topOffset]);
 
   useFrame((_, delta) => {
     const group = groupRef.current;
@@ -796,123 +787,46 @@ function DeckStack({
     }
   });
 
-  if (!showMat && metrics.layerCount === 0) {
+  if (cardCount === 0) {
     return null;
   }
 
-  const frameInset = Math.min(0.34, width * 0.105);
-  const layerOffsets = Array.from({ length: metrics.layerCount }, (_, index) =>
-    getDeckLayerOffset(
-      index,
-      metrics.layerCount,
-      metrics.stackHeightRatio,
-      layout
-    )
-  );
-  const footprintOffsets = [[0, 0] as TablePoint, ...layerOffsets];
-  const minimumOffsetX = Math.min(
-    ...footprintOffsets.map(([offsetX]) => offsetX)
-  );
-  const maximumOffsetX = Math.max(
-    ...footprintOffsets.map(([offsetX]) => offsetX)
-  );
-  const minimumOffsetY = Math.min(
-    ...footprintOffsets.map(([, offsetY]) => offsetY)
-  );
-  const maximumOffsetY = Math.max(
-    ...footprintOffsets.map(([, offsetY]) => offsetY)
-  );
-  const matPosition: TablePoint = [
+  const [topOffsetX, topOffsetY] = topOffset;
+  const minimumOffsetX = Math.min(0, topOffsetX);
+  const maximumOffsetX = Math.max(0, topOffsetX);
+  const minimumOffsetY = Math.min(0, topOffsetY);
+  const maximumOffsetY = Math.max(0, topOffsetY);
+  const shadowPosition: TablePoint = [
     (minimumOffsetX + maximumOffsetX) / 2,
     (minimumOffsetY + maximumOffsetY) / 2,
   ];
-  const matWidth = width + maximumOffsetX - minimumOffsetX;
-  const matHeight = height + maximumOffsetY - minimumOffsetY;
-  const [topOffsetX, topOffsetY] =
-    layerOffsets[metrics.layerCount - 1] ?? [0, 0];
+  const shadowWidth = width + maximumOffsetX - minimumOffsetX;
+  const shadowHeight = height + maximumOffsetY - minimumOffsetY;
   const shadowCasterBottom =
     DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE;
-  const shadowCasterTop =
-    metrics.topCardCenter + CARD_THICKNESS / 2;
-  const shadowCasterHeight = shadowCasterTop - shadowCasterBottom;
+  const shadowCasterHeight = Math.max(CARD_THICKNESS, stackHeight);
 
   return (
     <group ref={groupRef} renderOrder={DECK_STACK_RENDER_ORDER}>
-      {showMat && (
-        <DeckMat
-          palette={palette}
-          width={matWidth}
-          height={matHeight}
-          position={matPosition}
+      <DeckMat palette={palette} width={width} height={height} position={[0, 0]} />
+      {/* A single invisible volume keeps the pile's shadow soft and cheap.
+          Every visible layer is still one of the real remaining cards. */}
+      <mesh
+        position={[
+          shadowPosition[0],
+          shadowPosition[1],
+          shadowCasterBottom + shadowCasterHeight / 2,
+        ]}
+        castShadow
+        receiveShadow={false}
+      >
+        <boxGeometry args={[shadowWidth, shadowHeight, shadowCasterHeight]} />
+        <meshBasicMaterial
+          colorWrite={false}
+          depthTest={false}
+          depthWrite={false}
         />
-      )}
-      {showMat && (
-        <RoundedBox
-          args={[matWidth, matHeight, shadowCasterHeight]}
-          radius={0.045}
-          smoothness={3}
-          position={[
-            matPosition[0],
-            matPosition[1],
-            shadowCasterBottom + shadowCasterHeight / 2,
-          ]}
-          castShadow
-          receiveShadow={false}
-        >
-          <meshBasicMaterial
-            colorWrite={false}
-            depthTest={false}
-            depthWrite={false}
-          />
-        </RoundedBox>
-      )}
-      {Array.from({ length: metrics.layerCount }, (_, index) => {
-        const [offsetX, offsetY] = layerOffsets[index];
-
-        return (
-          <RoundedBox
-            key={index}
-            args={[width, height, metrics.layerThickness]}
-            radius={0.045}
-            smoothness={3}
-            position={[
-              offsetX,
-              offsetY,
-              metrics.firstCenter + index * metrics.layerStep,
-            ]}
-            renderOrder={index}
-            castShadow={false}
-            receiveShadow={false}
-          >
-            <CardPaperMaterial
-              color={
-                index % 2
-                  ? palette.cardPaper
-                  : palette.cardPaperShadow
-              }
-              roughness={index % 2 ? 0.88 : 0.84}
-              paperSeed={getPaperSeed(`${backUrl}:${index}`)}
-              depthTest={false}
-            />
-          </RoundedBox>
-        );
-      })}
-      {metrics.layerCount > 0 && (
-        <Suspense fallback={null}>
-          {/* This passive face becomes the next card back while the live top
-              card is lifted, without adding another pointer target. */}
-          <CardArtwork
-            url={backUrl}
-            crop={artworkCrop}
-            position={[topOffsetX, topOffsetY, metrics.topSurface + 0.002]}
-            width={width - frameInset}
-            height={height - frameInset}
-            renderOrder={metrics.layerCount + 1}
-            paperSeed={getPaperSeed(`${backUrl}:passive`)}
-            depthTest={false}
-          />
-        </Suspense>
-      )}
+      </mesh>
     </group>
   );
 }
@@ -1034,6 +948,73 @@ function TableSurface({
   );
 }
 
+type SceneSpotlightDefinition = {
+  color: string;
+  intensity: number;
+  position: [number, number, number];
+};
+
+function SceneSpotlight({
+  angle,
+  castShadow,
+  color,
+  intensity,
+  position,
+  shadowRadius,
+}: SceneSpotlightDefinition & {
+  angle: number;
+  castShadow: boolean;
+  shadowRadius: number;
+}) {
+  const lightRef = useRef<ThreeSpotLight>(null);
+  const invalidate = useThree((state) => state.invalidate);
+  const target = useMemo(() => {
+    const object = new Object3D();
+    object.position.set(0, 0, TABLE_SURFACE_Z);
+    return object;
+  }, []);
+
+  useLayoutEffect(() => {
+    const light = lightRef.current;
+
+    if (!light) {
+      return;
+    }
+
+    light.target = target;
+    target.updateMatrixWorld();
+    invalidate();
+  }, [invalidate, target]);
+
+  useEffect(() => {
+    invalidate();
+  }, [angle, color, intensity, invalidate, position, shadowRadius]);
+
+  return (
+    <>
+      <primitive object={target} />
+      <spotLight
+        ref={lightRef}
+        angle={angle}
+        castShadow={castShadow}
+        color={color}
+        decay={2}
+        distance={24}
+        intensity={intensity}
+        penumbra={0.82}
+        position={position}
+        shadow-bias={-0.00035}
+        shadow-camera-far={18}
+        shadow-camera-near={0.2}
+        shadow-mapSize-height={1024}
+        shadow-mapSize-width={1024}
+        shadow-normalBias={0.001}
+        shadow-radius={shadowRadius}
+      />
+    </>
+  );
+}
+
 function TarotTable({
   cardSet,
   session,
@@ -1055,23 +1036,12 @@ function TarotTable({
   const size = useThree((state) => state.size);
   const invalidate = useThree((state) => state.invalidate);
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
+  const deckCollapseTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isDeckExpanded, setIsDeckExpanded] = useState(false);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
   const palette = getSceneTheme(sceneSettings.themeId).palette;
-  const shadowFillMultiplier = MathUtils.mapLinear(
-    sceneSettings.shadowDepth,
-    MIN_SCENE_LIGHT_INTENSITY,
-    MAX_SCENE_LIGHT_INTENSITY,
-    1.18,
-    0.82
-  );
-  const shadowRadius = MathUtils.mapLinear(
-    sceneSettings.shadowDepth,
-    MIN_SCENE_LIGHT_INTENSITY,
-    MAX_SCENE_LIGHT_INTENSITY,
-    11,
-    5
-  );
   const layout = useMemo(
     () =>
       createSceneTableLayout({
@@ -1091,18 +1061,22 @@ function TarotTable({
     () => new Map(cardSet.cards.map((card) => [card.id, card])),
     [cardSet.cards]
   );
+  const slabGeometry = useMemo(
+    () => createCardSlabGeometry(layout.cardWidth, layout.cardHeight),
+    [layout.cardHeight, layout.cardWidth]
+  );
+  const deckCards = useMemo(() => getDeckCards(session), [session]);
   const deckPreloadUrls = useMemo(
     () =>
-      session.cards
-        .filter((card) => card.zone === "deck")
-        .sort((first, second) => second.zIndex - first.zIndex)
+      [...deckCards]
+        .reverse()
         .slice(0, 3)
         .flatMap((card) => {
           const definition = definitions.get(card.cardId);
 
           return definition ? [definition.image.preview] : [];
         }),
-    [definitions, session.cards]
+    [deckCards, definitions]
   );
   const tableCards = useMemo(
     () =>
@@ -1111,8 +1085,7 @@ function TarotTable({
         .sort((first, second) => first.zIndex - second.zIndex),
     [session.cards]
   );
-  const topDeckCard = getTopDeckCard(session);
-  const deckCount = getRemainingDeckCount(session);
+  const deckCount = deckCards.length;
   const resolvedDeckPosition =
     session.deckPosition ?? layout.defaultDeckPosition;
   const deckPosition = useMemo(
@@ -1126,13 +1099,41 @@ function TarotTable({
     },
     [invalidate]
   );
-  const deckMetrics = getDeckMetrics(
-    Math.max(0, deckCount - 1),
-    cardSet.cards.length
+  const handleDeckHover = useCallback((hovered: boolean) => {
+    if (deckCollapseTimerRef.current !== null) {
+      clearTimeout(deckCollapseTimerRef.current);
+      deckCollapseTimerRef.current = null;
+    }
+
+    if (hovered) {
+      setIsDeckExpanded(true);
+      return;
+    }
+
+    deckCollapseTimerRef.current = setTimeout(() => {
+      deckCollapseTimerRef.current = null;
+      setIsDeckExpanded(false);
+    }, 1800);
+  }, []);
+  const deckMetrics = getDeckMetrics(deckCount, cardSet.cards.length);
+  const deckOffsets = useMemo(
+    () =>
+      deckCards.map((_, index) =>
+        getDeckLayerOffset(
+          index,
+          deckCards.length,
+          layout,
+          isDeckExpanded
+            ? EXPANDED_DECK_CASCADE_SCALE
+            : DECK_CASCADE_SCALE
+        )
+      ),
+    [deckCards, isDeckExpanded, layout]
   );
-  const visibleCards = topDeckCard
-    ? [topDeckCard, ...tableCards]
-    : tableCards;
+  const deckOrder = new Map(
+    deckCards.map((card, index) => [card.id, index])
+  );
+  const visibleCards = [...deckCards, ...tableCards];
   const tableOrder = new Map(
     tableCards.map((card, index) => [card.id, index])
   );
@@ -1157,6 +1158,17 @@ function TarotTable({
     CARD_THICKNESS +
     0.035;
 
+  useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
+
+  useEffect(
+    () => () => {
+      if (deckCollapseTimerRef.current !== null) {
+        clearTimeout(deckCollapseTimerRef.current);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     useTexture.preload(cardSet.back.preview);
     deckPreloadUrls.forEach((url) => useTexture.preload(url));
@@ -1173,34 +1185,13 @@ function TarotTable({
         viewportBounds={layout.viewportBounds}
         targetZoom={viewZoom}
       />
-      <ambientLight
-        intensity={
-          0.44 * sceneSettings.lightIntensity * shadowFillMultiplier
-        }
-      />
-      <pointLight
+      <SceneSpotlight
+        angle={SPOTLIGHT_ANGLE}
         castShadow
-        position={[0, 0, 7.5]}
-        intensity={86 * sceneSettings.lightIntensity}
-        distance={24}
-        decay={2}
         color={palette.keyLight}
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
-        shadow-bias={-0.00035}
-        shadow-radius={shadowRadius}
-        shadow-normalBias={0.001}
-        shadow-camera-near={0.2}
-        shadow-camera-far={18}
-      />
-      <pointLight
-        position={[0, 0, 4.5]}
-        intensity={
-          8 * sceneSettings.lightIntensity * shadowFillMultiplier
-        }
-        distance={16}
-        decay={2}
-        color={palette.fillLight}
+        intensity={SPOTLIGHT_INTENSITY}
+        position={[0, 0, 7.5]}
+        shadowRadius={SPOTLIGHT_SHADOW_RADIUS}
       />
       <TableSurface
         palette={palette}
@@ -1210,17 +1201,14 @@ function TarotTable({
         reducedMotion={reducedMotion}
         onSelect={onSelect}
       />
-      <DeckStack
-        count={Math.max(0, deckCount - 1)}
-        deckCapacity={cardSet.cards.length}
+      <DeckBase
+        cardCount={deckCount}
         palette={palette}
-        showMat={deckCount > 0}
         position={deckPosition}
-        layout={layout}
         width={layout.cardWidth}
         height={layout.cardHeight}
-        backUrl={cardSet.back.preview}
-        artworkCrop={cardSet.artworkCrop}
+        topOffset={deckOffsets.at(-1) ?? [0, 0]}
+        stackHeight={deckMetrics.stackHeight}
         reducedMotion={reducedMotion}
         previewPositionRef={deckPreviewPositionRef}
       />
@@ -1232,18 +1220,26 @@ function TarotTable({
         }
 
         const tableIndex = tableOrder.get(card.id) ?? 0;
+        const deckIndex = deckOrder.get(card.id);
+        const deckOffset =
+          deckIndex === undefined ? ([0, 0] as TablePoint) : deckOffsets[deckIndex];
+        const deckCardPosition: TablePoint = [
+          deckPosition[0] + deckOffset[0],
+          deckPosition[1] + deckOffset[1],
+        ];
         const restingZ =
           card.zone === "deck"
-            ? deckMetrics.topCardCenter
+            ? deckMetrics.bottomCardCenter +
+              (deckIndex ?? 0) * deckMetrics.cardThickness
             : tableCardRestingHeights.get(card.id) ?? baseTableCardZ;
         const renderOrder =
           card.zone === "deck"
-            ? DECK_CARD_RENDER_ORDER
+            ? DECK_CARD_RENDER_ORDER + (deckIndex ?? 0)
             : TABLE_CARD_RENDER_ORDER +
               tableIndex * CARD_RENDER_ORDER_STEP;
         const interactionZ =
           card.zone === "deck"
-            ? restingZ + CARD_THICKNESS / 2 + 0.04
+            ? restingZ + deckMetrics.cardThickness / 2 + 0.004
             : draggingZ + 0.02 + tableIndex * 0.002;
 
         return (
@@ -1254,6 +1250,11 @@ function TarotTable({
             cardSet={cardSet}
             layout={layout}
             deckPosition={deckPosition}
+            deckCardPosition={deckCardPosition}
+            deckOffset={deckOffset}
+            deckDepthScale={deckMetrics.depthScale}
+            deckPreviewPositionRef={deckPreviewPositionRef}
+            slabGeometry={slabGeometry}
             restingZ={restingZ}
             interactionZ={interactionZ}
             draggingZ={draggingZ}
@@ -1269,6 +1270,7 @@ function TarotTable({
             onMove={onMove}
             onFlip={onFlip}
             onRotate={onRotate}
+            onDeckHover={handleDeckHover}
             onHover={onHover}
             onSound={onSound}
           />

@@ -66,8 +66,6 @@ import {
 } from "./table-layout";
 import {
   DEFAULT_SCENE_SETTINGS,
-  MAX_SCENE_LIGHT_INTENSITY,
-  MIN_SCENE_LIGHT_INTENSITY,
   resolveSceneSettings,
   SCENE_THEME_IDS,
   type SceneSettings,
@@ -1038,15 +1036,6 @@ export function TarotStudio() {
     [updateSceneTheme]
   );
 
-  const updateSceneRange = useCallback(
-    (key: "lightIntensity" | "shadowDepth", value: number) => {
-      setSceneSettings((current) =>
-        resolveSceneSettings({ ...current, [key]: value })
-      );
-    },
-    []
-  );
-
   const undoLastAction = useCallback(() => {
     const previous = session.history[session.history.length - 1];
 
@@ -2007,69 +1996,6 @@ export function TarotStudio() {
                       <span>{sceneThemeLabels[themeId]}</span>
                     </button>
                   ))}
-                </div>
-              </div>
-              <div className="tarot-config-section">
-                <h3 className="tarot-config-section-title">
-                  {messages.lighting}
-                </h3>
-                <div className="tarot-config-range-row">
-                  <label htmlFor="scene-light-intensity">
-                    {messages.lightIntensity}
-                  </label>
-                  <output
-                    className="tarot-config-range-value"
-                    htmlFor="scene-light-intensity"
-                  >
-                    {messages.lightIntensityValue(sceneSettings.lightIntensity)}
-                  </output>
-                  <input
-                    id="scene-light-intensity"
-                    className="tarot-config-range"
-                    type="range"
-                    min={MIN_SCENE_LIGHT_INTENSITY}
-                    max={MAX_SCENE_LIGHT_INTENSITY}
-                    step="0.05"
-                    value={sceneSettings.lightIntensity}
-                    aria-valuetext={messages.lightIntensityValue(
-                      sceneSettings.lightIntensity
-                    )}
-                    onChange={(event) =>
-                      updateSceneRange(
-                        "lightIntensity",
-                        event.currentTarget.valueAsNumber
-                      )
-                    }
-                  />
-                </div>
-                <div className="tarot-config-range-row">
-                  <label htmlFor="scene-shadow-depth">
-                    {messages.shadowDepth}
-                  </label>
-                  <output
-                    className="tarot-config-range-value"
-                    htmlFor="scene-shadow-depth"
-                  >
-                    {messages.shadowDepthValue(sceneSettings.shadowDepth)}
-                  </output>
-                  <input
-                    id="scene-shadow-depth"
-                    className="tarot-config-range"
-                    type="range"
-                    min={MIN_SCENE_LIGHT_INTENSITY}
-                    max={MAX_SCENE_LIGHT_INTENSITY}
-                    step="0.05"
-                    value={sceneSettings.shadowDepth}
-                    aria-valuetext={messages.shadowDepthValue(
-                      sceneSettings.shadowDepth
-                    )}
-                    onChange={(event) =>
-                      updateSceneRange(
-                        "shadowDepth",
-                        event.currentTarget.valueAsNumber
-                      )
-                    }
-                  />
                 </div>
               </div>
               <div className="tarot-config-section">
