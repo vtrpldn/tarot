@@ -15,6 +15,12 @@ const artwork = (filename: string): CardArtwork => {
   };
 };
 
+const lenormandArtwork = (filename: string): CardArtwork => ({
+  preview: `/decks/classic-lenormand/preview/${filename}.webp`,
+  detail: `/decks/classic-lenormand/detail/${filename}.webp`,
+  source: `/decks/classic-lenormand/source/${filename}.jpg`,
+});
+
 const majorArcana = [
   ["0-the-fool.png", "The Fool"],
   ["1-the-magician.png", "The Magician"],
@@ -101,11 +107,70 @@ export const riderWaiteSmith: CardSetDefinition = {
   cards: riderWaiteSmithCards,
 };
 
+const classicLenormandCards = [
+  ["01-rider", "Rider"],
+  ["02-clover", "Clover"],
+  ["03-ship", "Ship"],
+  ["04-house", "House"],
+  ["05-tree", "Tree"],
+  ["06-clouds", "Clouds"],
+  ["07-snake", "Snake"],
+  ["08-coffin", "Coffin"],
+  ["09-bouquet", "Bouquet"],
+  ["10-scythe", "Scythe"],
+  ["11-whip", "Whip"],
+  ["12-birds", "Birds"],
+  ["13-child", "Child"],
+  ["14-fox", "Fox"],
+  ["15-bear", "Bear"],
+  ["16-stars", "Stars"],
+  ["17-stork", "Stork"],
+  ["18-dog", "Dog"],
+  ["19-tower", "Tower"],
+  ["20-garden", "Garden"],
+  ["21-mountain", "Mountain"],
+  ["22-crossroads", "Crossroads"],
+  ["23-mice", "Mice"],
+  ["24-heart", "Heart"],
+  ["25-ring", "Ring"],
+  ["26-book", "Book"],
+  ["27-letter", "Letter"],
+  ["28-man", "Man"],
+  ["29-woman", "Woman"],
+  ["30-lily", "Lilies"],
+  ["31-sun", "Sun"],
+  ["32-moon", "Moon"],
+  ["33-key", "Key"],
+  ["34-fish", "Fish"],
+  ["35-anchor", "Anchor"],
+  ["36-cross", "Cross"],
+] as const;
+
+export const classicLenormand: CardSetDefinition = {
+  id: "classic-lenormand",
+  kind: "lenormand",
+  label: "Classic Lenormand",
+  shortLabel: "Classic Lenormand",
+  description:
+    "The original 36-card Game of Hope, the historic foundation of Petit Lenormand.",
+  cardAspectRatio: 25 / 33,
+  back: lenormandArtwork("back"),
+  cards: classicLenormandCards.map(([id, name], order) => ({
+    id,
+    name,
+    order,
+    image: lenormandArtwork(id),
+  })),
+};
+
 /**
  * Add another Tarot deck or a Lenormand set here. The table session and card
  * interactions are deliberately independent of card count, art, or aspect ratio.
  */
-export const cardSets: CardSetDefinition[] = [riderWaiteSmith];
+export const cardSets: CardSetDefinition[] = [
+  riderWaiteSmith,
+  classicLenormand,
+];
 
 export function getCardSet(cardSetId: string): CardSetDefinition {
   const cardSet = cardSets.find((set) => set.id === cardSetId);

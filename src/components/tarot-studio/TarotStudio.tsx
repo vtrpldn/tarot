@@ -105,6 +105,8 @@ export function TarotStudio() {
   const canBringForward =
     selectedTableIndex >= 0 && selectedTableIndex < tableCards.length - 1;
   const deckCount = getRemainingDeckCount(session);
+  const deckCardNoun = deckCount === 1 ? "card" : "cards";
+  const tableCardNoun = tableCards.length === 1 ? "card" : "cards";
 
   useEffect(() => {
     if (!isShuffleMenuOpen) {
@@ -400,7 +402,7 @@ export function TarotStudio() {
         className="tarot-canvas-shell"
         tabIndex={0}
         role="region"
-        aria-label="Interactive tarot table. Drag the top card to draw it, hold Control or Command while dragging to move the whole deck, drag table cards to arrange them, scroll over a card to change its layer, and drag near a selected card edge to rotate it."
+        aria-label="Interactive card table. Drag the top card to draw it, hold Control or Command while dragging to move the whole deck, drag table cards to arrange them, scroll over a card to change its layer, and drag near a selected card edge to rotate it."
         onKeyDown={handleKeyDown}
         onWheel={handleTableWheel}
       >
@@ -473,7 +475,9 @@ export function TarotStudio() {
             </option>
           ))}
         </select>
-        <span>{deckCount} cards in the deck</span>
+        <span>
+          {deckCount} {deckCardNoun} in the deck
+        </span>
       </div>
 
       {selectedCard?.zone === "table" &&
@@ -681,7 +685,7 @@ export function TarotStudio() {
       <p className="tarot-live-status" aria-live="polite">
         {deckCount === 0
           ? "The deck is empty. Start a new shuffle to begin again."
-          : `${deckCount} cards remain in the deck. ${tableCards.length} cards are on the table.`}
+          : `${deckCount} ${deckCardNoun} ${deckCount === 1 ? "remains" : "remain"} in the deck. ${tableCards.length} ${tableCardNoun} ${tableCards.length === 1 ? "is" : "are"} on the table.`}
       </p>
     </main>
   );
