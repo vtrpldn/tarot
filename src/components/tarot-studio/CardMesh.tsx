@@ -41,6 +41,7 @@ const MIN_THROW_SPEED = 0.7;
 const MAX_THROW_ROTATION = 11;
 const FLIP_DURATION_SECONDS = 0.52;
 const FLIP_LIFT = 0.14;
+const DRAG_SCALE = 1.035;
 
 export const CARD_THICKNESS = 0.11;
 
@@ -586,7 +587,7 @@ export function CardMesh({
     const drag = dragRef.current;
     const pendingPosition = pendingPositionRef.current;
     const pendingRotation = pendingRotationRef.current;
-    const rendersOnTop = Boolean(drag) || pendingTopLayerRef.current;
+    const rendersOnTop = Boolean(drag?.moved) || pendingTopLayerRef.current;
     const activeRenderOrder = rendersOnTop
       ? dragRenderOrder
       : renderOrder;
@@ -602,6 +603,7 @@ export function CardMesh({
       drag?.mode === "move" ? drag.tiltX : 0;
     const tiltYTarget =
       drag?.mode === "move" ? drag.tiltY : 0;
+    const scaleTarget = drag?.mode === "move" && drag.moved ? DRAG_SCALE : 1;
     const flipAnimation = flipAnimationRef.current;
     let flipIsActive = false;
 
@@ -662,7 +664,7 @@ export function CardMesh({
       group.position.x = positionXTarget;
       group.position.y = positionYTarget;
       group.position.z = zTarget;
-      group.scale.set(1, 1, 1);
+      group.scale.set(scaleTarget, scaleTarget, scaleTarget);
       if (drag?.mode === "move-deck") {
         setDeckPreview([positionXTarget, positionYTarget]);
       }
@@ -693,6 +695,12 @@ export function CardMesh({
       delta
     );
     const nextZ = MathUtils.damp(group.position.z, zTarget, 18, delta);
+    const nextScale = MathUtils.damp(
+      group.scale.x,
+      scaleTarget,
+      17,
+      delta
+    );
 
     const needsAnotherFrame =
       flipIsActive ||
@@ -701,7 +709,8 @@ export function CardMesh({
       Math.abs(nextRotation - rotationTarget) > 0.0008 ||
       Math.abs(nextX - positionXTarget) > 0.0008 ||
       Math.abs(nextY - positionYTarget) > 0.0008 ||
-      Math.abs(nextZ - zTarget) > 0.0008;
+      Math.abs(nextZ - zTarget) > 0.0008 ||
+      Math.abs(nextScale - scaleTarget) > 0.0008;
 
     group.rotation.x = nextTiltX;
     group.rotation.y = nextTiltY;
@@ -709,7 +718,7 @@ export function CardMesh({
     group.position.x = nextX;
     group.position.y = nextY;
     group.position.z = nextZ;
-    group.scale.set(1, 1, 1);
+    group.scale.set(nextScale, nextScale, nextScale);
 
     if (drag?.mode === "move-deck") {
       setDeckPreview([nextX, nextY]);
@@ -746,6 +755,10 @@ export function CardMesh({
           isNearCardEdge(event)
         ? "rotate"
         : "move";
+
+    if (!card.faceUp && mode === "move") {
+      useTexture.preload(frontTexture);
+    }
     const startAngle = Math.atan2(
       point.y - group.position.y,
       point.x - group.position.x
@@ -806,10 +819,6 @@ export function CardMesh({
       startRotation: card.rotation,
       previewRotation: card.rotation,
     };
-    group.renderOrder = dragRenderOrder;
-    if (flipRef.current) {
-      flipRef.current.renderOrder = dragRenderOrder;
-    }
     if (mode === "move-deck") {
       setDeckPreview([group.position.x, group.position.y]);
     }
@@ -913,7 +922,6 @@ export function CardMesh({
     if (!cancelled) {
       if (drag.mode === "rotate" && drag.moved) {
         pendingRotationRef.current = drag.previewRotation;
-        pendingTopLayerRef.current = true;
         schedulePendingReconciliation();
         onRotate(
           card.id,

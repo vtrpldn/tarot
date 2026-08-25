@@ -1,6 +1,6 @@
 "use client";
 
-import { RoundedBox } from "@react-three/drei";
+import { RoundedBox, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
@@ -43,6 +43,20 @@ const DECK_CARD_RENDER_ORDER = 20;
 const TABLE_CARD_RENDER_ORDER = 100;
 const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
+const CELESTIAL_MARKS = [
+  [-0.38, 0.31, 0.018],
+  [-0.29, 0.18, 0.011],
+  [-0.17, 0.37, 0.014],
+  [-0.06, 0.22, 0.01],
+  [0.12, 0.34, 0.016],
+  [0.25, 0.2, 0.01],
+  [0.39, 0.29, 0.018],
+  [-0.41, -0.22, 0.012],
+  [-0.23, -0.34, 0.017],
+  [-0.02, -0.27, 0.011],
+  [0.16, -0.36, 0.015],
+  [0.34, -0.19, 0.01],
+] as const;
 
 type TarotSceneProps = {
   cardSet: CardSetDefinition;
@@ -290,6 +304,7 @@ function TableSurface({
 }) {
   const visibleWidth = (width / MIN_VIEW_ZOOM) * 1.04;
   const visibleHeight = (height / MIN_VIEW_ZOOM) * 1.04;
+  const celestialRadius = Math.min(visibleWidth, visibleHeight) * 0.19;
 
   return (
     <>
@@ -307,6 +322,67 @@ function TableSurface({
           emissiveIntensity={0.18}
         />
       </mesh>
+      <group position={[0, 0, TABLE_SURFACE_Z + 0.002]} renderOrder={1}>
+        <mesh rotation={[0, 0, -0.18]} renderOrder={1}>
+          <ringGeometry
+            args={[
+              celestialRadius,
+              celestialRadius + 0.012,
+              96,
+              1,
+              0.3,
+              Math.PI * 1.25,
+            ]}
+          />
+          <meshBasicMaterial
+            color={TAROT_SCENE_PALETTE.cardRule}
+            transparent
+            opacity={0.055}
+            depthTest={false}
+            depthWrite={false}
+          />
+        </mesh>
+        <mesh rotation={[0, 0, Math.PI + 0.22]} renderOrder={1}>
+          <ringGeometry
+            args={[
+              celestialRadius * 1.34,
+              celestialRadius * 1.34 + 0.008,
+              96,
+              1,
+              0.2,
+              Math.PI * 0.92,
+            ]}
+          />
+          <meshBasicMaterial
+            color={TAROT_SCENE_PALETTE.fillLight}
+            transparent
+            opacity={0.05}
+            depthTest={false}
+            depthWrite={false}
+          />
+        </mesh>
+        {CELESTIAL_MARKS.map(([x, y, radius], index) => (
+          <mesh
+            key={`${x}:${y}`}
+            position={[x * visibleWidth, y * visibleHeight, 0]}
+            rotation={[0, 0, index * 0.31]}
+            renderOrder={1}
+          >
+            <circleGeometry args={[radius, index % 3 === 0 ? 5 : 4]} />
+            <meshBasicMaterial
+              color={
+                index % 2
+                  ? TAROT_SCENE_PALETTE.fillLight
+                  : TAROT_SCENE_PALETTE.cardRule
+              }
+              transparent
+              opacity={index % 3 === 0 ? 0.14 : 0.09}
+              depthTest={false}
+              depthWrite={false}
+            />
+          </mesh>
+        ))}
+      </group>
     </>
   );
 }
@@ -350,6 +426,19 @@ function TarotTable({
     () => new Map(cardSet.cards.map((card) => [card.id, card])),
     [cardSet.cards]
   );
+  const deckPreloadUrls = useMemo(
+    () =>
+      session.cards
+        .filter((card) => card.zone === "deck")
+        .sort((first, second) => second.zIndex - first.zIndex)
+        .slice(0, 3)
+        .flatMap((card) => {
+          const definition = definitions.get(card.cardId);
+
+          return definition ? [definition.image.preview] : [];
+        }),
+    [definitions, session.cards]
+  );
   const tableCards = getTableCards(session);
   const topDeckCard = getTopDeckCard(session);
   const deckCount = getRemainingDeckCount(session);
@@ -382,6 +471,11 @@ function TarotTable({
     Math.max(deckMetrics.topCardCenter, highestTableCardZ) +
     CARD_THICKNESS +
     0.035;
+
+  useEffect(() => {
+    useTexture.preload(cardSet.back.preview);
+    deckPreloadUrls.forEach((url) => useTexture.preload(url));
+  }, [cardSet.back.preview, deckPreloadUrls]);
 
   useEffect(() => {
     onLayoutChange(layout);

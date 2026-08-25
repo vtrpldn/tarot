@@ -72,6 +72,8 @@ export function TarotStudio() {
   const hoveredCardIdRef = useRef<string | null>(null);
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
   const activeSpreadRef = useRef<TarotSpread | null>(null);
+  const arrangeMenuRef = useRef<HTMLDivElement>(null);
+  const arrangeMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const shuffleMenuRef = useRef<HTMLDivElement>(null);
   const shuffleMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const layerWheelRef = useRef({
@@ -81,6 +83,7 @@ export function TarotStudio() {
   });
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
   const [viewZoom, setViewZoom] = useState(1);
+  const [isArrangeMenuOpen, setIsArrangeMenuOpen] = useState(false);
   const [isShuffleMenuOpen, setIsShuffleMenuOpen] = useState(false);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
@@ -150,6 +153,32 @@ export function TarotStudio() {
     session,
     viewZoom,
   ]);
+
+  useEffect(() => {
+    if (!isArrangeMenuOpen) {
+      return;
+    }
+
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!arrangeMenuRef.current?.contains(event.target as Node)) {
+        setIsArrangeMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsArrangeMenuOpen(false);
+        arrangeMenuTriggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isArrangeMenuOpen]);
 
   useEffect(() => {
     if (!isShuffleMenuOpen) {
@@ -654,42 +683,78 @@ export function TarotStudio() {
             +
           </button>
         </div>
-        <div className="tarot-arrange-actions" aria-label="Arrange cards">
+        <div className="tarot-arrange-menu" ref={arrangeMenuRef}>
           <button
+            ref={arrangeMenuTriggerRef}
             type="button"
-            onClick={() => arrangeCards("fan")}
-            disabled={!tableCards.length}
+            className="tarot-arrange-trigger"
+            aria-label="Arrange cards and undo"
+            aria-controls="arrange-actions"
+            aria-expanded={isArrangeMenuOpen}
+            aria-haspopup="dialog"
+            onClick={() => {
+              setIsShuffleMenuOpen(false);
+              setIsArrangeMenuOpen((isOpen) => !isOpen);
+            }}
+            disabled={!tableCards.length && !session.history.length}
           >
-            Fan
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 7.5h10v12H5zM9 4.5h10v12" />
+              <path d="M8 11.5h4M8 14.5h4" />
+            </svg>
+            <span>Arrange</span>
+            <svg
+              className="tarot-menu-chevron"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="m8 10 4 4 4-4" />
+            </svg>
           </button>
-          <button
-            type="button"
-            onClick={() => arrangeCards("grid")}
-            disabled={!tableCards.length}
-          >
-            Grid
-          </button>
-          <button
-            type="button"
-            onClick={() => arrangeCards("stack")}
-            disabled={!tableCards.length}
-          >
-            Stack
-          </button>
-          <button
-            type="button"
-            onClick={() => arrangeCards("sort")}
-            disabled={!tableCards.length}
-          >
-            Sort
-          </button>
-          <button
-            type="button"
-            onClick={undoLastAction}
-            disabled={!session.history.length}
-          >
-            Undo
-          </button>
+          {isArrangeMenuOpen && (
+            <div
+              id="arrange-actions"
+              className="tarot-arrange-popover"
+              role="dialog"
+              aria-label="Arrange cards and undo"
+            >
+              <p>Table actions</p>
+              <div>
+                {(
+                  [
+                    ["fan", "Fan", "Open arc"],
+                    ["grid", "Grid", "Even rows"],
+                    ["stack", "Stack", "Single pile"],
+                    ["sort", "Sort", "Deck order"],
+                  ] as const
+                ).map(([layout, label, hint]) => (
+                  <button
+                    key={layout}
+                    type="button"
+                    onClick={() => {
+                      arrangeCards(layout);
+                      setIsArrangeMenuOpen(false);
+                    }}
+                    disabled={!tableCards.length}
+                  >
+                    <span>{label}</span>
+                    <small>{hint}</small>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    undoLastAction();
+                    setIsArrangeMenuOpen(false);
+                  }}
+                  disabled={!session.history.length}
+                >
+                  <span>Undo</span>
+                  <small>Last table move</small>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="tarot-shuffle-menu" ref={shuffleMenuRef}>
           <button
@@ -700,14 +765,17 @@ export function TarotStudio() {
             aria-controls="shuffle-actions"
             aria-expanded={isShuffleMenuOpen}
             aria-haspopup="dialog"
-            onClick={() => setIsShuffleMenuOpen((isOpen) => !isOpen)}
+            onClick={() => {
+              setIsArrangeMenuOpen(false);
+              setIsShuffleMenuOpen((isOpen) => !isOpen);
+            }}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7h2.7c3.2 0 4 10 7.3 10H20" />
               <path d="m17 14 3 3-3 3M4 17h2.7c1.2 0 2-.7 2.8-1.7M14.5 7H20m-3-3 3 3-3 3" />
             </svg>
             <span>Shuffle</span>
-            <svg className="tarot-shuffle-chevron" viewBox="0 0 24 24" aria-hidden="true">
+            <svg className="tarot-menu-chevron" viewBox="0 0 24 24" aria-hidden="true">
               <path d="m8 10 4 4 4-4" />
             </svg>
           </button>
