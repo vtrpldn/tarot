@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { cardSets, getCardSet } from "@/data/card-sets";
+import type { CardReading } from "@/data/card-readings";
 import {
   createCardSoundEngine,
   type CardSoundEvent,
@@ -58,6 +59,14 @@ const TarotScene = dynamic(
     loading: () => <div className="tarot-scene-loading">Preparing the table…</div>,
   }
 );
+
+let cardReadingsPromise: Promise<typeof import("@/data/card-readings")> | null =
+  null;
+
+function loadCardReadings() {
+  cardReadingsPromise ??= import("@/data/card-readings");
+  return cardReadingsPromise;
+}
 
 function useReducedMotionPreference() {
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -372,6 +381,10 @@ export function TarotStudio() {
   const [isDeckMoveMode, setIsDeckMoveMode] = useState(false);
   const [isSceneLayoutReady, setIsSceneLayoutReady] = useState(false);
   const [isWorkspaceReady, setIsWorkspaceReady] = useState(false);
+  const [selectedReading, setSelectedReading] = useState<CardReading | null>(
+    null
+  );
+  const [isReadingLoading, setIsReadingLoading] = useState(false);
   const activeCardSet = useMemo(
     () => getCardSet(activeCardSetId),
     [activeCardSetId]
@@ -499,6 +512,51 @@ export function TarotStudio() {
       setIsInspectorCollapsed(true);
     }
   }, [selectedCard?.zone]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (
+      !isInspectorOpen ||
+      !selectedCard?.faceUp ||
+      !selectedDefinition
+    ) {
+      setSelectedReading(null);
+      setIsReadingLoading(false);
+      return;
+    }
+
+    setSelectedReading(null);
+    setIsReadingLoading(true);
+
+    void loadCardReadings()
+      .then(({ getCardReading }) => {
+        if (!cancelled) {
+          setSelectedReading(
+            getCardReading(activeCardSet.id, selectedDefinition) ?? null
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedReading(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsReadingLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeCardSet.id,
+    isInspectorOpen,
+    selectedCard?.faceUp,
+    selectedDefinition,
+  ]);
 
   const collapseInspector = useCallback(() => {
     setIsInspectorCollapsed(true);
@@ -1314,87 +1372,140 @@ export function TarotStudio() {
           {isInspectorOpen && (
             <aside
               id="selected-card-inspector"
-              className="tarot-inspector"
+              className={`tarot-inspector${selectedCard?.faceUp ? " tarot-inspector--with-reading" : ""}`}
               aria-label={`Selected card controls for ${selectedTitle}`}
             >
-              <div className="tarot-inspector-heading">
-                <p className="tarot-eyebrow">Selected card</p>
-                <button
-                  ref={inspectorCollapseRef}
-                  type="button"
-                  className="tarot-inspector-collapse"
-                  aria-label="Collapse selected card controls"
-                  aria-expanded="true"
-                  onClick={collapseInspector}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m7 10 5 5 5-5" />
-                  </svg>
-                </button>
-              </div>
-              <h2>{selectedTitle}</h2>
-              <p>{selectedHint}</p>
-              <div className="tarot-card-browser">
-                <label htmlFor="drawn-card">Browse cards on the table</label>
-                <select
-                  id="drawn-card"
-                  name="drawn-card"
-                  autoComplete="off"
-                  value={session.selectedCardId ?? ""}
-                  disabled={tableCards.length === 0}
-                  onChange={(event) => {
-                    const cardId = event.target.value || null;
+              <div className="tarot-inspector-controls">
+                <div className="tarot-inspector-heading">
+                  <p className="tarot-eyebrow">Selected card</p>
+                  <button
+                    ref={inspectorCollapseRef}
+                    type="button"
+                    className="tarot-inspector-collapse"
+                    aria-label="Collapse selected card controls"
+                    aria-expanded="true"
+                    onClick={collapseInspector}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m7 10 5 5 5-5" />
+                    </svg>
+                  </button>
+                </div>
+                <h2>{selectedTitle}</h2>
+                <p>{selectedHint}</p>
+                <div className="tarot-card-browser">
+                  <label htmlFor="drawn-card">Browse cards on the table</label>
+                  <select
+                    id="drawn-card"
+                    name="drawn-card"
+                    autoComplete="off"
+                    value={session.selectedCardId ?? ""}
+                    disabled={tableCards.length === 0}
+                    onChange={(event) => {
+                      const cardId = event.target.value || null;
 
-                    if (cardId) {
-                      playCardSound("pickup", { intensity: 0.7 });
-                    }
-                    handleSelect(cardId);
-                  }}
-                >
-                  <option value="">Select a drawn card</option>
-                  {tableCards.map((card, index) => {
-                    const definition = activeCardSet.cards.find(
-                      (candidate) => candidate.id === card.cardId
-                    );
+                      if (cardId) {
+                        playCardSound("pickup", { intensity: 0.7 });
+                      }
+                      handleSelect(cardId);
+                    }}
+                  >
+                    <option value="">Select a drawn card</option>
+                    {tableCards.map((card, index) => {
+                      const definition = activeCardSet.cards.find(
+                        (candidate) => candidate.id === card.cardId
+                      );
 
-                    return (
-                      <option key={card.id} value={card.id}>
-                        {card.faceUp
-                          ? definition?.name ?? `Card ${index + 1}`
-                          : `Face-down card ${index + 1}`}
-                      </option>
-                    );
-                  })}
-                </select>
+                      return (
+                        <option key={card.id} value={card.id}>
+                          {card.faceUp
+                            ? definition?.name ?? `Card ${index + 1}`
+                            : `Face-down card ${index + 1}`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <div className="tarot-inspector-actions">
+                  <button type="button" onClick={flipSelected}>
+                    Flip <Shortcut>F</Shortcut>
+                  </button>
+                  <button type="button" onClick={() => turnSelected(-15)}>
+                    Turn −15° <Shortcut>[</Shortcut>
+                  </button>
+                  <button type="button" onClick={() => turnSelected(15)}>
+                    Turn +15° <Shortcut>]</Shortcut>
+                  </button>
+                  <button type="button" onClick={() => turnSelected(180)}>
+                    Reverse <Shortcut>R</Shortcut>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => reorderSelected("backward")}
+                    disabled={!canSendBackward}
+                  >
+                    Send back <Shortcut>Pg↓</Shortcut>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => reorderSelected("forward")}
+                    disabled={!canBringForward}
+                  >
+                    Bring forward <Shortcut>Pg↑</Shortcut>
+                  </button>
+                </div>
               </div>
-              <div className="tarot-inspector-actions">
-                <button type="button" onClick={flipSelected}>
-                  Flip <Shortcut>F</Shortcut>
-                </button>
-                <button type="button" onClick={() => turnSelected(-15)}>
-                  Turn −15° <Shortcut>[</Shortcut>
-                </button>
-                <button type="button" onClick={() => turnSelected(15)}>
-                  Turn +15° <Shortcut>]</Shortcut>
-                </button>
-                <button type="button" onClick={() => turnSelected(180)}>
-                  Reverse <Shortcut>R</Shortcut>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => reorderSelected("backward")}
-                  disabled={!canSendBackward}
+              {selectedCard?.faceUp && (
+                <section
+                  className="tarot-card-reading"
+                  aria-busy={isReadingLoading}
+                  aria-label={`Symbolism and correspondences for ${selectedTitle}`}
                 >
-                  Send back <Shortcut>Pg↓</Shortcut>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => reorderSelected("forward")}
-                  disabled={!canBringForward}
-                >
-                  Bring forward <Shortcut>Pg↑</Shortcut>
-                </button>
-              </div>
+                  <h3>Symbolism &amp; correspondences</h3>
+                  {isReadingLoading && (
+                    <p className="tarot-card-reading-loading">
+                      Opening the card notes…
+                    </p>
+                  )}
+                  {selectedReading && (
+                    <>
+                      <p>{selectedReading.summary}</p>
+                      <dl className="tarot-correspondences">
+                        {selectedReading.correspondences.map(
+                          ({ label, value }) => (
+                            <div key={label}>
+                              <dt>{label}</dt>
+                              <dd>{value}</dd>
+                            </div>
+                          )
+                        )}
+                      </dl>
+                      {selectedReading.traditionNote && (
+                        <p className="tarot-tradition-note">
+                          {selectedReading.traditionNote}
+                        </p>
+                      )}
+                      <div className="tarot-card-sources">
+                        <span>Sources</span>
+                        <ul>
+                          {selectedReading.sources.map((source) => (
+                            <li key={source.href}>
+                              <a
+                                href={source.href}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {source.label}
+                              </a>
+                              {source.locator && <small>{source.locator}</small>}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </>
+                  )}
+                </section>
+              )}
             </aside>
           )}
         </div>
