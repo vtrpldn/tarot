@@ -887,6 +887,9 @@ export function TarotStudio() {
         onFocusCapture={handleDockFocus}
         onBlurCapture={handleDockBlur}
       >
+        <span className="tarot-toolbar-sigil" aria-hidden="true">
+          ☾
+        </span>
         <div className="tarot-deck-menu" ref={deckMenuRef}>
           <button
             ref={deckMenuTriggerRef}

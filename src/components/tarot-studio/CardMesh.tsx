@@ -1,6 +1,6 @@
 "use client";
 
-import { RoundedBox, useTexture } from "@react-three/drei";
+import { useTexture } from "@react-three/drei";
 import { ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import {
   memo,
@@ -8,16 +8,19 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import {
+  ExtrudeGeometry,
   Group,
   LinearFilter,
   MathUtils,
   Mesh,
   Plane,
   Raycaster,
+  Shape,
   SRGBColorSpace,
   Texture,
   Vector2,
@@ -47,7 +50,8 @@ const FLIP_DURATION_SECONDS = 0.52;
 const FLIP_LIFT = 0.14;
 const DRAG_SCALE = 1.035;
 
-export const CARD_THICKNESS = 0.11;
+export const CARD_THICKNESS = 0.075;
+const CARD_CORNER_RADIUS = 0.16;
 
 type PointerCaptureTarget = Mesh & {
   setPointerCapture?: (pointerId: number) => void;
@@ -206,8 +210,8 @@ export function CardArtwork({
       <planeGeometry args={[width, height]} />
       <meshStandardMaterial
         map={texture}
-        color="#fffaf0"
-        roughness={0.78}
+        color="#fffdf7"
+        roughness={0.92}
         metalness={0}
         toneMapped={false}
         depthTest={false}
@@ -232,57 +236,74 @@ function CardFaceLayers({
   const rotation: [number, number, number] | undefined = reverse
     ? [0, Math.PI, 0]
     : undefined;
-  const outerInset = Math.min(0.2, cardWidth * 0.08);
-  const ruleInset = Math.min(0.32, cardWidth * 0.13);
-  const artInset = Math.min(0.42, cardWidth * 0.17);
-  const fieldWidth = Math.max(0.2, cardWidth - outerInset);
-  const fieldHeight = Math.max(0.3, cardHeight - outerInset);
-  const ruleWidth = Math.max(0.18, cardWidth - ruleInset);
-  const ruleHeight = Math.max(0.28, cardHeight - ruleInset);
-  const artworkWidth = Math.max(0.16, cardWidth - artInset);
-  const artworkHeight = Math.max(0.26, cardHeight - artInset);
+  const frameInset = Math.min(0.34, cardWidth * 0.105);
+  const artworkWidth = Math.max(0.16, cardWidth - frameInset);
+  const artworkHeight = Math.max(0.26, cardHeight - frameInset);
 
   return (
-    <>
-      <mesh
-        position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.001)]}
+    <Suspense fallback={null}>
+      <CardArtwork
+        url={artworkUrl}
+        position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.002)]}
         rotation={rotation}
+        width={artworkWidth}
+        height={artworkHeight}
         renderOrder={1}
-      >
-        <planeGeometry args={[fieldWidth, fieldHeight]} />
-        <meshStandardMaterial
-          color={TAROT_SCENE_PALETTE.cardField}
-          roughness={0.52}
-          metalness={0.12}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
-      <mesh
-        position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.003)]}
-        rotation={rotation}
-        renderOrder={2}
-      >
-        <planeGeometry args={[ruleWidth, ruleHeight]} />
-        <meshStandardMaterial
-          color={TAROT_SCENE_PALETTE.cardRule}
-          roughness={0.46}
-          metalness={0.48}
-          depthTest={false}
-          depthWrite={false}
-        />
-      </mesh>
-      <Suspense fallback={null}>
-        <CardArtwork
-          url={artworkUrl}
-          position={[0, 0, direction * (CARD_THICKNESS / 2 + 0.005)]}
-          rotation={rotation}
-          width={artworkWidth}
-          height={artworkHeight}
-        />
-      </Suspense>
-    </>
+      />
+    </Suspense>
   );
+}
+
+function createCardSlabGeometry(width: number, height: number) {
+  const radius = Math.min(
+    CARD_CORNER_RADIUS,
+    width * 0.08,
+    height * 0.05
+  );
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const shape = new Shape();
+
+  shape.moveTo(-halfWidth + radius, -halfHeight);
+  shape.lineTo(halfWidth - radius, -halfHeight);
+  shape.quadraticCurveTo(
+    halfWidth,
+    -halfHeight,
+    halfWidth,
+    -halfHeight + radius
+  );
+  shape.lineTo(halfWidth, halfHeight - radius);
+  shape.quadraticCurveTo(
+    halfWidth,
+    halfHeight,
+    halfWidth - radius,
+    halfHeight
+  );
+  shape.lineTo(-halfWidth + radius, halfHeight);
+  shape.quadraticCurveTo(
+    -halfWidth,
+    halfHeight,
+    -halfWidth,
+    halfHeight - radius
+  );
+  shape.lineTo(-halfWidth, -halfHeight + radius);
+  shape.quadraticCurveTo(
+    -halfWidth,
+    -halfHeight,
+    -halfWidth + radius,
+    -halfHeight
+  );
+
+  const geometry = new ExtrudeGeometry(shape, {
+    bevelEnabled: false,
+    curveSegments: 8,
+    depth: CARD_THICKNESS,
+    steps: 1,
+  });
+
+  geometry.translate(0, 0, -CARD_THICKNESS / 2);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function getPointerPoint(event: ThreeEvent<PointerEvent>): Vector3 {
@@ -407,7 +428,13 @@ export const CardMesh = memo(function CardMesh({
   const targetPositionY = targetPosition[1];
   const cardWidth = layout.cardWidth;
   const cardHeight = layout.cardHeight;
+  const slabGeometry = useMemo(
+    () => createCardSlabGeometry(cardWidth, cardHeight),
+    [cardHeight, cardWidth]
+  );
   const frontTexture = definition.image.preview;
+
+  useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
 
   const clearPendingReconciliationTimeout = useCallback(() => {
     if (pendingReconciliationTimeoutRef.current === null) {
@@ -1235,23 +1262,21 @@ export const CardMesh = memo(function CardMesh({
   return (
     <group ref={groupRef} renderOrder={renderOrder}>
       <group ref={flipRef} renderOrder={renderOrder}>
-        <RoundedBox
+        <mesh
           ref={slabRef}
-          args={[cardWidth, cardHeight, CARD_THICKNESS]}
-          radius={0.075}
-          smoothness={5}
+          geometry={slabGeometry}
           castShadow
           receiveShadow
           renderOrder={0}
         >
           <meshStandardMaterial
-            color={TAROT_SCENE_PALETTE.cardEdge}
-            roughness={0.62}
-            metalness={0.04}
+            color={TAROT_SCENE_PALETTE.cardPaper}
+            roughness={0.96}
+            metalness={0}
             depthTest={false}
             depthWrite={false}
           />
-        </RoundedBox>
+        </mesh>
         {hasRevealed && (
           <CardFaceLayers
             artworkUrl={frontTexture}

@@ -515,6 +515,25 @@ button {
   will-change: opacity;
 }
 
+.tarot-toolbar-sigil {
+  display: inline-grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 2.75rem;
+  color: rgba(234, 212, 155, 0.68);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  line-height: 1;
+  text-shadow: 0 0 0.85rem rgba(234, 212, 155, 0.2);
+}
+
+.tarot-toolbar-sigil::after {
+  content: "✦";
+  margin: -0.38rem -0.52rem 0 0;
+  color: rgba(221, 189, 240, 0.52);
+  font-size: 0.42rem;
+}
+
 .tarot-mode-cancel {
   display: inline-flex;
   align-items: center;
@@ -810,6 +829,10 @@ select:focus-visible {
 }
 
 @media (max-width: 767px) {
+  .tarot-toolbar-sigil {
+    display: none;
+  }
+
   .tarot-set-picker {
     bottom: calc(100% + 0.42rem);
     width: min(18rem, calc(100vw - 1.25rem));

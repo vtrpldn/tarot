@@ -3,6 +3,7 @@ import { TABLE_POINT_LIMIT } from "@/types";
 
 export const MIN_VIEW_ZOOM = 0.3;
 export const MAX_VIEW_ZOOM = 1.35;
+const CARD_SCALE_AT_100_PERCENT = 0.8;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(Math.max(value, minimum), maximum);
@@ -12,6 +13,8 @@ export type SceneTableLayout = {
   cardHeight: number;
   /** The camera's unzoomed world-space bounds. */
   viewportBounds: SceneBounds;
+  /** The world-space limits used when card and deck positions are clamped. */
+  dragBounds: SceneBounds;
   defaultDeckPosition: TablePoint;
   /**
    * Stable deck locations used when a spread needs to keep the deck out of
@@ -54,17 +57,21 @@ export function createSceneTableLayout({
   cardAspectRatio: number;
 }): SceneTableLayout {
   const isMobile = pixelWidth < 720;
-  const requestedCardWidth = clamp(
+  const unscaledRequestedCardWidth = clamp(
     viewportWidth * (isMobile ? 0.66 : 0.36),
     isMobile ? 2.82 : 3.15,
     isMobile ? 3.66 : 4.38
   );
   const verticalUiReserve = isMobile ? 3.2 : 2.35;
-  const widthAllowedByHeight = Math.max(
+  const unscaledWidthAllowedByHeight = Math.max(
     1.2,
     Math.max(0, viewportHeight - verticalUiReserve) * cardAspectRatio
   );
-  const cardWidth = Math.min(requestedCardWidth, widthAllowedByHeight);
+  const cardWidth =
+    Math.min(
+      unscaledRequestedCardWidth,
+      unscaledWidthAllowedByHeight
+    ) * CARD_SCALE_AT_100_PERCENT;
   const cardHeight = cardWidth / cardAspectRatio;
   const horizontalPadding = isMobile ? 0.18 : 0.42;
   const tableLeft = -viewportWidth / 2 + horizontalPadding;
@@ -95,6 +102,24 @@ export function createSceneTableLayout({
       TABLE_POINT_LIMIT
     ),
   ];
+  const toWorld = ([x, y]: TablePoint): [number, number] => [
+    centerX + x * halfWidth,
+    centerY + y * halfHeight,
+  ];
+  const [dragLeft, dragBottom] = toWorld([
+    -TABLE_POINT_LIMIT,
+    -TABLE_POINT_LIMIT,
+  ]);
+  const [dragRight, dragTop] = toWorld([
+    TABLE_POINT_LIMIT,
+    TABLE_POINT_LIMIT,
+  ]);
+  const dragBounds: SceneBounds = {
+    left: dragLeft,
+    right: dragRight,
+    top: dragTop,
+    bottom: dragBottom,
+  };
   const createDeckCandidate = (
     id: DeckPositionCandidate["id"],
     x: number,
@@ -142,9 +167,10 @@ export function createSceneTableLayout({
     cardWidth,
     cardHeight,
     viewportBounds,
+    dragBounds,
     defaultDeckPosition,
     deckPositionCandidates,
-    toWorld: ([x, y]) => [centerX + x * halfWidth, centerY + y * halfHeight],
+    toWorld,
     toPoint,
   };
 }
