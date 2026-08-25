@@ -104,10 +104,10 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
   const material = useMemo(() => {
     const nextMaterial = new MeshStandardMaterial({
       color,
-      map,
       metalness: 0,
       roughness,
       toneMapped,
+      ...(map ? { map } : {}),
     });
 
     nextMaterial.name = "tarot-card-paper";
