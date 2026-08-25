@@ -28,6 +28,18 @@ export type PhysicsCardPose = {
   rotation: number;
 };
 
+export type PhysicsCardPoseUpdate = PhysicsCardPose & {
+  authorityKey: string;
+  cardId: string;
+};
+
+export type PhysicsTableBounds = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+};
+
 export type ReleaseKinematics = {
   angularVelocity: [x: number, y: number, z: number];
   linearVelocity: [x: number, y: number, z: number];
@@ -59,6 +71,25 @@ const clampMagnitude = (
   const scale = Math.min(1, maximum / magnitude);
   return [first * scale, second * scale];
 };
+
+export function clampPhysicsPointToBounds(
+  point: TablePoint,
+  bounds: PhysicsTableBounds
+): TablePoint {
+  const left = Math.min(bounds.left, bounds.right);
+  const right = Math.max(bounds.left, bounds.right);
+  const bottom = Math.min(bounds.bottom, bounds.top);
+  const top = Math.max(bounds.bottom, bounds.top);
+  const fallbackX = (left + right) / 2;
+  const fallbackY = (bottom + top) / 2;
+  const x = Number.isFinite(point[0]) ? point[0] : fallbackX;
+  const y = Number.isFinite(point[1]) ? point[1] : fallbackY;
+
+  return [
+    Math.max(left, Math.min(right, x)),
+    Math.max(bottom, Math.min(top, y)),
+  ];
+}
 
 export function createCardQuaternion(
   rotationDegrees: number,
@@ -159,6 +190,26 @@ export function hasMeaningfulPoseChange(
     positionDelta > 0.0015 ||
     rotationDelta > 0.08
   );
+}
+
+/**
+ * Identifies the durable pose that a physics body was last reconciled with.
+ * Settled solver output is accepted only while this key still matches the
+ * session, preventing a late sleep event from overwriting undo or redo.
+ */
+export function createPhysicsAuthorityKey({
+  faceUp,
+  position,
+  rotation,
+  zIndex,
+}: PhysicsCardPose & { zIndex: number }): string {
+  return [
+    faceUp ? 1 : 0,
+    position[0],
+    position[1],
+    normalizeRotation(rotation),
+    zIndex,
+  ].join(":");
 }
 
 export function normalizeRotation(rotation: number): number {

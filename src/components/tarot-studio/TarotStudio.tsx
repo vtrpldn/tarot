@@ -35,6 +35,10 @@ import {
   type CardSoundEvent,
   type CardSoundPlayOptions,
 } from "@/lib/card-sounds";
+import type {
+  PhysicsCardPose,
+  PhysicsCardPoseUpdate,
+} from "@/lib/card-physics";
 import {
   getArrangementPresentation,
   type AutomaticCardPlacement,
@@ -498,6 +502,11 @@ export function TarotStudio() {
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
   const viewZoomRef = useRef(1);
   const activeArrangementRef = useRef<ActiveAutomaticArrangement | null>(null);
+  const pendingPhysicsPosesRef = useRef(
+    new Map<string, PhysicsCardPoseUpdate>()
+  );
+  const physicsSyncScheduledRef = useRef(false);
+  const physicsSyncMountedRef = useRef(true);
   const spacePressedRef = useRef(false);
   const panGestureRef = useRef<{
     pointerId: number;
@@ -633,6 +642,16 @@ export function TarotStudio() {
     activeCardSet,
     createTarotSession
   );
+  useEffect(() => {
+    const pendingPhysicsPoses = pendingPhysicsPosesRef.current;
+
+    physicsSyncMountedRef.current = true;
+
+    return () => {
+      physicsSyncMountedRef.current = false;
+      pendingPhysicsPoses.clear();
+    };
+  }, []);
   const reducedMotion = useReducedMotionPreference();
   const {
     isMuted: areCardSoundsMuted,
@@ -1031,6 +1050,38 @@ export function TarotStudio() {
       dispatch({ type: "move", cardId, position, rotation });
     },
     [playCardSound]
+  );
+
+  const handlePhysicsSettle = useCallback(
+    (cardId: string, pose: PhysicsCardPose, authorityKey: string) => {
+      pendingPhysicsPosesRef.current.set(cardId, {
+        ...pose,
+        authorityKey,
+        cardId,
+      });
+
+      if (physicsSyncScheduledRef.current) {
+        return;
+      }
+
+      physicsSyncScheduledRef.current = true;
+      queueMicrotask(() => {
+        physicsSyncScheduledRef.current = false;
+
+        if (!physicsSyncMountedRef.current) {
+          pendingPhysicsPosesRef.current.clear();
+          return;
+        }
+
+        const poses = Array.from(pendingPhysicsPosesRef.current.values());
+        pendingPhysicsPosesRef.current.clear();
+
+        if (poses.length > 0) {
+          dispatch({ type: "sync-physics-poses", poses });
+        }
+      });
+    },
+    []
   );
 
   const handleFlip = useCallback((cardId: string) => {
@@ -1645,6 +1696,7 @@ export function TarotStudio() {
           onDraw={handleDraw}
           onMoveDeck={handleMoveDeck}
           onMove={handleMove}
+          onPhysicsSettle={handlePhysicsSettle}
           onFlip={handleFlip}
           onRotate={handleRotate}
           onHover={handleHover}

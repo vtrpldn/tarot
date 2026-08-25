@@ -9,6 +9,12 @@ import type {
   TarotSession,
 } from "@/types";
 import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
+import {
+  createPhysicsAuthorityKey,
+  hasMeaningfulPoseChange,
+  normalizeRotation,
+  type PhysicsCardPoseUpdate,
+} from "@/lib/card-physics";
 import type { CardSpread } from "@/lib/tarot-spreads";
 import { getCardStackOffset } from "@/lib/card-stack-layout";
 
@@ -237,6 +243,10 @@ export type TarotSessionAction =
   | { type: "move-deck"; position: TablePoint }
   | { type: "sync-deck-position"; position: TablePoint }
   | {
+      type: "sync-physics-poses";
+      poses: PhysicsCardPoseUpdate[];
+    }
+  | {
       type: "move";
       cardId: string;
       position: TablePoint;
@@ -389,6 +399,55 @@ export function tarotSessionReducer(
       ...session,
       deckPosition,
     };
+  }
+
+  if (action.type === "sync-physics-poses") {
+    const poseByCardId = new Map<
+      string,
+      PhysicsCardPoseUpdate
+    >();
+
+    action.poses.forEach((pose) => {
+      if (
+        !Number.isFinite(pose.position[0]) ||
+        !Number.isFinite(pose.position[1]) ||
+        !Number.isFinite(pose.rotation)
+      ) {
+        return;
+      }
+
+      poseByCardId.set(pose.cardId, {
+        ...pose,
+        position: [
+          clampTablePoint(pose.position[0]),
+          clampTablePoint(pose.position[1]),
+        ],
+        rotation: normalizeRotation(pose.rotation),
+      });
+    });
+    let changed = false;
+    const cards = session.cards.map((card) => {
+      const pose = poseByCardId.get(card.id);
+
+      if (
+        card.zone !== "table" ||
+        !pose ||
+        pose.authorityKey !== createPhysicsAuthorityKey(card) ||
+        !hasMeaningfulPoseChange(card, pose)
+      ) {
+        return card;
+      }
+
+      changed = true;
+      return {
+        ...card,
+        faceUp: pose.faceUp,
+        position: pose.position,
+        rotation: pose.rotation,
+      };
+    });
+
+    return changed ? { ...session, cards } : session;
   }
 
   if (action.type === "layout") {

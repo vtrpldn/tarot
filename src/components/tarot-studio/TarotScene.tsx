@@ -7,6 +7,7 @@ import {
   useFrame,
   useThree,
 } from "@react-three/fiber";
+import { Physics } from "@react-three/rapier";
 import {
   type MutableRefObject,
   type RefCallback,
@@ -46,6 +47,11 @@ import type {
 import { getCardStackOffset } from "@/lib/card-stack-layout";
 import { getDeckCards } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
+import {
+  CARD_PHYSICS,
+  createPhysicsAuthorityKey,
+  type PhysicsCardPose,
+} from "@/lib/card-physics";
 import type { SpreadRelationshipId } from "@/lib/tarot-spreads";
 import {
   CARD_THICKNESS,
@@ -56,7 +62,9 @@ import {
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { TableClothMaterial } from "./TableClothMaterial";
 import { ConstellationReading } from "./ConstellationReading";
-import { getTableCardRestingHeights } from "./card-stacking";
+import { DeckPhysics } from "./DeckPhysics";
+import { PhysicsCard } from "./PhysicsCard";
+import { TablePhysics } from "./TablePhysics";
 import {
   createSceneTableLayout,
   clampViewPan,
@@ -77,21 +85,18 @@ const BASE_CAMERA_ZOOM = 75;
 const TABLE_SURFACE_Z = -0.16;
 const CARD_SURFACE_CLEARANCE = 0.002;
 const DECK_MAT_SURFACE_Z = TABLE_SURFACE_Z + 0.003;
-const TABLE_CARD_CONTACT_GAP = 0.002;
 const DECK_STACK_RENDER_ORDER = 1_000;
 const DECK_CARD_RENDER_ORDER = 2_000;
-const TABLE_CARD_RENDER_ORDER = 100;
-const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
 const MAX_DECK_STACK_HEIGHT = 0.07;
 const DECK_CASCADE_SCALE = 0.24;
 const CUT_RAIL_PIXEL_SIZE = 44;
 const CUT_DRAG_THRESHOLD = 0.045;
 const CARD_FACE_PLANE_OFFSET = 0.002;
-const AMBIENT_FILL_INTENSITY = 2.1;
+const AMBIENT_FILL_INTENSITY = 0.72;
 const SPOTLIGHT_ANGLE = 1.54;
-const SPOTLIGHT_INTENSITY = 172;
-const SPOTLIGHT_SHADOW_RADIUS = 3;
+const SPOTLIGHT_INTENSITY = 188;
+const SPOTLIGHT_SHADOW_RADIUS = 4;
 const CUT_DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
@@ -537,6 +542,11 @@ type TarotSceneProps = {
     cardId: string,
     position: TablePoint,
     rotation?: number
+  ) => void;
+  onPhysicsSettle: (
+    cardId: string,
+    pose: PhysicsCardPose,
+    authorityKey: string
   ) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
@@ -1553,10 +1563,12 @@ function SceneSpotlight({
   intensity,
   position,
   shadowRadius,
+  shadowMapSize,
 }: SceneSpotlightDefinition & {
   angle: number;
   castShadow: boolean;
   shadowRadius: number;
+  shadowMapSize: number;
 }) {
   const lightRef = useRef<ThreeSpotLight>(null);
   const invalidate = useThree((state) => state.invalidate);
@@ -1580,7 +1592,15 @@ function SceneSpotlight({
 
   useEffect(() => {
     invalidate();
-  }, [angle, color, intensity, invalidate, position, shadowRadius]);
+  }, [
+    angle,
+    color,
+    intensity,
+    invalidate,
+    position,
+    shadowMapSize,
+    shadowRadius,
+  ]);
 
   return (
     <>
@@ -1593,14 +1613,14 @@ function SceneSpotlight({
         decay={2}
         distance={24}
         intensity={intensity}
-        penumbra={0.38}
+        penumbra={0.46}
         position={position}
-        shadow-bias={-0.00035}
+        shadow-bias={-0.0002}
         shadow-camera-far={18}
         shadow-camera-near={0.2}
-        shadow-mapSize-height={1024}
-        shadow-mapSize-width={1024}
-        shadow-normalBias={0.001}
+        shadow-mapSize-height={shadowMapSize}
+        shadow-mapSize-width={shadowMapSize}
+        shadow-normalBias={0.0018}
         shadow-radius={shadowRadius}
       />
     </>
@@ -1621,6 +1641,7 @@ function TarotTable({
   onDraw,
   onMoveDeck,
   onMove,
+  onPhysicsSettle,
   onFlip,
   onRotate,
   onHover,
@@ -1736,30 +1757,7 @@ function TarotTable({
     () => new Map(deckCards.map((card, index) => [card.id, index])),
     [deckCards]
   );
-  const visibleCards = [...liveDeckCards, ...tableCards];
-  const tableOrder = new Map(
-    tableCards.map((card, index) => [card.id, index])
-  );
-  const baseTableCardZ =
-    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE;
-  const tableCardRestingHeights = useMemo(
-    () =>
-      getTableCardRestingHeights({
-        cards: tableCards,
-        layout,
-        baseHeight: baseTableCardZ,
-        layerStep: CARD_THICKNESS + TABLE_CARD_CONTACT_GAP,
-      }),
-    [baseTableCardZ, layout, tableCards]
-  );
-  const highestTableCardZ = Math.max(
-    baseTableCardZ,
-    ...Array.from(tableCardRestingHeights.values())
-  );
-  const draggingZ =
-    Math.max(deckMetrics.topCardCenter, highestTableCardZ) +
-    CARD_THICKNESS +
-    0.035;
+  const draggingZ = deckMetrics.topSurface + CARD_THICKNESS + 0.035;
 
   useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
 
@@ -1788,6 +1786,25 @@ function TarotTable({
     },
     [onSelect]
   );
+  const handlePhysicsMove = useCallback(
+    (cardId: string, position: TablePoint, rotation?: number) => {
+      onMove(cardId, layout.toPoint(position[0], position[1]), rotation);
+    },
+    [layout, onMove]
+  );
+  const handlePhysicsSettle = useCallback(
+    (cardId: string, pose: PhysicsCardPose, authorityKey: string) => {
+      onPhysicsSettle(
+        cardId,
+        {
+          ...pose,
+          position: layout.toPoint(pose.position[0], pose.position[1]),
+        },
+        authorityKey
+      );
+    },
+    [layout, onPhysicsSettle]
+  );
 
   return (
     <>
@@ -1800,12 +1817,18 @@ function TarotTable({
         color={palette.keyLight}
         intensity={AMBIENT_FILL_INTENSITY}
       />
+      <hemisphereLight
+        color={palette.fillLight}
+        groundColor={palette.tableEmissive}
+        intensity={0.42}
+      />
       <SceneSpotlight
         angle={SPOTLIGHT_ANGLE}
         castShadow
         color={palette.keyLight}
         intensity={SPOTLIGHT_INTENSITY}
-        position={[0, 0, 7.5]}
+        position={[-3.8, 4.6, 8.5]}
+        shadowMapSize={isMobileViewport ? 512 : 1024}
         shadowRadius={SPOTLIGHT_SHADOW_RADIUS}
       />
       <TableSurface
@@ -1815,6 +1838,12 @@ function TarotTable({
         dragBounds={layout.dragBounds}
         reducedMotion={reducedMotion}
         onSelect={handleTableSelect}
+      />
+      <TablePhysics
+        cardHeight={layout.cardHeight}
+        cardWidth={layout.cardWidth}
+        dragBounds={layout.dragBounds}
+        surfaceZ={TABLE_SURFACE_Z}
       />
       <ConstellationReading
         activeSpread={session.activeSpread}
@@ -1826,6 +1855,15 @@ function TarotTable({
         selectedCardId={session.selectedCardId}
         relationshipLabels={spreadRelationshipLabels}
         surfaceZ={TABLE_SURFACE_Z + 0.006}
+      />
+      <DeckPhysics
+        bottomZ={DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE}
+        height={layout.cardHeight}
+        maxStackHeight={MAX_DECK_STACK_HEIGHT}
+        position={deckPosition}
+        previewPositionRef={deckPreviewPositionRef}
+        stackHeight={deckMetrics.stackHeight}
+        width={layout.cardWidth}
       />
       <Suspense fallback={null}>
         <PhysicalDeck
@@ -1851,14 +1889,13 @@ function TarotTable({
           width={layout.cardWidth}
         />
       </Suspense>
-      {visibleCards.map((card) => {
+      {liveDeckCards.map((card) => {
         const definition = definitions.get(card.cardId);
 
         if (!definition) {
           return null;
         }
 
-        const tableIndex = tableOrder.get(card.id) ?? 0;
         const deckIndex = deckOrder.get(card.id);
         const baseDeckOffset =
           deckIndex === undefined
@@ -1878,22 +1915,13 @@ function TarotTable({
           deckPosition[0] + deckOffset[0],
           deckPosition[1] + deckOffset[1],
         ];
-        const restingZ =
-          card.zone === "deck"
-            ? peeked
-              ? deckMetrics.topSurface + CARD_THICKNESS / 2 + 0.006
-              : deckMetrics.bottomCardCenter +
-                (deckIndex ?? 0) * deckMetrics.cardThickness
-            : tableCardRestingHeights.get(card.id) ?? baseTableCardZ;
-        const renderOrder =
-          card.zone === "deck"
-            ? DECK_CARD_RENDER_ORDER + (deckIndex ?? 0)
-            : TABLE_CARD_RENDER_ORDER +
-              tableIndex * CARD_RENDER_ORDER_STEP;
+        const restingZ = peeked
+          ? deckMetrics.topSurface + CARD_THICKNESS / 2 + 0.006
+          : deckMetrics.bottomCardCenter +
+            (deckIndex ?? 0) * deckMetrics.cardThickness;
+        const renderOrder = DECK_CARD_RENDER_ORDER + (deckIndex ?? 0);
         const interactionZ =
-          card.zone === "deck"
-            ? restingZ + deckMetrics.cardThickness / 2 + 0.004
-            : draggingZ + 0.02 + tableIndex * 0.002;
+          restingZ + deckMetrics.cardThickness / 2 + 0.004;
 
         return (
           <CardMesh
@@ -1918,7 +1946,7 @@ function TarotTable({
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}
             deckMoveMode={deckMoveMode}
-            onSelect={card.zone === "table" ? handleTableSelect : onSelect}
+            onSelect={onSelect}
             onDraw={onDraw}
             onMoveDeck={onMoveDeck}
             onPreviewDeckPosition={previewDeckPosition}
@@ -1927,6 +1955,40 @@ function TarotTable({
             onRotate={onRotate}
             onHover={onHover}
             onSound={onSound}
+          />
+        );
+      })}
+      {tableCards.map((card, tableIndex) => {
+        const definition = definitions.get(card.cardId);
+
+        if (!definition) {
+          return null;
+        }
+
+        return (
+          <PhysicsCard
+            key={card.id}
+            authorityKey={createPhysicsAuthorityKey(card)}
+            card={card}
+            cardSet={cardSet}
+            cardHeight={layout.cardHeight}
+            cardWidth={layout.cardWidth}
+            definition={definition}
+            dragBounds={layout.dragBounds}
+            dropIndex={tableIndex}
+            layerKey={card.zIndex}
+            onFlip={onFlip}
+            onHover={onHover}
+            onMove={handlePhysicsMove}
+            onRotate={onRotate}
+            onSelect={handleTableSelect}
+            onSettle={handlePhysicsSettle}
+            onSound={onSound}
+            reducedMotion={reducedMotion}
+            selected={session.selectedCardId === card.id}
+            slabGeometry={slabGeometry}
+            tableSurfaceZ={TABLE_SURFACE_Z}
+            worldPosition={layout.toWorld(card.position)}
           />
         );
       })}
@@ -1958,7 +2020,23 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         value={props.viewZoom}
         reducedMotion={props.reducedMotion}
       />
-      <TarotTable {...props} />
+      <Suspense fallback={null}>
+        <Physics
+          colliders={false}
+          gravity={[...CARD_PHYSICS.gravity]}
+          interpolate
+          maxCcdSubsteps={props.isMobileViewport ? 1 : 2}
+          numAdditionalFrictionIterations={
+            props.isMobileViewport ? 2 : 4
+          }
+          numSolverIterations={props.isMobileViewport ? 6 : 8}
+          predictionDistance={0.004}
+          timeStep={CARD_PHYSICS.timeStep}
+          updateLoop="follow"
+        >
+          <TarotTable {...props} />
+        </Physics>
+      </Suspense>
     </Canvas>
   );
 });

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
   CARD_PHYSICS,
+  clampPhysicsPointToBounds,
   createCardQuaternion,
+  createPhysicsAuthorityKey,
   getCardColliderHalfExtents,
   getCardPose,
   getReleaseKinematics,
@@ -38,6 +40,16 @@ describe("card orientation", () => {
 });
 
 describe("card release", () => {
+  test("keeps a dragged card centre inside the table boundary", () => {
+    const bounds = { bottom: -2, left: -3, right: 3, top: 2 };
+
+    expect(clampPhysicsPointToBounds([8, -9], bounds)).toEqual([3, -2]);
+    expect(clampPhysicsPointToBounds([1.5, 0.75], bounds)).toEqual([
+      1.5,
+      0.75,
+    ]);
+  });
+
   test("caps planar speed while preserving its direction", () => {
     const release = getReleaseKinematics({
       grabOffset: [0, 0],
@@ -113,5 +125,19 @@ describe("card collider and persistence tolerances", () => {
         rotation: 10,
       })
     ).toBe(true);
+  });
+
+  test("keys settled poses to the current durable card revision", () => {
+    const pose = {
+      faceUp: true,
+      position: [0.25, -0.5] as [number, number],
+      rotation: 360,
+      zIndex: 7,
+    };
+
+    expect(createPhysicsAuthorityKey(pose)).toBe("1:0.25:-0.5:0:7");
+    expect(
+      createPhysicsAuthorityKey({ ...pose, zIndex: pose.zIndex + 1 })
+    ).not.toBe(createPhysicsAuthorityKey(pose));
   });
 });
