@@ -3,6 +3,7 @@ import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
 
 export const MIN_VIEW_ZOOM = 0.3;
 export const MAX_VIEW_ZOOM = 1.35;
+export const TABLE_SURFACE_OVERSCAN = 1.04;
 export const DECK_MAT_WIDTH_PADDING = 0.58;
 export const DECK_MAT_HEIGHT_PADDING = 0.64;
 const CARD_SCALE_AT_100_PERCENT = 0.8;
@@ -48,6 +49,49 @@ export type DeckPositionCandidate = {
   position: TablePoint;
   worldPosition: [number, number];
 };
+
+export function getViewPanBounds(
+  viewportBounds: SceneBounds,
+  viewZoom: number
+): SceneBounds {
+  const zoom = clamp(
+    Number.isFinite(viewZoom) ? viewZoom : 1,
+    MIN_VIEW_ZOOM,
+    MAX_VIEW_ZOOM
+  );
+  const viewportWidth = viewportBounds.right - viewportBounds.left;
+  const viewportHeight = viewportBounds.top - viewportBounds.bottom;
+  const surfaceHalfWidth =
+    (viewportWidth / MIN_VIEW_ZOOM) * TABLE_SURFACE_OVERSCAN * 0.5;
+  const surfaceHalfHeight =
+    (viewportHeight / MIN_VIEW_ZOOM) * TABLE_SURFACE_OVERSCAN * 0.5;
+  const visibleHalfWidth = viewportWidth / zoom / 2;
+  const visibleHalfHeight = viewportHeight / zoom / 2;
+  const maximumX = Math.max(0, surfaceHalfWidth - visibleHalfWidth);
+  const maximumY = Math.max(0, surfaceHalfHeight - visibleHalfHeight);
+
+  return {
+    left: -maximumX,
+    right: maximumX,
+    top: maximumY,
+    bottom: -maximumY,
+  };
+}
+
+export function clampViewPan(
+  pan: TablePoint,
+  viewportBounds: SceneBounds,
+  viewZoom: number
+): TablePoint {
+  const bounds = getViewPanBounds(viewportBounds, viewZoom);
+  const x = Number.isFinite(pan[0]) ? pan[0] : 0;
+  const y = Number.isFinite(pan[1]) ? pan[1] : 0;
+
+  return [
+    clamp(x, bounds.left, bounds.right),
+    clamp(y, bounds.bottom, bounds.top),
+  ];
+}
 
 export function createSceneTableLayout({
   viewportWidth,

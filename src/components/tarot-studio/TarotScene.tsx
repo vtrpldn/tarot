@@ -36,9 +36,11 @@ import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
+  clampViewPan,
   DECK_MAT_HEIGHT_PADDING,
   DECK_MAT_WIDTH_PADDING,
   MIN_VIEW_ZOOM,
+  TABLE_SURFACE_OVERSCAN,
   type SceneBounds,
   type SceneTableLayout,
 } from "./table-layout";
@@ -434,20 +436,38 @@ function AnimatedCameraZoom({
   return null;
 }
 
-function CameraPan({ value }: { value?: TablePoint }) {
+function CameraPan({
+  value,
+  viewportBounds,
+  targetZoom,
+}: {
+  value?: TablePoint;
+  viewportBounds: SceneBounds;
+  targetZoom: number;
+}) {
   const camera = useThree((state) => state.camera) as OrthographicCamera;
   const invalidate = useThree((state) => state.invalidate);
-  const [x, y] = value ?? [0, 0];
 
   useEffect(() => {
+    invalidate();
+  }, [invalidate, targetZoom, value, viewportBounds]);
+
+  useFrame(() => {
+    const currentZoom = camera.zoom / BASE_CAMERA_ZOOM;
+    const safeZoom = Math.min(targetZoom, currentZoom);
+    const [x, y] = clampViewPan(
+      value ?? [0, 0],
+      viewportBounds,
+      safeZoom
+    );
+
     if (camera.position.x === x && camera.position.y === y) {
       return;
     }
 
     camera.position.set(x, y, camera.position.z);
     camera.updateMatrixWorld();
-    invalidate();
-  }, [camera, invalidate, x, y]);
+  });
 
   return null;
 }
@@ -725,8 +745,10 @@ function TableSurface({
   reducedMotion: boolean;
   onSelect: (cardId: string | null) => void;
 }) {
-  const visibleWidth = (width / MIN_VIEW_ZOOM) * 1.04;
-  const visibleHeight = (height / MIN_VIEW_ZOOM) * 1.04;
+  const visibleWidth =
+    (width / MIN_VIEW_ZOOM) * TABLE_SURFACE_OVERSCAN;
+  const visibleHeight =
+    (height / MIN_VIEW_ZOOM) * TABLE_SURFACE_OVERSCAN;
   const celestialRadius = Math.min(visibleWidth, visibleHeight) * 0.19;
   const dragOutline = useMemo(
     () => createRoundedRectanglePoints(dragBounds, 0.5, 10),
@@ -828,6 +850,8 @@ function TarotTable({
   cardSet,
   session,
   reducedMotion,
+  viewZoom,
+  viewPan,
   deckMoveMode,
   onSelect,
   onDraw,
@@ -939,6 +963,11 @@ function TarotTable({
 
   return (
     <>
+      <CameraPan
+        value={viewPan}
+        viewportBounds={layout.viewportBounds}
+        targetZoom={viewZoom}
+      />
       <ambientLight intensity={0.48} />
       <directionalLight
         castShadow
@@ -1059,7 +1088,6 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         value={props.viewZoom}
         reducedMotion={props.reducedMotion}
       />
-      <CameraPan value={props.viewPan} />
       <TarotTable {...props} />
     </Canvas>
   );
