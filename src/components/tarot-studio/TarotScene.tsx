@@ -44,6 +44,8 @@ import { TAROT_SCENE_PALETTE } from "./theme";
 
 const BASE_CAMERA_ZOOM = 75;
 const TABLE_SURFACE_Z = -0.16;
+const CARD_SURFACE_CLEARANCE = 0.002;
+const DECK_MAT_SURFACE_Z = TABLE_SURFACE_Z + 0.003;
 const TABLE_CARD_CONTACT_GAP = 0.002;
 const DECK_STACK_RENDER_ORDER = 10;
 const DECK_CARD_RENDER_ORDER = 20;
@@ -458,10 +460,11 @@ function getDeckMetrics(count: number) {
       : 0;
   const layerThickness = 0.018;
   const layerStep = 0.019;
-  const firstCenter = TABLE_SURFACE_Z + 0.008 + layerThickness / 2;
+  const firstCenter =
+    DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE + layerThickness / 2;
   const topSurface = layerCount
     ? firstCenter + (layerCount - 1) * layerStep + layerThickness / 2
-    : TABLE_SURFACE_Z + 0.007;
+    : DECK_MAT_SURFACE_Z;
 
   return {
     firstCenter,
@@ -469,7 +472,8 @@ function getDeckMetrics(count: number) {
     layerStep,
     layerThickness,
     topSurface,
-    topCardCenter: topSurface + CARD_THICKNESS / 2 + 0.006,
+    topCardCenter:
+      topSurface + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE,
   };
 }
 
@@ -510,7 +514,7 @@ function DeckMat({ width, height }: { width: number; height: number }) {
       ),
     [matHeight, matWidth]
   );
-  const surfaceZ = TABLE_SURFACE_Z + 0.003;
+  const surfaceZ = DECK_MAT_SURFACE_Z;
 
   return (
     <group renderOrder={0}>
@@ -900,7 +904,7 @@ function TarotTable({
     tableCards.map((card, index) => [card.id, index])
   );
   const baseTableCardZ =
-    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + 0.008;
+    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE;
   const tableCardRestingHeights = useMemo(
     () =>
       getTableCardRestingHeights({
