@@ -7,13 +7,15 @@ import type {
   TableSnapshot,
   TarotSession,
 } from "@/types";
-import { TABLE_POINT_LIMIT } from "@/types";
+import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
 import type { CardSpread } from "@/lib/tarot-spreads";
 
 const HISTORY_LIMIT = 24;
 
 const clampTablePoint = (value: number) =>
   Math.min(TABLE_POINT_LIMIT, Math.max(-TABLE_POINT_LIMIT, value));
+const clampDeckPoint = (value: number) =>
+  Math.min(DECK_POINT_LIMIT, Math.max(-DECK_POINT_LIMIT, value));
 
 function shuffle<T>(items: T[]): T[] {
   const shuffled = [...items];
@@ -235,6 +237,7 @@ export type TarotSessionAction =
     }
   | {
       type: "layout";
+      deckPosition?: TablePoint;
       placements: Map<
         string,
         Pick<TableCard, "position" | "rotation" | "zIndex">
@@ -330,8 +333,8 @@ export function tarotSessionReducer(
 
   if (action.type === "move-deck") {
     const deckPosition: TablePoint = [
-      clampTablePoint(action.position[0]),
-      clampTablePoint(action.position[1]),
+      clampDeckPoint(action.position[0]),
+      clampDeckPoint(action.position[1]),
     ];
 
     if (
@@ -347,8 +350,8 @@ export function tarotSessionReducer(
 
   if (action.type === "sync-deck-position") {
     const deckPosition: TablePoint = [
-      clampTablePoint(action.position[0]),
-      clampTablePoint(action.position[1]),
+      clampDeckPoint(action.position[0]),
+      clampDeckPoint(action.position[1]),
     ];
 
     if (
@@ -372,7 +375,12 @@ export function tarotSessionReducer(
       return placement ? { ...card, ...placement } : card;
     });
 
-    return commit(session, cards);
+    return commit(
+      session,
+      cards,
+      session.selectedCardId,
+      action.deckPosition ?? session.deckPosition
+    );
   }
 
   if (action.type === "deal-spread") {

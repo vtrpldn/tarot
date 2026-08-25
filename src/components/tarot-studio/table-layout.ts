@@ -1,8 +1,10 @@
 import type { TablePoint } from "@/types";
-import { TABLE_POINT_LIMIT } from "@/types";
+import { DECK_POINT_LIMIT, TABLE_POINT_LIMIT } from "@/types";
 
 export const MIN_VIEW_ZOOM = 0.3;
 export const MAX_VIEW_ZOOM = 1.35;
+export const DECK_MAT_WIDTH_PADDING = 0.58;
+export const DECK_MAT_HEIGHT_PADDING = 0.64;
 const CARD_SCALE_AT_100_PERCENT = 0.8;
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -23,6 +25,8 @@ export type SceneTableLayout = {
    */
   deckPositionCandidates: DeckPositionCandidate[];
   toPoint: (x: number, y: number) => TablePoint;
+  /** Converts a planner position using the deck's wider parking range. */
+  toDeckPoint: (x: number, y: number) => TablePoint;
   toWorld: (point: TablePoint) => [number, number];
 };
 
@@ -90,18 +94,28 @@ export function createSceneTableLayout({
   const halfHeight = Math.max((tableTop - tableBottom) / 2, cardHeight / 2);
   const deckSideInset = 0.12;
   const deckVerticalInset = isMobile ? 0.58 : 0.95;
-  const toPoint = (x: number, y: number): TablePoint => [
+  const deckWidth = cardWidth + DECK_MAT_WIDTH_PADDING;
+  const deckHeight = cardHeight + DECK_MAT_HEIGHT_PADDING;
+  const toLimitedPoint = (
+    x: number,
+    y: number,
+    limit: number
+  ): TablePoint => [
     clamp(
       (x - centerX) / halfWidth,
-      -TABLE_POINT_LIMIT,
-      TABLE_POINT_LIMIT
+      -limit,
+      limit
     ),
     clamp(
       (y - centerY) / halfHeight,
-      -TABLE_POINT_LIMIT,
-      TABLE_POINT_LIMIT
+      -limit,
+      limit
     ),
   ];
+  const toPoint = (x: number, y: number): TablePoint =>
+    toLimitedPoint(x, y, TABLE_POINT_LIMIT);
+  const toDeckPoint = (x: number, y: number): TablePoint =>
+    toLimitedPoint(x, y, DECK_POINT_LIMIT);
   const toWorld = ([x, y]: TablePoint): [number, number] => [
     centerX + x * halfWidth,
     centerY + y * halfHeight,
@@ -132,32 +146,32 @@ export function createSceneTableLayout({
   const deckPositionCandidates: DeckPositionCandidate[] = [
     createDeckCandidate(
       "top-left",
-      tableLeft + cardWidth / 2 + deckSideInset,
-      tableTop - cardHeight / 2 - deckVerticalInset
+      tableLeft + deckWidth / 2 + deckSideInset,
+      tableTop - deckHeight / 2 - deckVerticalInset
     ),
     createDeckCandidate(
       "top-right",
-      tableRight - cardWidth / 2 - deckSideInset,
-      tableTop - cardHeight / 2 - deckVerticalInset
+      tableRight - deckWidth / 2 - deckSideInset,
+      tableTop - deckHeight / 2 - deckVerticalInset
     ),
     createDeckCandidate(
       "bottom-left",
-      tableLeft + cardWidth / 2 + deckSideInset,
-      tableBottom + cardHeight / 2 + deckSideInset
+      tableLeft + deckWidth / 2 + deckSideInset,
+      tableBottom + deckHeight / 2 + deckSideInset
     ),
     createDeckCandidate(
       "bottom-right",
-      tableRight - cardWidth / 2 - deckSideInset,
-      tableBottom + cardHeight / 2 + deckSideInset
+      tableRight - deckWidth / 2 - deckSideInset,
+      tableBottom + deckHeight / 2 + deckSideInset
     ),
     createDeckCandidate(
       "left",
-      tableLeft + cardWidth / 2 + deckSideInset,
+      tableLeft + deckWidth / 2 + deckSideInset,
       centerY
     ),
     createDeckCandidate(
       "right",
-      tableRight - cardWidth / 2 - deckSideInset,
+      tableRight - deckWidth / 2 - deckSideInset,
       centerY
     ),
   ];
@@ -172,5 +186,6 @@ export function createSceneTableLayout({
     deckPositionCandidates,
     toWorld,
     toPoint,
+    toDeckPoint,
   };
 }

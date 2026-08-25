@@ -36,6 +36,8 @@ import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
+  DECK_MAT_HEIGHT_PADDING,
+  DECK_MAT_WIDTH_PADDING,
   MIN_VIEW_ZOOM,
   type SceneBounds,
   type SceneTableLayout,
@@ -495,8 +497,8 @@ function getDeckLayerOffset(
 }
 
 function DeckMat({ width, height }: { width: number; height: number }) {
-  const matWidth = width + 0.58;
-  const matHeight = height + 0.64;
+  const matWidth = width + DECK_MAT_WIDTH_PADDING;
+  const matHeight = height + DECK_MAT_HEIGHT_PADDING;
   const shape = useMemo(
     () => createRoundedRectangleShape(matWidth, matHeight, 0.24),
     [matHeight, matWidth]
@@ -929,7 +931,7 @@ function TarotTable({
     deckPreloadUrls.forEach((url) => useTexture.preload(url));
   }, [cardSet.back.preview, deckPreloadUrls]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     onLayoutChange(layout);
   }, [layout, onLayoutChange]);
 
