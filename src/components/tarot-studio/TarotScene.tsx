@@ -1113,7 +1113,7 @@ function PhysicalDeck({
         velocityY *= velocityScale;
       }
 
-      const velocityBlend = 1 - Math.exp(-elapsed * 18);
+      const velocityBlend = 1 - Math.exp(-elapsed * 36);
       drag.velocity.x = MathUtils.lerp(
         drag.velocity.x,
         velocityX,

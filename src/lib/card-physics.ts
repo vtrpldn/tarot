@@ -1,21 +1,21 @@
 import type { TablePoint } from "@/types";
 
 export const CARD_PHYSICS = {
-  angularDamping: 4.5,
-  cardFriction: 0.62,
+  angularDamping: 3.2,
+  cardFriction: 0.28,
   cardMassKilograms: 0.0018,
   cardRestitution: 0.035,
   colliderInset: 0.025,
   contactSkin: 0.001,
   dragLift: 0.18,
   gravity: [0, 0, -9.81] as const,
-  linearDamping: 2.4,
+  linearDamping: 0.85,
   maxAngularSpeed: 14,
-  maxPlanarSpeed: 5.8,
+  maxPlanarSpeed: 4.2,
   settleAngularSpeed: 0.035,
   settleLinearSpeed: 0.018,
   spawnLift: 0.14,
-  tableFriction: 0.78,
+  tableFriction: 0.46,
   tableRestitution: 0,
   timeStep: 1 / 60,
 } as const;
@@ -34,7 +34,6 @@ export type PhysicsCardPoseUpdate = PhysicsCardPose & {
 };
 
 export type PhysicsFlipVisualState = {
-  lift: number;
   rotationX: number;
   scaleX: number;
   scaleY: number;
@@ -218,7 +217,6 @@ export function getFlipVisualState(progress: number): PhysicsFlipVisualState {
   const envelope = Math.sin(Math.PI * eased);
 
   return {
-    lift: envelope,
     rotationX: eased < 0.5 ? 0 : Math.PI,
     scaleX: 1 - envelope * 0.006,
     scaleY: Math.max(0.12, Math.abs(Math.cos(Math.PI * eased))),

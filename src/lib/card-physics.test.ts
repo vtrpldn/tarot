@@ -118,7 +118,6 @@ describe("card release", () => {
 describe("controlled flip presentation", () => {
   test("squeezes flat at the midpoint and restores full size", () => {
     expect(getFlipVisualState(0)).toEqual({
-      lift: 0,
       rotationX: 0,
       scaleX: 1,
       scaleY: 1,

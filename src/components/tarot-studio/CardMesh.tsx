@@ -54,7 +54,6 @@ import { TAROT_SCENE_PALETTE } from "./theme";
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const DRAG_THRESHOLD = 0.045;
 const ROTATION_EDGE_THRESHOLD = 0.14;
-const DRAG_FOLLOW_LAMBDA = 21;
 const POSITION_SETTLE_LAMBDA = 11;
 const MAX_POINTER_SPEED = 7.5;
 const RELEASE_GLIDE_SECONDS = 0.06;
@@ -143,7 +142,7 @@ function sampleDragVelocity(
   }
 
   if (Math.hypot(deltaX, deltaY) > 0.0001) {
-    const velocityBlend = 1 - Math.exp(-elapsed * 18);
+    const velocityBlend = 1 - Math.exp(-elapsed * 36);
     drag.velocity.x = MathUtils.lerp(
       drag.velocity.x,
       sampleVelocityX,
@@ -939,6 +938,9 @@ export const CardMesh = memo(function CardMesh({
         } else if (drag.mode !== "rotate" && drag.moved) {
           const releaseX = point.x - drag.offset.x;
           const releaseY = point.y - drag.offset.y;
+          const releaseWorldPosition = layout.toWorld(
+            layout.toPoint(releaseX, releaseY)
+          );
           drag.target.set(releaseX, releaseY, group.position.z);
           const idleSeconds = Math.max(
             0,
@@ -1014,9 +1016,9 @@ export const CardMesh = memo(function CardMesh({
                   ...launch,
                   faceUp: card.faceUp,
                   position: [
-                    group.position.x,
-                    group.position.y,
-                    group.position.z,
+                    releaseWorldPosition[0],
+                    releaseWorldPosition[1],
+                    Math.max(group.position.z, draggingZ),
                   ],
                   rotation: MathUtils.radToDeg(group.rotation.z),
                   targetPosition: nextWorldPosition,
@@ -1053,6 +1055,7 @@ export const CardMesh = memo(function CardMesh({
       cardWidth,
       clearPendingRelease,
       deckOffset,
+      draggingZ,
       invalidate,
       layout,
       onDraw,
@@ -1166,11 +1169,8 @@ export const CardMesh = memo(function CardMesh({
       : pointerMoving && drag
         ? drag.target.y
       : pendingPosition?.[1] ?? restingPositionY;
-    const positionLambda = moving
-      ? DRAG_FOLLOW_LAMBDA
-      : card.zone === "deck"
-        ? 24
-        : POSITION_SETTLE_LAMBDA;
+    const positionLambda =
+      card.zone === "deck" ? 24 : POSITION_SETTLE_LAMBDA;
     const nextTiltX = reducedMotion
       ? 0
       : MathUtils.damp(group.rotation.x, tiltXTarget, 14, delta);
@@ -1182,7 +1182,7 @@ export const CardMesh = memo(function CardMesh({
       : MathUtils.damp(group.rotation.z, rotationTarget, 14, delta);
     const followsDeckPreview =
       Boolean(previewDeckPosition) && card.zone === "deck" && !moving;
-    const nextX = reducedMotion || followsDeckPreview
+    const nextX = reducedMotion || followsDeckPreview || moving
       ? positionXTarget
       : MathUtils.damp(
           group.position.x,
@@ -1190,7 +1190,7 @@ export const CardMesh = memo(function CardMesh({
           positionLambda,
           delta
         );
-    const nextY = reducedMotion || followsDeckPreview
+    const nextY = reducedMotion || followsDeckPreview || moving
       ? positionYTarget
       : MathUtils.damp(
           group.position.y,

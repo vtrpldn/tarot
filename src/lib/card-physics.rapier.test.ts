@@ -127,18 +127,18 @@ describe("configured Tarot card colliders in Rapier", () => {
     }
   });
 
-  test("keeps visible planar inertia after a card is released", () => {
+  test("keeps visible planar inertia after an ordinary card release", () => {
     const world = createWorld();
 
     try {
       const card = createCard(world, {
         position: [0, 0, CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin],
-        velocity: [2.4, 0, 0],
+        velocity: [1.5, 0, 0],
       });
 
-      step(world, 12);
+      step(world, 18);
 
-      expect(card.body.translation().x).toBeGreaterThan(0.18);
+      expect(card.body.translation().x).toBeGreaterThan(0.2);
       expect(card.body.translation().z).toBeGreaterThanOrEqual(
         CARD_HALF_DEPTH - 0.0006
       );

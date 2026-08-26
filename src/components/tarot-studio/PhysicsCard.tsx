@@ -683,7 +683,7 @@ export function PhysicsCard({
       const flipVisual = getFlipVisualState(progress);
 
       if (visual) {
-        visual.position.z = flipVisual.lift * 0.008;
+        visual.position.z = 0;
         visual.rotation.x = flipVisual.rotationX;
         visual.scale.set(
           flipVisual.scaleX,
