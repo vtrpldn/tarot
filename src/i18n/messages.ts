@@ -1,15 +1,15 @@
 import type { AppLocale } from "./locale";
-import type { CardSpreadId } from "@/types";
+import type { CardSetKind, CardSpreadId } from "@/types";
 import type { SpreadRelationshipId } from "@/lib/tarot-spreads";
 
-type CardCategory = "lenormand" | "major" | "minor";
+type CardCategory = "lenormand" | "major" | "minor" | "oracle";
 
 type Count = {
   count: number;
   noun: string;
 };
 
-type Messages = {
+export type Messages = {
   localeLabel: string;
   localeShortLabel: string;
   loadingTable: string;
@@ -17,6 +17,9 @@ type Messages = {
   tableActions: string;
   deckTrigger: (deckLabel: string, deck: Count) => string;
   chooseDeck: string;
+  chooseDeckHint: string;
+  currentDeck: string;
+  deckKinds: Readonly<Record<CardSetKind, string>>;
   deck: string;
   cardsInDeck: (deck: Count) => string;
   tableZoom: (percent: number) => string;
@@ -116,6 +119,14 @@ const messages: Record<AppLocale, Messages> = {
     deckTrigger: (deckLabel, deck) =>
       `Choose deck. ${deckLabel}, ${deck.count} ${deck.noun} remaining`,
     chooseDeck: "Choose deck",
+    chooseDeckHint:
+      "Focus a deck to preview it. Choosing a different deck resets the table with a fresh shuffle.",
+    currentDeck: "Current deck",
+    deckKinds: {
+      tarot: "Tarot",
+      lenormand: "Lenormand",
+      oracle: "Oracle",
+    },
     deck: "Deck",
     cardsInDeck: (deck) => `${deck.count} ${deck.noun} in the deck`,
     tableZoom: (percent) => `Table zoom, ${percent} percent`,
@@ -188,6 +199,8 @@ const messages: Record<AppLocale, Messages> = {
       const categoryLabel =
         category === "lenormand"
           ? "Lenormand"
+          : category === "oracle"
+            ? "Oracle"
           : category === "major"
             ? "Major Arcana"
             : "Minor Arcana";
@@ -258,6 +271,14 @@ const messages: Record<AppLocale, Messages> = {
     deckTrigger: (deckLabel, deck) =>
       `Escolher baralho. ${deckLabel}, restam ${deck.count} ${deck.noun}`,
     chooseDeck: "Escolher baralho",
+    chooseDeckHint:
+      "Foque um baralho para visualizá-lo. Escolher outro baralho redefine a mesa com um novo embaralhamento.",
+    currentDeck: "Baralho atual",
+    deckKinds: {
+      tarot: "Tarô",
+      lenormand: "Lenormand",
+      oracle: "Oráculo",
+    },
     deck: "Baralho",
     cardsInDeck: (deck) => `${deck.count} ${deck.noun} no baralho`,
     tableZoom: (percent) => `Zoom da mesa, ${percent} por cento`,
@@ -330,6 +351,8 @@ const messages: Record<AppLocale, Messages> = {
       const categoryLabel =
         category === "lenormand"
           ? "Lenormand"
+          : category === "oracle"
+            ? "Oráculo"
           : category === "major"
             ? "Arcanos Maiores"
             : "Arcanos Menores";
