@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 216 395" role="img" aria-labelledby="title description">
+  <title id="title">Forty Servants table edition card back</title>
+  <desc id="description">A symmetrical midnight blue and warm gold pattern created for this application.</desc>
+  <rect width="216" height="395" rx="9" fill="#102a42" />
+  <path d="M108 22 194 108 108 194 22 108ZM108 201l86 86-86 86-86-86Z" fill="#173a55" />
+  <g fill="#e8d08d" opacity="0.7">
+    <circle cx="42" cy="61" r="1" />
+    <circle cx="84" cy="38" r="0.7" />
+    <circle cx="132" cy="69" r="0.8" />
+    <circle cx="177" cy="48" r="1" />
+    <circle cx="38" cy="142" r="0.8" />
+    <circle cx="181" cy="151" r="0.7" />
+    <circle cx="33" cy="244" r="0.7" />
+    <circle cx="179" cy="235" r="0.9" />
+    <circle cx="50" cy="328" r="1" />
+    <circle cx="89" cy="354" r="0.7" />
+    <circle cx="137" cy="324" r="0.8" />
+    <circle cx="173" cy="349" r="1" />
+  </g>
+  <rect x="9" y="9" width="198" height="377" rx="6" fill="none" stroke="#e5cf91" stroke-width="2" />
+  <rect x="15" y="15" width="186" height="365" rx="4" fill="none" stroke="#9f7c36" stroke-width="0.8" />
+  <g transform="translate(108 197.5)" fill="none" stroke="#ead49b">
+    <circle r="61" stroke-width="1.4" />
+    <circle r="43" stroke-width="0.8" opacity="0.8" />
+    <path d="M0-75 13-13 75 0 13 13 0 75-13 13-75 0-13-13Z" stroke-width="1.4" />
+    <path d="m0-50 15 35 35 15-35 15L0 50l-15-35-35-15 35-15Z" fill="#d8b96e" fill-opacity="0.12" stroke-width="0.9" />
+    <path d="M-28-28 28 28M28-28-28 28" stroke-width="0.75" opacity="0.72" />
+  </g>
+  <text x="108" y="204" fill="#f7ecd0" font-family="Georgia, serif" font-size="18" letter-spacing="3" text-anchor="middle">XL</text>
+  <g fill="#ead49b">
+    <circle cx="23" cy="23" r="2" />
+    <circle cx="193" cy="23" r="2" />
+    <circle cx="23" cy="372" r="2" />
+    <circle cx="193" cy="372" r="2" />
+  </g>
+</svg>

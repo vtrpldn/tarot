@@ -1,6 +1,6 @@
 import type { AppLocale } from "@/i18n/locale";
 
-export type CardSetKind = "tarot" | "lenormand";
+export type CardSetKind = "tarot" | "lenormand" | "oracle";
 
 export type TarotSuit = "cups" | "pentacles" | "swords" | "wands";
 
@@ -34,6 +34,12 @@ export type CardDefinition = {
   rank?: string;
 };
 
+export type CardSetSource = {
+  label: string;
+  displayLabels?: Partial<Record<AppLocale, string>>;
+  href: string;
+};
+
 export type CardSetDefinition = {
   id: string;
   kind: CardSetKind;
@@ -44,6 +50,8 @@ export type CardSetDefinition = {
   displayLabels?: Partial<Record<AppLocale, string>>;
   displayShortLabels?: Partial<Record<AppLocale, string>>;
   displayDescriptions?: Partial<Record<AppLocale, string>>;
+  /** Public provenance, guide, and reuse links shown in the deck chooser. */
+  sources: ReadonlyArray<CardSetSource>;
   cardAspectRatio: number;
   artworkCrop?: CardArtworkCrop;
   back: CardArtwork;

@@ -12,6 +12,8 @@
     "validate:lenormand-assets": "node scripts/validate-lenormand-assets.mjs",
     "build:marseille-assets": "node scripts/build-marseille-assets.mjs",
     "validate:marseille-assets": "node scripts/validate-marseille-assets.mjs",
+    "build:forty-servants-assets": "node scripts/build-forty-servants-assets.mjs",
+    "validate:forty-servants-assets": "node scripts/validate-forty-servants-assets.mjs",
     "validate:locales": "node scripts/validate-locales.mjs",
     "validate:card-readings": "node scripts/validate-card-readings.mjs"
   },
