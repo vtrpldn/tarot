@@ -41,6 +41,25 @@ type PaperShader = {
 
 const DEFAULT_CARD_SIZE = [1, 1] as const;
 
+const CardPaperCurlUpdater = memo(function CardPaperCurlUpdater({
+  material,
+  motionRef,
+}: {
+  material: MeshStandardMaterial;
+  motionRef: MutableRefObject<CardPaperMotion>;
+}) {
+  useFrame(() => {
+    const shader = material.userData.paperShader as PaperShader | undefined;
+    const curl = shader?.uniforms.uPaperCurl?.value;
+
+    if (curl instanceof Vector2) {
+      curl.set(motionRef.current.curlX, motionRef.current.curlY);
+    }
+  });
+
+  return null;
+});
+
 const PAPER_VERTEX_DECLARATION = /* glsl */ `
 #include <common>
 varying vec3 vPaperPosition;
@@ -233,19 +252,14 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
     toneMapped,
   ]);
 
-  useFrame(() => {
-    const shader = material.userData.paperShader as PaperShader | undefined;
-    const curl = shader?.uniforms.uPaperCurl?.value;
-
-    if (curl instanceof Vector2) {
-      curl.set(
-        motionRef?.current.curlX ?? 0,
-        motionRef?.current.curlY ?? 0
-      );
-    }
-  });
-
   useEffect(() => () => material.dispose(), [material]);
 
-  return <primitive object={material} attach={attach} />;
+  return (
+    <>
+      <primitive object={material} attach={attach} />
+      {motionRef ? (
+        <CardPaperCurlUpdater material={material} motionRef={motionRef} />
+      ) : null}
+    </>
+  );
 });

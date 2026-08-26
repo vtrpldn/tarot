@@ -71,7 +71,8 @@ diffuseColor.rgb *= 1.0 + clothFiber + clothCloud;
 const CLOTH_FRAGMENT_ROUGHNESS = /* glsl */ `
 #include <roughnessmap_fragment>
 roughnessFactor = clamp(
-  roughnessFactor + (clothNap - 0.5) * 0.055,
+  roughnessFactor +
+    (clothNap - 0.5) * clothDetailFade(clothNapPoint) * 0.055,
   0.88,
   1.0
 );
@@ -111,7 +112,7 @@ export const TableClothMaterial = memo(function TableClothMaterial({
           CLOTH_FRAGMENT_ROUGHNESS
         );
     };
-    nextMaterial.customProgramCacheKey = () => "tarot-table-cloth-v3";
+    nextMaterial.customProgramCacheKey = () => "tarot-table-cloth-v4";
     return nextMaterial;
   }, [color, emissive]);
 

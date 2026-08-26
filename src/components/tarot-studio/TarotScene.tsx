@@ -464,18 +464,8 @@ function DriftingAstrologicalField({
 
   useEffect(() => {
     invalidate();
-
-    if (reducedMotion) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        invalidate();
-      }
-    }, 66);
-
-    return () => window.clearInterval(interval);
+    // Decorative drift advances on frames requested by real scene activity.
+    // Do not keep a demand-rendered canvas awake solely for this effect.
   }, [invalidate, reducedMotion]);
 
   useFrame(({ clock }) => {
