@@ -1,7 +1,7 @@
 import type { TablePoint } from "@/types";
 
 export const CARD_PHYSICS = {
-  angularDamping: 8.5,
+  angularDamping: 4.5,
   cardFriction: 0.62,
   cardMassKilograms: 0.0018,
   cardRestitution: 0.035,
@@ -9,7 +9,7 @@ export const CARD_PHYSICS = {
   contactSkin: 0.001,
   dragLift: 0.18,
   gravity: [0, 0, -9.81] as const,
-  linearDamping: 5.5,
+  linearDamping: 2.4,
   maxAngularSpeed: 14,
   maxPlanarSpeed: 5.8,
   settleAngularSpeed: 0.035,
@@ -32,6 +32,25 @@ export type PhysicsCardPoseUpdate = PhysicsCardPose & {
   authorityKey: string;
   cardId: string;
 };
+
+export type PhysicsFlipVisualState = {
+  lift: number;
+  rotationX: number;
+  scaleX: number;
+  scaleY: number;
+};
+
+export type PhysicsCardLaunch = {
+  id: number;
+  angularVelocity: [x: number, y: number, z: number];
+  faceUp: boolean;
+  linearVelocity: [x: number, y: number, z: number];
+  position: [x: number, y: number, z: number];
+  rotation: number;
+  targetPosition: TablePoint;
+};
+
+export type PhysicsCardLaunchInput = Omit<PhysicsCardLaunch, "id">;
 
 export type PhysicsTableBounds = {
   bottom: number;
@@ -159,6 +178,72 @@ export function getReleaseKinematics({
     angularVelocity: [0, 0, angularZ],
     linearVelocity: [velocityX, velocityY, 0],
   };
+}
+
+export function constrainReleaseToBounds({
+  bounds,
+  kinematics,
+  position,
+}: {
+  bounds: PhysicsTableBounds;
+  kinematics: ReleaseKinematics;
+  position: TablePoint;
+}): ReleaseKinematics {
+  const left = Math.min(bounds.left, bounds.right);
+  const right = Math.max(bounds.left, bounds.right);
+  const bottom = Math.min(bounds.bottom, bounds.top);
+  const top = Math.max(bounds.bottom, bounds.top);
+  const [velocityX, velocityY, velocityZ] = kinematics.linearVelocity;
+  const boundedVelocityX =
+    (position[0] <= left && velocityX < 0) ||
+    (position[0] >= right && velocityX > 0)
+      ? 0
+      : velocityX;
+  const boundedVelocityY =
+    (position[1] <= bottom && velocityY < 0) ||
+    (position[1] >= top && velocityY > 0)
+      ? 0
+      : velocityY;
+
+  return {
+    angularVelocity: [...kinematics.angularVelocity],
+    linearVelocity: [boundedVelocityX, boundedVelocityY, velocityZ],
+  };
+}
+
+export function getFlipVisualState(progress: number): PhysicsFlipVisualState {
+  const boundedProgress = Math.max(0, Math.min(1, progress));
+  const eased =
+    boundedProgress * boundedProgress * (3 - 2 * boundedProgress);
+  const envelope = Math.sin(Math.PI * eased);
+
+  return {
+    lift: envelope,
+    rotationX: eased < 0.5 ? 0 : Math.PI,
+    scaleX: 1 - envelope * 0.006,
+    scaleY: Math.max(0.12, Math.abs(Math.cos(Math.PI * eased))),
+  };
+}
+
+export function isPhysicsLaunchForTarget(
+  launch: PhysicsCardLaunch | undefined,
+  target: TablePoint
+): launch is PhysicsCardLaunch {
+  return Boolean(
+    launch &&
+      Math.hypot(
+        launch.targetPosition[0] - target[0],
+        launch.targetPosition[1] - target[1]
+      ) <= 0.0015
+  );
+}
+
+export function isPhysicsLaunchForMountedCard(
+  launch: PhysicsCardLaunch,
+  zone: "deck" | "table",
+  target: TablePoint
+): boolean {
+  return zone === "table" && isPhysicsLaunchForTarget(launch, target);
 }
 
 export function getCardColliderHalfExtents(

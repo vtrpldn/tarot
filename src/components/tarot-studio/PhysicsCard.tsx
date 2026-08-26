@@ -17,11 +17,12 @@ import {
   useRef,
 } from "react";
 import {
+  DoubleSide,
   type ExtrudeGeometry,
+  Group,
   MathUtils,
   Mesh,
   Plane,
-  Quaternion,
   Raycaster,
   Vector2,
   Vector3,
@@ -37,11 +38,15 @@ import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
   CARD_PHYSICS,
   clampPhysicsPointToBounds,
+  constrainReleaseToBounds,
   createCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
+  getFlipVisualState,
   getReleaseKinematics,
   hasMeaningfulPoseChange,
+  isPhysicsLaunchForTarget,
+  type PhysicsCardLaunch,
   type PhysicsCardPose,
   type PhysicsTableBounds,
 } from "@/lib/card-physics";
@@ -98,9 +103,8 @@ type LostPointerCaptureBinding = {
 
 type FlipState = {
   elapsed: number;
-  from: Quaternion;
   position: Vector3;
-  to: Quaternion;
+  rotation: { w: number; x: number; y: number; z: number };
 };
 
 const FLIP_DURATION_SECONDS = 0.42;
@@ -122,12 +126,15 @@ export type PhysicsCardProps = {
   dropIndex?: number;
   /** Semantic layer revision; unlike dropIndex this changes at every move commit. */
   layerKey: number;
+  /** One-shot deck release state used only when this rigid body first mounts. */
+  initialLaunch?: PhysicsCardLaunch;
   /** Optional hand-off position supplied while the deck-cut controller owns a drag. */
   externalDragRef?: MutableRefObject<ExternalCardDrag | null>;
   onFlip: (cardId: string) => void;
   onHover: (cardId: string | null) => void;
   /** Records the user intent before solver-driven collision effects occur. */
   onMove: (cardId: string, position: TablePoint, rotation?: number) => void;
+  onLaunchConsumed: (cardId: string, launch: PhysicsCardLaunch) => void;
   onRotate?: (cardId: string, degrees: number) => void;
   onSelect: (cardId: string | null) => void;
   onSettle: (
@@ -206,10 +213,12 @@ export function PhysicsCard({
   dragBounds,
   dropIndex = 0,
   layerKey,
+  initialLaunch,
   externalDragRef,
   onFlip,
   onHover,
   onMove,
+  onLaunchConsumed,
   onRotate,
   onSelect,
   onSettle,
@@ -223,6 +232,7 @@ export function PhysicsCard({
   const bodyRef = useRef<RapierRigidBody>(null);
   const dragRef = useRef<DragState | null>(null);
   const flipRef = useRef<FlipState | null>(null);
+  const visualRef = useRef<Group>(null);
   const fallbackRef = useRef<PointerFallbackBinding | null>(null);
   const lostPointerCaptureRef =
     useRef<LostPointerCaptureBinding | null>(null);
@@ -251,9 +261,18 @@ export function PhysicsCard({
     CARD_PHYSICS.spawnLift +
     Math.min(12, Math.max(0, dropIndex)) * CARD_THICKNESS * 0.7;
   const initialZ = tableSurfaceZ + CARD_THICKNESS / 2 + dropLift;
-  const initialYaw = MathUtils.degToRad(card.rotation);
   const worldX = worldPosition[0];
   const worldY = worldPosition[1];
+  const initialLaunchRef = useRef<PhysicsCardLaunch | undefined>(
+    isPhysicsLaunchForTarget(initialLaunch, [worldX, worldY])
+      ? initialLaunch
+      : undefined
+  );
+  const resolvedInitialLaunch = initialLaunchRef.current;
+  const initialFaceUp = resolvedInitialLaunch?.faceUp ?? card.faceUp;
+  const initialYaw = MathUtils.degToRad(
+    resolvedInitialLaunch?.rotation ?? card.rotation
+  );
   const sceneAuthorityKey = [
     authorityKey,
     worldX,
@@ -268,13 +287,18 @@ export function PhysicsCard({
     sceneAuthorityKey,
   });
   const initialPositionRef = useRef<[number, number, number]>([
-    worldX,
-    worldY,
-    initialZ,
+    resolvedInitialLaunch?.position[0] ?? worldX,
+    resolvedInitialLaunch?.position[1] ?? worldY,
+    resolvedInitialLaunch
+      ? Math.max(
+          resolvedInitialLaunch.position[2],
+          tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin
+        )
+      : initialZ,
   ]);
   const initialRotationRef = useRef<
     [number, number, number, "ZXY"]
-  >([card.faceUp ? 0 : Math.PI, 0, initialYaw, "ZXY"]);
+  >([initialFaceUp ? 0 : Math.PI, 0, initialYaw, "ZXY"]);
   const dropLiftRef = useRef(dropLift);
 
   dropLiftRef.current = dropLift;
@@ -472,13 +496,17 @@ export function PhysicsCard({
             (timestamp - drag.lastMovementTimestamp) / 1000
           );
           const velocityDecay = Math.exp(-idleSeconds * 10);
-          const release = getReleaseKinematics({
-            grabOffset: [drag.grabOffset.x, drag.grabOffset.y],
-            pointerVelocity: [
-              drag.pointerVelocity.x * velocityDecay,
-              drag.pointerVelocity.y * velocityDecay,
-            ],
-            reducedMotion,
+          const release = constrainReleaseToBounds({
+            bounds: dragBounds,
+            kinematics: getReleaseKinematics({
+              grabOffset: [drag.grabOffset.x, drag.grabOffset.y],
+              pointerVelocity: [
+                drag.pointerVelocity.x * velocityDecay,
+                drag.pointerVelocity.y * velocityDecay,
+              ],
+              reducedMotion,
+            }),
+            position: targetPosition,
           });
           body.setLinvel(
             {
@@ -510,6 +538,7 @@ export function PhysicsCard({
     [
       canvas,
       card.id,
+      dragBounds,
       invalidate,
       onMove,
       onRotate,
@@ -562,9 +591,10 @@ export function PhysicsCard({
       return;
     }
 
+    const launch = isNewBody ? initialLaunchRef.current : undefined;
     const [x, y, z, w] = createCardQuaternion(
-      targetPose.rotation,
-      targetPose.faceUp
+      launch?.rotation ?? targetPose.rotation,
+      launch?.faceUp ?? targetPose.faceUp
     );
     const restingZ = tableSurfaceZ + CARD_THICKNESS / 2;
     const nextZ = isNewBody
@@ -573,12 +603,38 @@ export function PhysicsCard({
 
     body.setBodyType(rapier.RigidBodyType.Dynamic, true);
     body.setTranslation(
-      { x: targetPose.position[0], y: targetPose.position[1], z: nextZ },
+      {
+        x: launch?.position[0] ?? targetPose.position[0],
+        y: launch?.position[1] ?? targetPose.position[1],
+        z: nextZ,
+      },
       true
     );
     body.setRotation({ x, y, z, w }, true);
-    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    body.setLinvel(
+      launch
+        ? {
+            x: launch.linearVelocity[0],
+            y: launch.linearVelocity[1],
+            z: launch.linearVelocity[2],
+          }
+        : { x: 0, y: 0, z: 0 },
+      true
+    );
+    body.setAngvel(
+      launch
+        ? {
+            x: launch.angularVelocity[0],
+            y: launch.angularVelocity[1],
+            z: launch.angularVelocity[2],
+          }
+        : { x: 0, y: 0, z: 0 },
+      true
+    );
+    if (launch) {
+      initialLaunchRef.current = undefined;
+      onLaunchConsumed(card.id, launch);
+    }
     invalidate();
   }, [
     authorityKey,
@@ -587,6 +643,7 @@ export function PhysicsCard({
     card.rotation,
     layerKey,
     invalidate,
+    onLaunchConsumed,
     rapier.RigidBodyType.Dynamic,
     sceneAuthorityKey,
     tableSurfaceZ,
@@ -615,52 +672,55 @@ export function PhysicsCard({
     const flip = flipRef.current;
 
     if (flip) {
-      flip.elapsed = Math.min(
-        FLIP_DURATION_SECONDS,
-        flip.elapsed + CARD_PHYSICS.timeStep
-      );
+      const visual = visualRef.current;
+      flip.elapsed = reducedMotion
+        ? FLIP_DURATION_SECONDS
+        : Math.min(
+            FLIP_DURATION_SECONDS,
+            flip.elapsed + CARD_PHYSICS.timeStep
+          );
       const progress = flip.elapsed / FLIP_DURATION_SECONDS;
-      const eased = progress * progress * (3 - 2 * progress);
-      const rotation = flip.from.clone().slerp(flip.to, eased);
-      const translation = {
-        x: flip.position.x,
-        y: flip.position.y,
-        z:
-          flip.position.z +
-          Math.sin(Math.PI * eased) * CARD_PHYSICS.dragLift * 0.72,
-      };
+      const flipVisual = getFlipVisualState(progress);
 
-      body.setNextKinematicRotation(rotation);
-      body.setNextKinematicTranslation(translation);
+      if (visual) {
+        visual.position.z = flipVisual.lift * 0.008;
+        visual.rotation.x = flipVisual.rotationX;
+        visual.scale.set(
+          flipVisual.scaleX,
+          flipVisual.scaleY,
+          1
+        );
+      }
+
+      // The collider stays flat and stationary. Only the nested render group
+      // flips, so deterministic UI choreography cannot sweep nearby bodies.
+      body.setNextKinematicRotation(flip.rotation);
+      body.setNextKinematicTranslation(flip.position);
 
       if (progress >= 1) {
         const latestAuthority = latestAuthorityRef.current;
-        const completedPose = getCardPose(translation, rotation);
+        const [x, y, z, w] = createCardQuaternion(
+          latestAuthority.rotation,
+          latestAuthority.faceUp
+        );
 
-        if (hasMeaningfulPoseChange(completedPose, latestAuthority)) {
-          const [x, y, z, w] = createCardQuaternion(
-            latestAuthority.rotation,
-            latestAuthority.faceUp
-          );
-
-          body.setRotation({ x, y, z, w }, true);
-          body.setTranslation(
-            {
-              x: latestAuthority.position[0],
-              y: latestAuthority.position[1],
-              z: Math.max(
-                translation.z,
-                tableSurfaceZ +
-                  CARD_THICKNESS / 2 +
-                  CARD_PHYSICS.spawnLift
-              ),
-            },
-            true
-          );
-        } else {
-          body.setRotation(rotation, true);
-          body.setTranslation(translation, true);
+        if (visual) {
+          visual.position.set(0, 0, 0);
+          visual.rotation.set(0, 0, 0);
+          visual.scale.set(1, 1, 1);
         }
+        body.setRotation({ x, y, z, w }, true);
+        body.setTranslation(
+          {
+            x: latestAuthority.position[0],
+            y: latestAuthority.position[1],
+            z: Math.max(
+              flip.position.z,
+              tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin
+            ),
+          },
+          true
+        );
         body.setBodyType(rapier.RigidBodyType.Dynamic, true);
         body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         body.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -887,23 +947,29 @@ export function PhysicsCard({
       return;
     }
 
-    const pose = getCardPose(body.translation(), body.rotation());
-    const [x, y, z, w] = createCardQuaternion(pose.rotation, !pose.faceUp);
     const translation = body.translation();
     const rotation = body.rotation();
+    const visual = visualRef.current;
 
     body.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
     body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    visual?.position.set(0, 0, 0);
+    visual?.rotation.set(0, 0, 0);
+    visual?.scale.set(1, 1, 1);
     flipRef.current = {
       elapsed: 0,
-      from: new Quaternion(rotation.x, rotation.y, rotation.z, rotation.w),
       position: new Vector3(
         translation.x,
         translation.y,
         translation.z
       ),
-      to: new Quaternion(x, y, z, w),
+      rotation: {
+        w: rotation.w,
+        x: rotation.x,
+        y: rotation.y,
+        z: rotation.z,
+      },
     };
     onFlip(card.id);
     invalidate();
@@ -949,39 +1015,41 @@ export function PhysicsCard({
         restitution={CARD_PHYSICS.cardRestitution}
         contactSkin={CARD_PHYSICS.contactSkin}
       />
-      <mesh geometry={slabGeometry} castShadow receiveShadow>
-        <CardPaperMaterial
-          attach="material-0"
-          color={TAROT_SCENE_PALETTE.cardPaper}
-          roughness={0.94}
+      <group ref={visualRef}>
+        <mesh geometry={slabGeometry} castShadow receiveShadow>
+          <CardPaperMaterial
+            attach="material-0"
+            color={TAROT_SCENE_PALETTE.cardPaper}
+            roughness={0.94}
+            paperSeed={paperSeed}
+            cardSize={[cardWidth, cardHeight]}
+            edgePatina={0.12}
+          />
+          <CardPaperMaterial
+            attach="material-1"
+            color="#cdbd9e"
+            roughness={0.88}
+            paperSeed={paperSeed + 0.213}
+            cardSize={[cardWidth, cardHeight]}
+            edgePatina={0.3}
+          />
+        </mesh>
+        <CardFace
+          url={definition.image.preview}
+          artworkCrop={cardSet.artworkCrop}
+          cardWidth={cardWidth}
+          cardHeight={cardHeight}
           paperSeed={paperSeed}
-          cardSize={[cardWidth, cardHeight]}
-          edgePatina={0.12}
         />
-        <CardPaperMaterial
-          attach="material-1"
-          color="#cdbd9e"
-          roughness={0.88}
-          paperSeed={paperSeed + 0.213}
-          cardSize={[cardWidth, cardHeight]}
-          edgePatina={0.3}
+        <CardFace
+          url={cardSet.back.preview}
+          artworkCrop={cardSet.artworkCrop}
+          cardWidth={cardWidth}
+          cardHeight={cardHeight}
+          paperSeed={paperSeed + 0.417}
+          reverse
         />
-      </mesh>
-      <CardFace
-        url={definition.image.preview}
-        artworkCrop={cardSet.artworkCrop}
-        cardWidth={cardWidth}
-        cardHeight={cardHeight}
-        paperSeed={paperSeed}
-      />
-      <CardFace
-        url={cardSet.back.preview}
-        artworkCrop={cardSet.artworkCrop}
-        cardWidth={cardWidth}
-        cardHeight={cardHeight}
-        paperSeed={paperSeed + 0.417}
-        reverse
-      />
+      </group>
       <mesh
         position={[0, 0, CARD_VISIBLE_HALF_DEPTH + 0.004]}
         onPointerDown={handlePointerDown}
@@ -1006,6 +1074,7 @@ export function PhysicsCard({
         <meshBasicMaterial
           transparent
           opacity={0}
+          side={DoubleSide}
           depthTest={false}
           depthWrite={false}
         />

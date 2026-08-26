@@ -38,6 +38,11 @@ import type {
   TablePoint,
 } from "@/types";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
+import {
+  constrainReleaseToBounds,
+  getReleaseKinematics,
+  type PhysicsCardLaunchInput,
+} from "@/lib/card-physics";
 import type { SceneTableLayout } from "./table-layout";
 import {
   type CardPaperMotion,
@@ -193,6 +198,10 @@ type CardMeshProps = {
     cardId: string,
     position: TablePoint,
     rotation?: number
+  ) => void;
+  onPhysicsLaunch: (
+    cardId: string,
+    launch: PhysicsCardLaunchInput
   ) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
@@ -488,6 +497,7 @@ export const CardMesh = memo(function CardMesh({
   onMoveDeck,
   onPreviewDeckPosition,
   onMove,
+  onPhysicsLaunch,
   onFlip,
   onRotate,
   onHover,
@@ -986,6 +996,32 @@ export const CardMesh = memo(function CardMesh({
             schedulePendingReconciliation();
 
             if (card.zone === "deck") {
+              if (!reducedMotion) {
+                const launch = constrainReleaseToBounds({
+                  bounds: layout.dragBounds,
+                  kinematics: getReleaseKinematics({
+                    grabOffset: [drag.offset.x, drag.offset.y],
+                    pointerVelocity: [
+                      releaseVelocityX,
+                      releaseVelocityY,
+                    ],
+                    reducedMotion: false,
+                  }),
+                  position: nextWorldPosition,
+                });
+
+                onPhysicsLaunch(card.id, {
+                  ...launch,
+                  faceUp: card.faceUp,
+                  position: [
+                    group.position.x,
+                    group.position.y,
+                    group.position.z,
+                  ],
+                  rotation: MathUtils.radToDeg(group.rotation.z),
+                  targetPosition: nextWorldPosition,
+                });
+              }
               onDraw(card.id, nextPoint, landingRotation);
             } else {
               onMove(card.id, nextPoint, landingRotation);
@@ -1009,6 +1045,7 @@ export const CardMesh = memo(function CardMesh({
     },
     [
       canvas,
+      card.faceUp,
       card.id,
       card.rotation,
       card.zone,
@@ -1022,6 +1059,7 @@ export const CardMesh = memo(function CardMesh({
       onHover,
       onMove,
       onMoveDeck,
+      onPhysicsLaunch,
       onRotate,
       reducedMotion,
       schedulePendingReconciliation,

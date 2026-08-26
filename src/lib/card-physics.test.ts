@@ -2,12 +2,16 @@ import { describe, expect, test } from "vitest";
 import {
   CARD_PHYSICS,
   clampPhysicsPointToBounds,
+  constrainReleaseToBounds,
   createCardQuaternion,
   createPhysicsAuthorityKey,
   getCardColliderHalfExtents,
   getCardPose,
+  getFlipVisualState,
   getReleaseKinematics,
   hasMeaningfulPoseChange,
+  isPhysicsLaunchForMountedCard,
+  isPhysicsLaunchForTarget,
   normalizeRotation,
 } from "./card-physics";
 
@@ -93,6 +97,42 @@ describe("card release", () => {
       linearVelocity: [0, 0, 0],
     });
   });
+
+  test("removes only momentum that points out of the table", () => {
+    expect(
+      constrainReleaseToBounds({
+        bounds: { bottom: -2, left: -3, right: 3, top: 2 },
+        kinematics: {
+          angularVelocity: [0, 0, 2],
+          linearVelocity: [4, 1.5, 0],
+        },
+        position: [3, 0],
+      })
+    ).toEqual({
+      angularVelocity: [0, 0, 2],
+      linearVelocity: [0, 1.5, 0],
+    });
+  });
+});
+
+describe("controlled flip presentation", () => {
+  test("squeezes flat at the midpoint and restores full size", () => {
+    expect(getFlipVisualState(0)).toEqual({
+      lift: 0,
+      rotationX: 0,
+      scaleX: 1,
+      scaleY: 1,
+    });
+    expect(getFlipVisualState(0.5)).toMatchObject({
+      rotationX: Math.PI,
+      scaleY: 0.12,
+    });
+    expect(getFlipVisualState(1)).toMatchObject({
+      rotationX: Math.PI,
+      scaleX: 1,
+      scaleY: 1,
+    });
+  });
 });
 
 describe("card collider and persistence tolerances", () => {
@@ -139,5 +179,39 @@ describe("card collider and persistence tolerances", () => {
     expect(
       createPhysicsAuthorityKey({ ...pose, zIndex: pose.zIndex + 1 })
     ).not.toBe(createPhysicsAuthorityKey(pose));
+  });
+
+  test("accepts a one-shot launch only for its durable draw target", () => {
+    const launch = {
+      id: 7,
+      angularVelocity: [0, 0, 1] as [number, number, number],
+      faceUp: false,
+      linearVelocity: [2, 0, 0] as [number, number, number],
+      position: [-1, 0, 0.2] as [number, number, number],
+      rotation: 18,
+      targetPosition: [0.5, -0.25] as [number, number],
+    };
+
+    expect(isPhysicsLaunchForTarget(launch, [0.5, -0.25])).toBe(true);
+    expect(isPhysicsLaunchForTarget(launch, [0.7, -0.25])).toBe(false);
+    expect(
+      isPhysicsLaunchForMountedCard(launch, "table", [0.5, -0.25])
+    ).toBe(true);
+  });
+
+  test("invalidates a same-target launch when undo returns its card to the deck", () => {
+    const launch = {
+      id: 8,
+      angularVelocity: [0, 0, 1] as [number, number, number],
+      faceUp: true,
+      linearVelocity: [2, 0, 0] as [number, number, number],
+      position: [-1, 0, 0.2] as [number, number, number],
+      rotation: -24,
+      targetPosition: [0.5, -0.25] as [number, number],
+    };
+
+    expect(
+      isPhysicsLaunchForMountedCard(launch, "deck", [0.5, -0.25])
+    ).toBe(false);
   });
 });

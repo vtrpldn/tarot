@@ -40,16 +40,31 @@ float clothNoise(vec2 point) {
     blend.y
   );
 }
+
+// Procedural cloth has no mip chain. Fade each thread as its cell footprint
+// approaches a pixel so camera zoom and low DPR cannot turn it into moire.
+float clothDetailFade(vec2 point) {
+  vec2 footprint = fwidth(point);
+  float largestFootprint = max(footprint.x, footprint.y);
+
+  return 1.0 - smoothstep(0.28, 0.85, largestFootprint);
+}
 `;
 
 const CLOTH_FRAGMENT_COLOR = /* glsl */ `
 #include <map_fragment>
 vec2 clothPoint = vClothPosition.xy;
-float clothWarp = sin(clothPoint.x * 34.0) * 0.5 + 0.5;
-float clothWeft = sin(clothPoint.y * 39.0 + 0.72) * 0.5 + 0.5;
-float clothNap = clothNoise(clothPoint * 7.0);
-float clothFiber = (clothWarp * clothWeft - 0.25) * 0.034;
-float clothCloud = (clothNap - 0.5) * 0.024;
+vec2 clothWarpPoint = clothPoint * vec2(5.5, 1.4);
+vec2 clothWeftPoint = clothPoint * vec2(1.2, 6.2) + 0.72;
+vec2 clothNapPoint = clothPoint * 7.0;
+float clothWarp = clothNoise(clothWarpPoint);
+float clothWeft = clothNoise(clothWeftPoint);
+float clothNap = clothNoise(clothNapPoint);
+float clothFiber =
+  ((clothWarp - 0.5) * clothDetailFade(clothWarpPoint) +
+    (clothWeft - 0.5) * clothDetailFade(clothWeftPoint)) * 0.012;
+float clothCloud =
+  (clothNap - 0.5) * clothDetailFade(clothNapPoint) * 0.024;
 diffuseColor.rgb *= 1.0 + clothFiber + clothCloud;
 `;
 
@@ -79,6 +94,11 @@ export const TableClothMaterial = memo(function TableClothMaterial({
     });
 
     nextMaterial.name = "tarot-table-cloth";
+    (
+      nextMaterial as MeshStandardMaterial & {
+        extensions: { derivatives: boolean };
+      }
+    ).extensions = { derivatives: true };
     nextMaterial.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
         .replace("#include <common>", CLOTH_VERTEX_DECLARATION)
@@ -91,7 +111,7 @@ export const TableClothMaterial = memo(function TableClothMaterial({
           CLOTH_FRAGMENT_ROUGHNESS
         );
     };
-    nextMaterial.customProgramCacheKey = () => "tarot-table-cloth-v1";
+    nextMaterial.customProgramCacheKey = () => "tarot-table-cloth-v3";
     return nextMaterial;
   }, [color, emissive]);
 

@@ -49,7 +49,12 @@ import { getDeckCards } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
   CARD_PHYSICS,
+  constrainReleaseToBounds,
   createPhysicsAuthorityKey,
+  getReleaseKinematics,
+  isPhysicsLaunchForMountedCard,
+  type PhysicsCardLaunch,
+  type PhysicsCardLaunchInput,
   type PhysicsCardPose,
 } from "@/lib/card-physics";
 import type { SpreadRelationshipId } from "@/lib/tarot-spreads";
@@ -92,11 +97,13 @@ const MAX_DECK_STACK_HEIGHT = 0.07;
 const DECK_CASCADE_SCALE = 0.24;
 const CUT_RAIL_PIXEL_SIZE = 44;
 const CUT_DRAG_THRESHOLD = 0.045;
+const CUT_MAX_POINTER_SPEED = 7.5;
+const PHYSICS_LAUNCH_EXPIRY_MS = 5_000;
 const CARD_FACE_PLANE_OFFSET = 0.002;
-const AMBIENT_FILL_INTENSITY = 0.72;
+const AMBIENT_FILL_INTENSITY = 2.1;
 const SPOTLIGHT_ANGLE = 1.54;
-const SPOTLIGHT_INTENSITY = 188;
-const SPOTLIGHT_SHADOW_RADIUS = 4;
+const SPOTLIGHT_INTENSITY = 172;
+const SPOTLIGHT_SHADOW_RADIUS = 3;
 const CUT_DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const CELESTIAL_MARKS = [
   [-0.38, 0.31, 0.018],
@@ -756,11 +763,16 @@ type DeckCardLayer = {
 
 type CutDragState = {
   cardId: string;
+  faceUp: boolean;
+  lastInputAt: number;
+  lastMoveAt: number;
   lastPoint: Vector3;
   moved: boolean;
   offset: Vector3;
   origin: Vector3;
   pointerId: number;
+  rotation: number;
+  velocity: Vector3;
 };
 
 type DeckPointerCaptureTarget = EventTarget & {
@@ -817,6 +829,7 @@ function PhysicalDeck({
   layout,
   onCutSelect,
   onDraw,
+  onPhysicsLaunch,
   onSound,
   palette,
   passiveLayers,
@@ -838,6 +851,10 @@ function PhysicalDeck({
   layout: SceneTableLayout;
   onCutSelect: (cardId: string | null) => void;
   onDraw: (cardId: string, position: TablePoint) => void;
+  onPhysicsLaunch: (
+    cardId: string,
+    launch: PhysicsCardLaunchInput
+  ) => void;
   onSound: CardSoundPlayer;
   palette: ScenePalette;
   passiveLayers: DeckCardLayer[];
@@ -1058,14 +1075,57 @@ function PhysicalDeck({
     );
     cutPointerFallbackRef.current = null;
   };
-  const updateCutDragAt = (pointerId: number, point: Vector3) => {
+  const updateCutDragAt = (
+    pointerId: number,
+    point: Vector3,
+    timestamp: number
+  ) => {
     const drag = cutDragRef.current;
 
     if (!drag || drag.pointerId !== pointerId) {
       return false;
     }
 
-    const movement = point.distanceTo(drag.lastPoint);
+    if (
+      drag.lastInputAt === timestamp &&
+      point.distanceToSquared(drag.lastPoint) <= 0.00000001
+    ) {
+      return true;
+    }
+
+    drag.lastInputAt = timestamp;
+    const deltaX = point.x - drag.lastPoint.x;
+    const deltaY = point.y - drag.lastPoint.y;
+    const movement = Math.hypot(deltaX, deltaY);
+    const elapsed = Math.min(
+      0.064,
+      Math.max(0.004, (timestamp - drag.lastMoveAt) / 1000)
+    );
+
+    if (movement > 0.0001) {
+      let velocityX = deltaX / elapsed;
+      let velocityY = deltaY / elapsed;
+      const speed = Math.hypot(velocityX, velocityY);
+
+      if (speed > CUT_MAX_POINTER_SPEED) {
+        const velocityScale = CUT_MAX_POINTER_SPEED / speed;
+        velocityX *= velocityScale;
+        velocityY *= velocityScale;
+      }
+
+      const velocityBlend = 1 - Math.exp(-elapsed * 18);
+      drag.velocity.x = MathUtils.lerp(
+        drag.velocity.x,
+        velocityX,
+        velocityBlend
+      );
+      drag.velocity.y = MathUtils.lerp(
+        drag.velocity.y,
+        velocityY,
+        velocityBlend
+      );
+      drag.lastMoveAt = timestamp;
+    }
 
     drag.moved ||= point.distanceTo(drag.origin) > CUT_DRAG_THRESHOLD;
     drag.lastPoint.copy(point);
@@ -1086,10 +1146,12 @@ function PhysicalDeck({
   const finishCutDragAt = ({
     pointerId,
     point,
+    timestamp,
     cancelled = false,
   }: {
     pointerId: number;
     point: Vector3;
+    timestamp: number;
     cancelled?: boolean;
   }) => {
     const drag = cutDragRef.current;
@@ -1098,17 +1160,54 @@ function PhysicalDeck({
       return false;
     }
 
+    if (!cancelled) {
+      updateCutDragAt(pointerId, point, timestamp);
+    }
+
     if (!cancelled && drag.moved) {
-      const worldPosition: TablePoint = [
+      const requestedWorldPosition: TablePoint = [
         point.x - drag.offset.x,
         point.y - drag.offset.y,
       ];
+      const targetPoint = layout.toPoint(...requestedWorldPosition);
+      const worldPosition = layout.toWorld(targetPoint);
 
       externalDragRef.current = {
         cardId: drag.cardId,
         position: worldPosition,
       };
-      onDraw(drag.cardId, layout.toPoint(...worldPosition));
+      if (!reducedMotion) {
+        const idleSeconds = Math.max(
+          0,
+          (timestamp - drag.lastMoveAt) / 1000
+        );
+        const velocityDecay = Math.exp(-idleSeconds * 10);
+        const release = constrainReleaseToBounds({
+          bounds: layout.dragBounds,
+          kinematics: getReleaseKinematics({
+            grabOffset: [drag.offset.x, drag.offset.y],
+            pointerVelocity: [
+              drag.velocity.x * velocityDecay,
+              drag.velocity.y * velocityDecay,
+            ],
+            reducedMotion: false,
+          }),
+          position: worldPosition,
+        });
+
+        onPhysicsLaunch(drag.cardId, {
+          ...release,
+          faceUp: drag.faceUp,
+          position: [
+            worldPosition[0],
+            worldPosition[1],
+            topSurface + CARD_THICKNESS / 2 + 0.035,
+          ],
+          rotation: drag.rotation,
+          targetPosition: worldPosition,
+        });
+      }
+      onDraw(drag.cardId, targetPoint);
       onCutSelect(null);
     } else if (cancelled) {
       onCutSelect(null);
@@ -1154,11 +1253,16 @@ function PhysicalDeck({
     clearCutPointerFallback();
     cutDragRef.current = {
       cardId: layer.card.id,
+      faceUp: layer.card.faceUp,
+      lastInputAt: event.timeStamp,
+      lastMoveAt: event.timeStamp,
       lastPoint: point.clone(),
       moved: false,
       offset: point.clone().sub(cardPosition),
       origin: point.clone(),
       pointerId: event.pointerId,
+      rotation: layer.card.rotation,
+      velocity: new Vector3(),
     };
     externalDragRef.current = {
       cardId: layer.card.id,
@@ -1179,12 +1283,14 @@ function PhysicalDeck({
       finishCutDragAt({
         pointerId: activeDrag.pointerId,
         point: activeDrag.lastPoint.clone(),
+        timestamp: lostEvent.timeStamp,
       });
     };
     const handlePointerMoveFallback = (nativeEvent: PointerEvent) => {
       updateCutDragAt(
         nativeEvent.pointerId,
-        getCanvasCutPoint(nativeEvent)
+        getCanvasCutPoint(nativeEvent),
+        nativeEvent.timeStamp
       );
     };
     const handlePointerUpFallback = (nativeEvent: PointerEvent) => {
@@ -1202,6 +1308,7 @@ function PhysicalDeck({
       finishCutDragAt({
         pointerId: nativeEvent.pointerId,
         point: pointAtRelease,
+        timestamp: nativeEvent.timeStamp,
       });
     };
     const handlePointerCancelFallback = (nativeEvent: PointerEvent) => {
@@ -1217,6 +1324,7 @@ function PhysicalDeck({
       finishCutDragAt({
         pointerId: nativeEvent.pointerId,
         point: getCanvasCutPoint(nativeEvent),
+        timestamp: nativeEvent.timeStamp,
         cancelled: true,
       });
     };
@@ -1254,7 +1362,11 @@ function PhysicalDeck({
     }
 
     event.stopPropagation();
-    updateCutDragAt(event.pointerId, getCutPoint(event));
+    updateCutDragAt(
+      event.pointerId,
+      getCutPoint(event),
+      event.timeStamp
+    );
   };
   const finishCutDrag = (
     event: ThreeEvent<PointerEvent>,
@@ -1279,6 +1391,7 @@ function PhysicalDeck({
     finishCutDragAt({
       pointerId: event.pointerId,
       point,
+      timestamp: event.timeStamp,
       cancelled,
     });
   };
@@ -1613,14 +1726,14 @@ function SceneSpotlight({
         decay={2}
         distance={24}
         intensity={intensity}
-        penumbra={0.46}
+        penumbra={0.38}
         position={position}
-        shadow-bias={-0.0002}
+        shadow-bias={-0.00035}
         shadow-camera-far={18}
         shadow-camera-near={0.2}
         shadow-mapSize-height={shadowMapSize}
         shadow-mapSize-width={shadowMapSize}
-        shadow-normalBias={0.0018}
+        shadow-normalBias={0.001}
         shadow-radius={shadowRadius}
       />
     </>
@@ -1652,6 +1765,9 @@ function TarotTable({
   const invalidate = useThree((state) => state.invalidate);
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
   const externalDeckDragRef = useRef<ExternalCardDrag | null>(null);
+  const physicsLaunchesRef = useRef(new Map<string, PhysicsCardLaunch>());
+  const physicsLaunchSequenceRef = useRef(0);
+  const physicsLaunchTimeoutsRef = useRef(new Map<string, number>());
   const [cutCardId, setCutCardId] = useState<string | null>(null);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
@@ -1714,6 +1830,76 @@ function TarotTable({
       invalidate();
     },
     [invalidate]
+  );
+  const discardPhysicsLaunch = useCallback(
+    (cardId: string, expectedId?: number) => {
+      const current = physicsLaunchesRef.current.get(cardId);
+
+      if (!current || (expectedId !== undefined && current.id !== expectedId)) {
+        return;
+      }
+
+      physicsLaunchesRef.current.delete(cardId);
+      const timeout = physicsLaunchTimeoutsRef.current.get(cardId);
+      if (timeout !== undefined) {
+        window.clearTimeout(timeout);
+        physicsLaunchTimeoutsRef.current.delete(cardId);
+      }
+    },
+    []
+  );
+  const registerPhysicsLaunch = useCallback(
+    (cardId: string, launch: PhysicsCardLaunchInput) => {
+      discardPhysicsLaunch(cardId);
+      physicsLaunchSequenceRef.current += 1;
+      const nextLaunch: PhysicsCardLaunch = {
+        ...launch,
+        id: physicsLaunchSequenceRef.current,
+      };
+
+      physicsLaunchesRef.current.set(cardId, nextLaunch);
+      physicsLaunchTimeoutsRef.current.set(
+        cardId,
+        window.setTimeout(
+          () => discardPhysicsLaunch(cardId, nextLaunch.id),
+          PHYSICS_LAUNCH_EXPIRY_MS
+        )
+      );
+    },
+    [discardPhysicsLaunch]
+  );
+  const consumePhysicsLaunch = useCallback(
+    (cardId: string, launch: PhysicsCardLaunch) => {
+      discardPhysicsLaunch(cardId, launch.id);
+    },
+    [discardPhysicsLaunch]
+  );
+  useLayoutEffect(() => {
+    const cardsById = new Map(session.cards.map((card) => [card.id, card]));
+
+    physicsLaunchesRef.current.forEach((launch, cardId) => {
+      const card = cardsById.get(cardId);
+      const worldTarget: TablePoint = card
+        ? layout.toWorld(card.position)
+        : [0, 0];
+
+      if (
+        !card ||
+        !isPhysicsLaunchForMountedCard(launch, card.zone, worldTarget)
+      ) {
+        discardPhysicsLaunch(cardId, launch.id);
+      }
+    });
+  }, [discardPhysicsLaunch, layout, session.cards]);
+  useEffect(
+    () => () => {
+      physicsLaunchTimeoutsRef.current.forEach((timeout) => {
+        window.clearTimeout(timeout);
+      });
+      physicsLaunchTimeoutsRef.current.clear();
+      physicsLaunchesRef.current.clear();
+    },
+    []
   );
   const deckMetrics = getDeckMetrics(deckCount, cardSet.cards.length);
   const deckOffsets = useMemo(
@@ -1817,18 +2003,13 @@ function TarotTable({
         color={palette.keyLight}
         intensity={AMBIENT_FILL_INTENSITY}
       />
-      <hemisphereLight
-        color={palette.fillLight}
-        groundColor={palette.tableEmissive}
-        intensity={0.42}
-      />
       <SceneSpotlight
         angle={SPOTLIGHT_ANGLE}
         castShadow
         color={palette.keyLight}
         intensity={SPOTLIGHT_INTENSITY}
-        position={[-3.8, 4.6, 8.5]}
-        shadowMapSize={isMobileViewport ? 512 : 1024}
+        position={[0, 0, 7.5]}
+        shadowMapSize={1024}
         shadowRadius={SPOTLIGHT_SHADOW_RADIUS}
       />
       <TableSurface
@@ -1877,6 +2058,7 @@ function TarotTable({
           layout={layout}
           onCutSelect={setCutCardId}
           onDraw={onDraw}
+          onPhysicsLaunch={registerPhysicsLaunch}
           onSound={onSound}
           palette={palette}
           passiveLayers={passiveDeckLayers}
@@ -1951,6 +2133,7 @@ function TarotTable({
             onMoveDeck={onMoveDeck}
             onPreviewDeckPosition={previewDeckPosition}
             onMove={onMove}
+            onPhysicsLaunch={registerPhysicsLaunch}
             onFlip={onFlip}
             onRotate={onRotate}
             onHover={onHover}
@@ -1977,9 +2160,11 @@ function TarotTable({
             dragBounds={layout.dragBounds}
             dropIndex={tableIndex}
             layerKey={card.zIndex}
+            initialLaunch={physicsLaunchesRef.current.get(card.id)}
             onFlip={onFlip}
             onHover={onHover}
             onMove={handlePhysicsMove}
+            onLaunchConsumed={consumePhysicsLaunch}
             onRotate={onRotate}
             onSelect={handleTableSelect}
             onSettle={handlePhysicsSettle}

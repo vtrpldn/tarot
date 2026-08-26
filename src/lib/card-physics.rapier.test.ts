@@ -126,4 +126,24 @@ describe("configured Tarot card colliders in Rapier", () => {
       world.free();
     }
   });
+
+  test("keeps visible planar inertia after a card is released", () => {
+    const world = createWorld();
+
+    try {
+      const card = createCard(world, {
+        position: [0, 0, CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin],
+        velocity: [2.4, 0, 0],
+      });
+
+      step(world, 12);
+
+      expect(card.body.translation().x).toBeGreaterThan(0.18);
+      expect(card.body.translation().z).toBeGreaterThanOrEqual(
+        CARD_HALF_DEPTH - 0.0006
+      );
+    } finally {
+      world.free();
+    }
+  });
 });
