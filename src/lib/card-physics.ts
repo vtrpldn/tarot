@@ -21,6 +21,8 @@ export const CARD_PHYSICS = {
 } as const;
 
 const POINTER_VELOCITY_RESPONSE = 36;
+const POINTER_VELOCITY_RESPONSE_WINDOW = 1 / 30;
+const STALE_POINTER_VELOCITY_SECONDS = 0.12;
 
 export type PhysicsQuaternion = [x: number, y: number, z: number, w: number];
 
@@ -66,7 +68,17 @@ export function getSmoothedPointerVelocity({
     sampleVelocityY *= velocityScale;
   }
 
-  const responseElapsed = Math.max(0.004, elapsedSeconds);
+  // Keep one late render frame from replacing an intentional flick with a
+  // near-zero final delta. A genuinely paused pointer should still begin a
+  // fresh velocity sample instead of resurrecting stale momentum.
+  if (elapsedSeconds >= STALE_POINTER_VELOCITY_SECONDS) {
+    return [sampleVelocityX, sampleVelocityY];
+  }
+
+  const responseElapsed = Math.min(
+    POINTER_VELOCITY_RESPONSE_WINDOW,
+    Math.max(0.004, elapsedSeconds)
+  );
   const blend =
     1 - Math.exp(-responseElapsed * POINTER_VELOCITY_RESPONSE);
 

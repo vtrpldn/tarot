@@ -45,24 +45,28 @@ describe("card orientation", () => {
 });
 
 describe("card release", () => {
-  test("retains flick momentum through a slower final pointer sample", () => {
+  test("retains flick momentum through 50-64ms final pointer samples", () => {
     const fastSample = getSmoothedPointerVelocity({
       delta: [0.2, 0],
       elapsedSeconds: 0.016,
       maxSpeed: 8,
       previousVelocity: [0, 0],
     });
-    const finalSample = getSmoothedPointerVelocity({
-      delta: [0.004, 0],
-      elapsedSeconds: 0.016,
-      maxSpeed: 8,
-      previousVelocity: fastSample,
-    });
+    const finalSamples = [0.05, 0.064].map((elapsedSeconds) =>
+      getSmoothedPointerVelocity({
+        delta: [0.004, 0],
+        elapsedSeconds,
+        maxSpeed: 8,
+        previousVelocity: fastSample,
+      })
+    );
 
     expect(fastSample[0]).toBeGreaterThan(3);
-    expect(finalSample[0]).toBeGreaterThan(1.5);
-    expect(finalSample[0]).toBeLessThan(fastSample[0]);
-    expect(finalSample[1]).toBe(0);
+    finalSamples.forEach((finalSample) => {
+      expect(finalSample[0]).toBeGreaterThan(1);
+      expect(finalSample[0]).toBeLessThan(fastSample[0]);
+      expect(finalSample[1]).toBe(0);
+    });
   });
 
   test("discards stale flick momentum after a pointer pause", () => {

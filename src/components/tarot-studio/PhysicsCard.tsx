@@ -57,6 +57,7 @@ import {
   type ExternalCardDrag,
 } from "./CardMesh";
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
+import { getMoveReleaseTranslation } from "./physics-card-drag";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
 const CARD_FACE_PLANE_OFFSET = 0.002;
@@ -476,11 +477,11 @@ export function PhysicsCard({
         );
       } else {
         body.setTranslation(
-          {
-            x: drag.target.x,
-            y: drag.target.y,
-            z: drag.target.z,
-          },
+          getMoveReleaseTranslation(
+            drag.moved,
+            drag.startTranslation,
+            drag.target
+          ),
           true
         );
       }
