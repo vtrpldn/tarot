@@ -57,6 +57,268 @@ const GAME_OF_HOPE_SOURCE = {
   locator: "Historical 36-card precursor, c. 1800",
 } as const;
 
+const FORTY_SERVANTS_INDEX_SOURCE = {
+  label: "The Forty Servants · official card index",
+  href: "https://www.adventuresinwoowoo.com/thefortyservants/",
+  locator: "Official 40-card index",
+} as const;
+
+const FORTY_SERVANTS_QUICK_GUIDE_SOURCE = {
+  label: "The Forty Servants · Quick Guide",
+  href: "https://www.adventuresinwoowoo.com/wp-content/uploads/2017/04/The-Forty-Servants-Cheat-Sheet.pdf",
+  locator: "Official four-page quick guide",
+} as const;
+
+type FortyServantsReading = {
+  summary: string;
+  summaryPtBr: string;
+  themes: string;
+  themesPtBr: string;
+};
+
+const FORTY_SERVANTS_READINGS: Record<string, FortyServantsReading> = {
+  "the-adventurer": {
+    summary: "Encourages a break from familiar routines in favor of fresh experience, movement, and discovery.",
+    summaryPtBr: "Incentiva a sair da rotina para buscar experiências novas, movimento e descoberta.",
+    themes: "Exploration · novelty · courage",
+    themesPtBr: "Exploração · novidade · coragem",
+  },
+  "the-balancer": {
+    summary: "Draws attention to the parts of life that need steadier proportion, harmony, and care.",
+    summaryPtBr: "Chama atenção para as áreas da vida que precisam de mais proporção, harmonia e cuidado.",
+    themes: "Balance · harmony · adjustment",
+    themesPtBr: "Equilíbrio · harmonia · ajuste",
+  },
+  "the-carnal": {
+    summary: "Centers embodied confidence, sensuality, and an affirmative relationship with physical desire.",
+    summaryPtBr: "Valoriza a confiança no corpo, a sensualidade e uma relação afirmativa com o desejo físico.",
+    themes: "Sensuality · attraction · self-worth",
+    themesPtBr: "Sensualidade · atração · autoestima",
+  },
+  "the-chaste": {
+    summary: "Calls for discipline when immediate pleasures distract from a healthier, more considered direction.",
+    summaryPtBr: "Pede disciplina quando prazeres imediatos afastam você de uma direção mais saudável e consciente.",
+    themes: "Discipline · restraint · purity",
+    themesPtBr: "Disciplina · contenção · pureza",
+  },
+  "the-conductor": {
+    summary: "Invites you to take an active hand in organizing events and directing your circumstances.",
+    summaryPtBr: "Convida você a participar ativamente da organização dos acontecimentos e da própria direção.",
+    themes: "Agency · coordination · leadership",
+    themesPtBr: "Autonomia · coordenação · liderança",
+  },
+  "the-contemplator": {
+    summary: "Suggests stepping back from a problem so subconscious understanding has room to emerge.",
+    summaryPtBr: "Sugere se afastar do problema para que a compreensão subconsciente tenha espaço para surgir.",
+    themes: "Subconscious · reflection · insight",
+    themesPtBr: "Subconsciente · reflexão · insight",
+  },
+  "the-dancer": {
+    summary: "Makes room for disappointment and asks for acceptance when events do not go as planned.",
+    summaryPtBr: "Abre espaço para a decepção e pede aceitação quando os acontecimentos não saem como planejado.",
+    themes: "Acceptance · resilience · release",
+    themesPtBr: "Aceitação · resiliência · desapego",
+  },
+  "the-dead": {
+    summary: "Links the present to ancestors and collective history, asking what the past can teach now.",
+    summaryPtBr: "Liga o presente aos ancestrais e à história coletiva, perguntando o que o passado pode ensinar agora.",
+    themes: "Ancestry · history · cycles",
+    themesPtBr: "Ancestralidade · história · ciclos",
+  },
+  "the-depleted": {
+    summary: "Signals that a resource has been exhausted and that rest, renewal, or a new direction is needed.",
+    summaryPtBr: "Sinaliza que um recurso se esgotou e que é preciso descansar, se renovar ou mudar de direção.",
+    themes: "Exhaustion · renewal · redirection",
+    themesPtBr: "Esgotamento · renovação · redirecionamento",
+  },
+  "the-desperate": {
+    summary: "Names a painful low point directly so its reality can be faced rather than avoided.",
+    summaryPtBr: "Nomeia diretamente um ponto doloroso para que sua realidade seja enfrentada, e não evitada.",
+    themes: "Despair · crisis · recognition",
+    themesPtBr: "Desespero · crise · reconhecimento",
+  },
+  "the-devil": {
+    summary: "Reveals limiting beliefs and self-made bindings that can be recognized and released.",
+    summaryPtBr: "Revela crenças limitantes e amarras autoimpostas que podem ser reconhecidas e abandonadas.",
+    themes: "Limitation · liberation · agency",
+    themesPtBr: "Limitação · libertação · autonomia",
+  },
+  "the-explorer": {
+    summary: "Supports inner exploration, personal development, and the discovery of overlooked potential.",
+    summaryPtBr: "Apoia a exploração interior, o desenvolvimento pessoal e a descoberta de potencial pouco percebido.",
+    themes: "Self-discovery · growth · potential",
+    themesPtBr: "Autodescoberta · crescimento · potencial",
+  },
+  "the-eye": {
+    summary: "Offers a wider perspective, inviting trust that events may belong to a pattern not yet visible.",
+    summaryPtBr: "Oferece uma perspectiva mais ampla e convida a confiar que os fatos podem pertencer a um padrão ainda invisível.",
+    themes: "Perspective · faith · acceptance",
+    themesPtBr: "Perspectiva · confiança · aceitação",
+  },
+  "the-father": {
+    summary: "Brings firm guidance that builds practical wisdom, responsibility, and self-reliance.",
+    summaryPtBr: "Traz uma orientação firme que desenvolve sabedoria prática, responsabilidade e autonomia.",
+    themes: "Guidance · wisdom · self-reliance",
+    themesPtBr: "Orientação · sabedoria · autonomia",
+  },
+  "the-fixer": {
+    summary: "Focuses on resolving a problem through practical action and willingness to meet its real demands.",
+    summaryPtBr: "Foca em resolver um problema por meio de ação prática e disposição para atender às suas exigências reais.",
+    themes: "Resolution · repair · commitment",
+    themesPtBr: "Resolução · reparo · compromisso",
+  },
+  "the-fortunate": {
+    summary: "Highlights well-being, abundance, and the ability to notice how much is already going well.",
+    summaryPtBr: "Destaca o bem-estar, a abundância e a capacidade de perceber quanto já está indo bem.",
+    themes: "Well-being · abundance · gratitude",
+    themesPtBr: "Bem-estar · abundância · gratidão",
+  },
+  "the-gate-keeper": {
+    summary: "Points toward access, reminding you that an opening or key may exist where you feel shut out.",
+    summaryPtBr: "Aponta para o acesso e lembra que pode haver uma abertura ou chave onde você se sente excluído.",
+    themes: "Access · openings · possibility",
+    themesPtBr: "Acesso · aberturas · possibilidade",
+  },
+  "the-giver": {
+    summary: "Emphasizes generosity and gratitude while keeping giving and receiving in mutual view.",
+    summaryPtBr: "Enfatiza generosidade e gratidão, mantendo dar e receber em uma mesma perspectiva.",
+    themes: "Generosity · exchange · gratitude",
+    themesPtBr: "Generosidade · troca · gratidão",
+  },
+  "the-guru": {
+    summary: "Asks that knowledge and spiritual insight be put to practical use in ordinary life.",
+    summaryPtBr: "Pede que o conhecimento e o insight espiritual sejam aplicados de modo prático na vida cotidiana.",
+    themes: "Practice · integration · guidance",
+    themesPtBr: "Prática · integração · orientação",
+  },
+  "the-healer": {
+    summary: "Centers recovery and restorative care for both yourself and the people around you.",
+    summaryPtBr: "Valoriza a recuperação e o cuidado restaurador consigo e com as pessoas ao seu redor.",
+    themes: "Healing · recovery · care",
+    themesPtBr: "Cura · recuperação · cuidado",
+  },
+  "the-idea": {
+    summary: "Encourages original thinking and recognizes inspiration as a resource that remains close at hand.",
+    summaryPtBr: "Incentiva o pensamento original e reconhece a inspiração como um recurso que permanece ao alcance.",
+    themes: "Creativity · originality · inspiration",
+    themesPtBr: "Criatividade · originalidade · inspiração",
+  },
+  "the-levitator": {
+    summary: "Creates distance from drama so a more detached and useful perspective can emerge.",
+    summaryPtBr: "Cria distância do drama para que surja uma perspectiva mais desapegada e útil.",
+    themes: "Detachment · perspective · calm",
+    themesPtBr: "Desapego · perspectiva · calma",
+  },
+  "the-librarian": {
+    summary: "Favors study, theory, and the patient expansion of knowledge around a subject.",
+    summaryPtBr: "Favorece o estudo, a teoria e a expansão paciente do conhecimento sobre um assunto.",
+    themes: "Study · theory · knowledge",
+    themesPtBr: "Estudo · teoria · conhecimento",
+  },
+  "the-lovers": {
+    summary: "Focuses on trust, intimacy, and the deeper bonds that remain after initial attraction settles.",
+    summaryPtBr: "Foca na confiança, na intimidade e nos vínculos profundos que permanecem depois que a atração inicial se assenta.",
+    themes: "Intimacy · partnership · devotion",
+    themesPtBr: "Intimidade · parceria · devoção",
+  },
+  "the-master": {
+    summary: "Calls you toward your best self and toward choices shaped by your higher rather than lesser impulses.",
+    summaryPtBr: "Chama você em direção ao seu melhor eu e a escolhas moldadas por seus impulsos mais elevados.",
+    themes: "Mastery · higher self · refinement",
+    themesPtBr: "Maestria · eu superior · aprimoramento",
+  },
+  "the-media": {
+    summary: "Examines how messages spread and how publicity or propaganda can shape what people believe.",
+    summaryPtBr: "Examina como mensagens se espalham e como publicidade ou propaganda podem moldar crenças.",
+    themes: "Communication · publicity · narrative",
+    themesPtBr: "Comunicação · divulgação · narrativa",
+  },
+  "the-messenger": {
+    summary: "Supports clearer communication and attentiveness to the messages life may be sending.",
+    summaryPtBr: "Apoia uma comunicação mais clara e a atenção às mensagens que a vida pode estar enviando.",
+    themes: "Messages · listening · connection",
+    themesPtBr: "Mensagens · escuta · conexão",
+  },
+  "the-monk": {
+    summary: "Recommends simplicity, contemplation, and quieter habits that reduce unnecessary complication.",
+    summaryPtBr: "Recomenda simplicidade, contemplação e hábitos mais tranquilos que reduzem complicações desnecessárias.",
+    themes: "Simplicity · meditation · introspection",
+    themesPtBr: "Simplicidade · meditação · introspecção",
+  },
+  "the-moon": {
+    summary: "Brings hidden matters and self-deception into view while asking for care around illusion and lies.",
+    summaryPtBr: "Traz à vista questões ocultas e autoengano, pedindo cuidado com ilusões e mentiras.",
+    themes: "Illusion · shadows · discernment",
+    themesPtBr: "Ilusão · sombras · discernimento",
+  },
+  "the-mother": {
+    summary: "Represents nourishment, fertility, safety, and the care that supports a secure life.",
+    summaryPtBr: "Representa nutrição, fertilidade, segurança e o cuidado que sustenta uma vida protegida.",
+    themes: "Nurture · fertility · security",
+    themesPtBr: "Nutrição · fertilidade · segurança",
+  },
+  "the-opposer": {
+    summary: "Identifies restrictions imposed from outside and asks you to meet the opposition directly.",
+    summaryPtBr: "Identifica restrições impostas de fora e pede que você enfrente a oposição diretamente.",
+    themes: "Opposition · boundaries · confrontation",
+    themesPtBr: "Oposição · limites · enfrentamento",
+  },
+  "the-planet": {
+    summary: "Restores a sense of scale by placing personal concerns within an immense, awe-inspiring universe.",
+    summaryPtBr: "Restaura a noção de escala ao situar preocupações pessoais em um universo imenso e inspirador.",
+    themes: "Scale · cosmos · wonder",
+    themesPtBr: "Escala · cosmos · assombro",
+  },
+  "the-protector": {
+    summary: "Emphasizes safeguards for yourself, loved ones, and whatever must be kept out of harm.",
+    summaryPtBr: "Enfatiza salvaguardas para você, pessoas queridas e tudo o que precisa ser mantido a salvo.",
+    themes: "Protection · defense · safety",
+    themesPtBr: "Proteção · defesa · segurança",
+  },
+  "the-protester": {
+    summary: "Urges a courageous response to injustice and a refusal to stay silent about what is wrong.",
+    summaryPtBr: "Incentiva uma resposta corajosa à injustiça e a recusa de silenciar diante do que está errado.",
+    themes: "Justice · dissent · courage",
+    themesPtBr: "Justiça · dissidência · coragem",
+  },
+  "the-road-opener": {
+    summary: "Clears obstacles and makes emerging opportunities or routes easier to recognize.",
+    summaryPtBr: "Remove obstáculos e torna mais fácil reconhecer oportunidades ou caminhos que estão surgindo.",
+    themes: "Clearing · opportunity · paths",
+    themesPtBr: "Limpeza · oportunidade · caminhos",
+  },
+  "the-saint": {
+    summary: "Directs you to seek help from people with the expertise or influence a task requires.",
+    summaryPtBr: "Orienta você a buscar ajuda de pessoas com a especialização ou influência que a tarefa exige.",
+    themes: "Help · expertise · intercession",
+    themesPtBr: "Ajuda · especialização · intercessão",
+  },
+  "the-seer": {
+    summary: "Favors intuition and inner guidance when instinct can contribute what analysis does not.",
+    summaryPtBr: "Favorece a intuição e a orientação interna quando o instinto pode oferecer o que a análise não oferece.",
+    themes: "Intuition · inner guidance · instinct",
+    themesPtBr: "Intuição · orientação interna · instinto",
+  },
+  "the-sun": {
+    summary: "Affirms radiance, vitality, and the confidence to meet life with visible energy.",
+    summaryPtBr: "Afirma a radiância, a vitalidade e a confiança para encontrar a vida com energia visível.",
+    themes: "Radiance · vitality · confidence",
+    themesPtBr: "Radiância · vitalidade · confiança",
+  },
+  "the-thinker": {
+    summary: "Uses rational analysis and impartial thought to clarify a problem and its next step.",
+    summaryPtBr: "Usa análise racional e pensamento imparcial para esclarecer um problema e seu próximo passo.",
+    themes: "Logic · analysis · objectivity",
+    themesPtBr: "Lógica · análise · objetividade",
+  },
+  "the-witch": {
+    summary: "Opens attention to sorcery, conjuring, and the mystery woven through everyday life.",
+    summaryPtBr: "Abre a atenção para feitiçaria, conjuração e o mistério tecido na vida cotidiana.",
+    themes: "Sorcery · mystery · enchantment",
+    themesPtBr: "Feitiçaria · mistério · encantamento",
+  },
+};
+
 type MajorReading = {
   rwsSummary: string;
   marseilleSummary: string;
@@ -959,6 +1221,14 @@ const PORTUGUESE_SOURCE_METADATA: Record<
     label: "Das Spiel der Hoffnung · Museu Britânico",
     locator: "Precursor histórico de 36 cartas, c. 1800",
   },
+  [FORTY_SERVANTS_INDEX_SOURCE.href]: {
+    label: "Os Quarenta Servidores · índice oficial das cartas",
+    locator: "Índice oficial das 40 cartas",
+  },
+  [FORTY_SERVANTS_QUICK_GUIDE_SOURCE.href]: {
+    label: "Os Quarenta Servidores · guia rápido",
+    locator: "Guia rápido oficial de quatro páginas",
+  },
 };
 
 function getPortugueseName(definition: CardDefinition): string {
@@ -975,6 +1245,46 @@ function localizeSources(
       ? { ...source, ...translation }
       : source;
   });
+}
+
+function getFortyServantsReading(
+  definition: CardDefinition,
+  locale: AppLocale
+): CardReading | undefined {
+  const reading = FORTY_SERVANTS_READINGS[definition.id];
+
+  if (!reading) {
+    return undefined;
+  }
+
+  if (locale === "pt-BR") {
+    return {
+      summary: reading.summaryPtBr,
+      correspondences: [
+        { label: "Temas", value: reading.themesPtBr },
+        { label: "Sistema", value: "Os Quarenta Servidores · oráculo de 40 cartas" },
+        { label: "Carta", value: getPortugueseName(definition) },
+      ],
+      sources: localizeSources([
+        FORTY_SERVANTS_INDEX_SOURCE,
+        FORTY_SERVANTS_QUICK_GUIDE_SOURCE,
+      ]),
+      traditionNote:
+        "Resumo editorial conciso, para leitura oracular, baseado no índice e guia rápido oficiais de Tommie Kelly.",
+    };
+  }
+
+  return {
+    summary: reading.summary,
+    correspondences: [
+      { label: "Themes", value: reading.themes },
+      { label: "System", value: "The Forty Servants · 40-card oracle" },
+      { label: "Card", value: definition.name },
+    ],
+    sources: [FORTY_SERVANTS_INDEX_SOURCE, FORTY_SERVANTS_QUICK_GUIDE_SOURCE],
+    traditionNote:
+      "Concise editorial oracle reading, based on Tommie Kelly's official card index and Quick Guide.",
+  };
 }
 
 function localizeAstrology(value: string): string {
@@ -1153,6 +1463,10 @@ export function getCardReading(
   definition: CardDefinition,
   locale: AppLocale = "en"
 ): CardReading | undefined {
+  if (cardSetId === "forty-servants") {
+    return getFortyServantsReading(definition, locale);
+  }
+
   if (locale === "pt-BR") {
     if (cardSetId === "classic-lenormand") {
       return getPortugueseLenormandReading(definition);
