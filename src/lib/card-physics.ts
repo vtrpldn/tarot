@@ -20,6 +20,8 @@ export const CARD_PHYSICS = {
   timeStep: 1 / 60,
 } as const;
 
+const POINTER_VELOCITY_RESPONSE = 36;
+
 export type PhysicsQuaternion = [x: number, y: number, z: number, w: number];
 
 export type PhysicsCardPose = {
@@ -38,6 +40,43 @@ export type PhysicsFlipVisualState = {
   scaleX: number;
   scaleY: number;
 };
+
+export function getSmoothedPointerVelocity({
+  delta,
+  elapsedSeconds,
+  maxSpeed,
+  previousVelocity,
+}: {
+  delta: TablePoint;
+  elapsedSeconds: number;
+  maxSpeed: number;
+  previousVelocity: TablePoint;
+}): TablePoint {
+  const sampleElapsed = Math.min(
+    0.064,
+    Math.max(0.004, elapsedSeconds)
+  );
+  let sampleVelocityX = delta[0] / sampleElapsed;
+  let sampleVelocityY = delta[1] / sampleElapsed;
+  const sampleSpeed = Math.hypot(sampleVelocityX, sampleVelocityY);
+
+  if (sampleSpeed > maxSpeed) {
+    const velocityScale = maxSpeed / sampleSpeed;
+    sampleVelocityX *= velocityScale;
+    sampleVelocityY *= velocityScale;
+  }
+
+  const responseElapsed = Math.max(0.004, elapsedSeconds);
+  const blend =
+    1 - Math.exp(-responseElapsed * POINTER_VELOCITY_RESPONSE);
+
+  return [
+    previousVelocity[0] +
+      (sampleVelocityX - previousVelocity[0]) * blend,
+    previousVelocity[1] +
+      (sampleVelocityY - previousVelocity[1]) * blend,
+  ];
+}
 
 export type PhysicsCardLaunch = {
   id: number;

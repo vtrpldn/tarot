@@ -9,6 +9,7 @@ import {
   getCardPose,
   getFlipVisualState,
   getReleaseKinematics,
+  getSmoothedPointerVelocity,
   hasMeaningfulPoseChange,
   isPhysicsLaunchForMountedCard,
   isPhysicsLaunchForTarget,
@@ -44,6 +45,44 @@ describe("card orientation", () => {
 });
 
 describe("card release", () => {
+  test("retains flick momentum through a slower final pointer sample", () => {
+    const fastSample = getSmoothedPointerVelocity({
+      delta: [0.2, 0],
+      elapsedSeconds: 0.016,
+      maxSpeed: 8,
+      previousVelocity: [0, 0],
+    });
+    const finalSample = getSmoothedPointerVelocity({
+      delta: [0.004, 0],
+      elapsedSeconds: 0.016,
+      maxSpeed: 8,
+      previousVelocity: fastSample,
+    });
+
+    expect(fastSample[0]).toBeGreaterThan(3);
+    expect(finalSample[0]).toBeGreaterThan(1.5);
+    expect(finalSample[0]).toBeLessThan(fastSample[0]);
+    expect(finalSample[1]).toBe(0);
+  });
+
+  test("discards stale flick momentum after a pointer pause", () => {
+    const fastSample = getSmoothedPointerVelocity({
+      delta: [0.2, 0],
+      elapsedSeconds: 0.016,
+      maxSpeed: 8,
+      previousVelocity: [0, 0],
+    });
+    const afterPause = getSmoothedPointerVelocity({
+      delta: [0.004, 0],
+      elapsedSeconds: 1,
+      maxSpeed: 8,
+      previousVelocity: fastSample,
+    });
+
+    expect(afterPause[0]).toBeCloseTo(0.0625, 4);
+    expect(afterPause[1]).toBe(0);
+  });
+
   test("keeps a dragged card centre inside the table boundary", () => {
     const bounds = { bottom: -2, left: -3, right: 3, top: 2 };
 

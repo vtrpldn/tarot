@@ -52,6 +52,7 @@ import {
   constrainReleaseToBounds,
   createPhysicsAuthorityKey,
   getReleaseKinematics,
+  getSmoothedPointerVelocity,
   isPhysicsLaunchForMountedCard,
   type PhysicsCardLaunch,
   type PhysicsCardLaunchInput,
@@ -1097,33 +1098,17 @@ function PhysicalDeck({
     const deltaX = point.x - drag.lastPoint.x;
     const deltaY = point.y - drag.lastPoint.y;
     const movement = Math.hypot(deltaX, deltaY);
-    const elapsed = Math.min(
-      0.064,
-      Math.max(0.004, (timestamp - drag.lastMoveAt) / 1000)
-    );
+    const elapsed = Math.max(0, (timestamp - drag.lastMoveAt) / 1000);
 
     if (movement > 0.0001) {
-      let velocityX = deltaX / elapsed;
-      let velocityY = deltaY / elapsed;
-      const speed = Math.hypot(velocityX, velocityY);
-
-      if (speed > CUT_MAX_POINTER_SPEED) {
-        const velocityScale = CUT_MAX_POINTER_SPEED / speed;
-        velocityX *= velocityScale;
-        velocityY *= velocityScale;
-      }
-
-      const velocityBlend = 1 - Math.exp(-elapsed * 36);
-      drag.velocity.x = MathUtils.lerp(
-        drag.velocity.x,
-        velocityX,
-        velocityBlend
-      );
-      drag.velocity.y = MathUtils.lerp(
-        drag.velocity.y,
-        velocityY,
-        velocityBlend
-      );
+      const [smoothedVelocityX, smoothedVelocityY] =
+        getSmoothedPointerVelocity({
+          delta: [deltaX, deltaY],
+          elapsedSeconds: elapsed,
+          maxSpeed: CUT_MAX_POINTER_SPEED,
+          previousVelocity: [drag.velocity.x, drag.velocity.y],
+        });
+      drag.velocity.set(smoothedVelocityX, smoothedVelocityY, 0);
       drag.lastMoveAt = timestamp;
     }
 

@@ -41,6 +41,7 @@ import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
   constrainReleaseToBounds,
   getReleaseKinematics,
+  getSmoothedPointerVelocity,
   type PhysicsCardLaunchInput,
 } from "@/lib/card-physics";
 import type { SceneTableLayout } from "./table-layout";
@@ -127,32 +128,16 @@ function sampleDragVelocity(
 ): [number, number] {
   const deltaX = point.x - drag.lastPoint.x;
   const deltaY = point.y - drag.lastPoint.y;
-  const elapsed = Math.min(
-    0.064,
-    Math.max(0.004, (timestamp - drag.lastMoveAt) / 1000)
-  );
-  let sampleVelocityX = deltaX / elapsed;
-  let sampleVelocityY = deltaY / elapsed;
-  const sampleSpeed = Math.hypot(sampleVelocityX, sampleVelocityY);
-
-  if (sampleSpeed > MAX_POINTER_SPEED) {
-    const velocityScale = MAX_POINTER_SPEED / sampleSpeed;
-    sampleVelocityX *= velocityScale;
-    sampleVelocityY *= velocityScale;
-  }
+  const elapsed = Math.max(0, (timestamp - drag.lastMoveAt) / 1000);
 
   if (Math.hypot(deltaX, deltaY) > 0.0001) {
-    const velocityBlend = 1 - Math.exp(-elapsed * 36);
-    drag.velocity.x = MathUtils.lerp(
-      drag.velocity.x,
-      sampleVelocityX,
-      velocityBlend
-    );
-    drag.velocity.y = MathUtils.lerp(
-      drag.velocity.y,
-      sampleVelocityY,
-      velocityBlend
-    );
+    const [velocityX, velocityY] = getSmoothedPointerVelocity({
+      delta: [deltaX, deltaY],
+      elapsedSeconds: elapsed,
+      maxSpeed: MAX_POINTER_SPEED,
+      previousVelocity: [drag.velocity.x, drag.velocity.y],
+    });
+    drag.velocity.set(velocityX, velocityY, 0);
     drag.lastMoveAt = timestamp;
   }
 

@@ -1,6 +1,10 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import { beforeAll, describe, expect, test } from "vitest";
-import { CARD_PHYSICS, getCardColliderHalfExtents } from "./card-physics";
+import {
+  CARD_PHYSICS,
+  getCardColliderHalfExtents,
+  getSmoothedPointerVelocity,
+} from "./card-physics";
 
 const CARD_WIDTH = 2;
 const CARD_HEIGHT = 3.5;
@@ -127,13 +131,25 @@ describe("configured Tarot card colliders in Rapier", () => {
     }
   });
 
-  test("keeps visible planar inertia after an ordinary card release", () => {
+  test("keeps visible inertia when a flick ends with a slower sample", () => {
     const world = createWorld();
 
     try {
+      const fastSample = getSmoothedPointerVelocity({
+        delta: [0.2, 0],
+        elapsedSeconds: 0.016,
+        maxSpeed: 8,
+        previousVelocity: [0, 0],
+      });
+      const releaseVelocity = getSmoothedPointerVelocity({
+        delta: [0.004, 0],
+        elapsedSeconds: 0.016,
+        maxSpeed: 8,
+        previousVelocity: fastSample,
+      });
       const card = createCard(world, {
         position: [0, 0, CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin],
-        velocity: [1.5, 0, 0],
+        velocity: [releaseVelocity[0], releaseVelocity[1], 0],
       });
 
       step(world, 18);

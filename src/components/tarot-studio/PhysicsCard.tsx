@@ -44,6 +44,7 @@ import {
   getCardPose,
   getFlipVisualState,
   getReleaseKinematics,
+  getSmoothedPointerVelocity,
   hasMeaningfulPoseChange,
   isPhysicsLaunchForTarget,
   type PhysicsCardLaunch,
@@ -383,19 +384,23 @@ export function PhysicsCard({
 
       drag.lastInputTimestamp = timestamp;
       const elapsed = Math.max(
-        0.004,
-        Math.min(0.064, (timestamp - drag.lastTimestamp) / 1000)
+        0,
+        (timestamp - drag.lastTimestamp) / 1000
       );
       const delta = point.clone().sub(drag.lastPoint);
       const movedThisSample = delta.lengthSq() > 0.00000001;
 
       if (movedThisSample) {
-        const speed = Math.hypot(delta.x / elapsed, delta.y / elapsed);
-        const scale =
-          speed > MAX_POINTER_SPEED ? MAX_POINTER_SPEED / speed : 1;
-
-        drag.pointerVelocity.x = (delta.x / elapsed) * scale;
-        drag.pointerVelocity.y = (delta.y / elapsed) * scale;
+        const [velocityX, velocityY] = getSmoothedPointerVelocity({
+          delta: [delta.x, delta.y],
+          elapsedSeconds: elapsed,
+          maxSpeed: MAX_POINTER_SPEED,
+          previousVelocity: [
+            drag.pointerVelocity.x,
+            drag.pointerVelocity.y,
+          ],
+        });
+        drag.pointerVelocity.set(velocityX, velocityY, 0);
         drag.lastMovementTimestamp = timestamp;
         drag.lastTimestamp = timestamp;
       }
