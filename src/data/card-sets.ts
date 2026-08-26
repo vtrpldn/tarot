@@ -3,6 +3,7 @@ import type {
   CardArtworkCrop,
   CardDefinition,
   CardSetDefinition,
+  CardSetSource,
   TarotSuit,
 } from "@/types";
 import type { AppLocale } from "@/i18n/locale";
@@ -48,6 +49,15 @@ const marseilleArtwork = (filename: string): CardArtwork => ({
   preview: `/decks/tarot-de-marseille/preview/${filename}.webp`,
   detail: `/decks/tarot-de-marseille/detail/${filename}.webp`,
   source: `/decks/tarot-de-marseille/source/${filename}.webp`,
+});
+
+const fortyServantsArtwork = (
+  filename: string,
+  sourceExtension = "png"
+): CardArtwork => ({
+  preview: `/decks/forty-servants/preview/${filename}.webp`,
+  detail: `/decks/forty-servants/detail/${filename}.webp`,
+  source: `/decks/forty-servants/source/${filename}.${sourceExtension}`,
 });
 
 const majorArcana = [
@@ -191,6 +201,20 @@ export const riderWaiteSmith: CardSetDefinition = {
   displayDescriptions: {
     "pt-BR": "Um baralho completo de 78 cartas para tiragens e leituras abertas.",
   },
+  sources: [
+    {
+      label: "Artwork archive · Wikimedia Commons",
+      displayLabels: { "pt-BR": "Arquivo de imagens · Wikimedia Commons" },
+      href: "https://commons.wikimedia.org/wiki/Category:Rider-Waite_tarot_deck",
+    },
+    {
+      label: "A. E. Waite · The Pictorial Key to the Tarot",
+      displayLabels: {
+        "pt-BR": "A. E. Waite · The Pictorial Key to the Tarot",
+      },
+      href: "https://en.wikisource.org/wiki/The_Pictorial_Key_to_the_Tarot",
+    },
+  ],
   cardAspectRatio: 1017 / 1776,
   back: artwork("back.png"),
   cards: riderWaiteSmithCards,
@@ -324,6 +348,22 @@ export const tarotDeMarseille: CardSetDefinition = {
   displayDescriptions: {
     "pt-BR": "O Tarô de Marselha completo de Jean Dodal, impresso em Lyon por volta de 1701–1715.",
   },
+  sources: [
+    {
+      label: "Jean Dodal Tarot · Gallica scan",
+      displayLabels: {
+        "pt-BR": "Tarô de Jean Dodal · digitalização Gallica",
+      },
+      href: "https://gallica.bnf.fr/ark:/12148/btv1b10537343h",
+    },
+    {
+      label: "Bibliographic record · Bibliothèque nationale de France",
+      displayLabels: {
+        "pt-BR": "Registro bibliográfico · Biblioteca Nacional da França",
+      },
+      href: "https://catalogue.bnf.fr/ark:/12148/cb40918567t",
+    },
+  ],
   cardAspectRatio: getCroppedAspectRatio(33 / 61, marseilleArtworkCrop),
   artworkCrop: marseilleArtworkCrop,
   back: marseilleArtwork("back"),
@@ -420,6 +460,22 @@ export const classicLenormand: CardSetDefinition = {
   displayDescriptions: {
     "pt-BR": "Um Lenormand completo de 36 cartas da Spielkartenfabrik Altenburg, por volta de 1890.",
   },
+  sources: [
+    {
+      label: "Stralsund deck · Etteilla Foundation",
+      displayLabels: {
+        "pt-BR": "Baralho de Stralsund · Fundação Etteilla",
+      },
+      href: "https://etteilla.org/en/deck/7/stralsund-mlle-lenormand-oracle-deck",
+    },
+    {
+      label: "Scan reuse terms · Etteilla Foundation",
+      displayLabels: {
+        "pt-BR": "Termos de reutilização · Fundação Etteilla",
+      },
+      href: "https://etteilla.org/en/collection-tos",
+    },
+  ],
   cardAspectRatio: getCroppedAspectRatio(51 / 83, lenormandArtworkCrop),
   artworkCrop: lenormandArtworkCrop,
   back: lenormandArtwork("back"),
@@ -432,14 +488,101 @@ export const classicLenormand: CardSetDefinition = {
   })),
 };
 
+const fortyServantsCards = [
+  ["the-adventurer", "The Adventurer", "A Aventureira"],
+  ["the-balancer", "The Balancer", "A Harmonizadora"],
+  ["the-carnal", "The Carnal", "A Carnal"],
+  ["the-chaste", "The Chaste", "A Casta"],
+  ["the-conductor", "The Conductor", "O Condutor"],
+  ["the-contemplator", "The Contemplator", "O Contemplador"],
+  ["the-dancer", "The Dancer", "A Dançarina"],
+  ["the-dead", "The Dead", "A Morte"],
+  ["the-depleted", "The Depleted", "O Esgotado"],
+  ["the-desperate", "The Desperate", "O Desesperado"],
+  ["the-devil", "The Devil", "O Diabo"],
+  ["the-explorer", "The Explorer", "O Explorador"],
+  ["the-eye", "The Eye", "O Olho"],
+  ["the-father", "The Father", "O Pai"],
+  ["the-fixer", "The Fixer", "O Reparador"],
+  ["the-fortunate", "The Fortunate", "A Afortunada"],
+  ["the-gate-keeper", "The Gate Keeper", "O Porteiro"],
+  ["the-giver", "The Giver", "O Doador"],
+  ["the-guru", "The Guru", "O Guru"],
+  ["the-healer", "The Healer", "A Curadora"],
+  ["the-idea", "The Idea", "A Ideia"],
+  ["the-levitator", "The Levitator", "O Levitador"],
+  ["the-librarian", "The Librarian", "A Bibliotecária"],
+  ["the-lovers", "The Lovers", "Os Amantes"],
+  ["the-master", "The Master", "O Mestre"],
+  ["the-media", "The Media", "A Mídia"],
+  ["the-messenger", "The Messenger", "O Mensageiro"],
+  ["the-monk", "The Monk", "O Monge"],
+  ["the-moon", "The Moon", "A Lua"],
+  ["the-mother", "The Mother", "A Mãe"],
+  ["the-opposer", "The Opposer", "O Opositor"],
+  ["the-planet", "The Planet", "O Planeta"],
+  ["the-protector", "The Protector", "O Protetor"],
+  ["the-protester", "The Protester", "A Protestadora"],
+  ["the-road-opener", "The Road Opener", "O Abre-Caminhos"],
+  ["the-saint", "The Saint", "O Santo"],
+  ["the-seer", "The Seer", "A Vidente"],
+  ["the-sun", "The Sun", "O Sol"],
+  ["the-thinker", "The Thinker", "O Pensador"],
+  ["the-witch", "The Witch", "A Bruxa"],
+] as const;
+
+export const fortyServants: CardSetDefinition = {
+  id: "forty-servants",
+  kind: "oracle",
+  label: "The Forty Servants · Tommie Kelly",
+  shortLabel: "The Forty Servants",
+  description:
+    "Tommie Kelly's complete 40-card oracle and chaos magick system, using his official low-resolution artwork.",
+  displayLabels: { "pt-BR": "Os Quarenta Servidores · Tommie Kelly" },
+  displayShortLabels: { "pt-BR": "Os Quarenta Servidores" },
+  displayDescriptions: {
+    "pt-BR":
+      "O sistema oracular e de magia do caos completo, com 40 cartas, criado por Tommie Kelly e apresentado com suas imagens oficiais em baixa resolução.",
+  },
+  sources: [
+    {
+      label: "Official deck and card index",
+      displayLabels: { "pt-BR": "Baralho e índice oficial das cartas" },
+      href: "https://www.adventuresinwoowoo.com/thefortyservants/",
+    },
+    {
+      label: "Official free low-resolution artwork",
+      displayLabels: {
+        "pt-BR": "Imagens oficiais gratuitas em baixa resolução",
+      },
+      href: "https://www.adventuresinwoowoo.com/2017/08/fortyservantsfree/",
+    },
+    {
+      label: "Support the creator · physical decks",
+      displayLabels: { "pt-BR": "Apoie o criador · baralhos físicos" },
+      href: "https://www.thegamecrafter.com/designers/tommie-kelly",
+    },
+  ],
+  cardAspectRatio: 216 / 395,
+  back: fortyServantsArtwork("back", "svg"),
+  cards: fortyServantsCards.map(([id, name, portugueseName], order) => ({
+    id,
+    name,
+    displayNames: { "pt-BR": portugueseName },
+    order,
+    image: fortyServantsArtwork(id),
+  })),
+};
+
 /**
- * Add another Tarot deck or a Lenormand set here. The table session and card
+ * Add another Tarot, Lenormand, or oracle set here. The table session and card
  * interactions are deliberately independent of card count, art, or aspect ratio.
  */
 export const cardSets: CardSetDefinition[] = [
   riderWaiteSmith,
   tarotDeMarseille,
   classicLenormand,
+  fortyServants,
 ];
 
 export function getCardSet(cardSetId: string): CardSetDefinition {
@@ -478,4 +621,11 @@ export function getCardSetDisplayDescription(
   locale: AppLocale
 ): string {
   return cardSet.displayDescriptions?.[locale] ?? cardSet.description;
+}
+
+export function getCardSetSourceLabel(
+  source: CardSetSource,
+  locale: AppLocale
+): string {
+  return source.displayLabels?.[locale] ?? source.label;
 }

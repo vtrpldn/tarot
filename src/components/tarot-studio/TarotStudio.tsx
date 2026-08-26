@@ -19,7 +19,6 @@ import {
   cardSets,
   getCardDisplayName,
   getCardSet,
-  getCardSetDisplayDescription,
   getCardSetDisplayLabel,
 } from "@/data/card-sets";
 import type { CardReading } from "@/data/card-readings";
@@ -70,6 +69,7 @@ import {
   type SceneSettings,
   type SceneThemeId,
 } from "./theme";
+import { DeckChooser } from "./DeckChooser";
 
 const WHEEL_LAYER_COOLDOWN = 110;
 const WHEEL_LAYER_THRESHOLD = 36;
@@ -418,6 +418,7 @@ function Shortcut({ children }: { children: ReactNode }) {
 
 type DockPopoverOptions = {
   containerRef: RefObject<HTMLDivElement | null>;
+  initialFocusSelector?: string;
   isOpen: boolean;
   popoverRef: RefObject<HTMLElement | null>;
   setIsOpen: (isOpen: boolean) => void;
@@ -426,6 +427,7 @@ type DockPopoverOptions = {
 
 function useDockPopover({
   containerRef,
+  initialFocusSelector = "[role='radio'][aria-checked='true'], button:not(:disabled), select:not(:disabled), input:not(:disabled)",
   isOpen,
   popoverRef,
   setIsOpen,
@@ -438,9 +440,7 @@ function useDockPopover({
 
     const focusTimer = window.requestAnimationFrame(() => {
       (popoverRef.current ?? containerRef.current)
-        ?.querySelector<HTMLElement>(
-          "[role='radio'][aria-checked='true'], button:not(:disabled), select:not(:disabled), input:not(:disabled)"
-        )
+        ?.querySelector<HTMLElement>(initialFocusSelector)
         ?.focus({ preventScroll: true });
     });
     const closeOnOutsidePress = (event: PointerEvent) => {
@@ -488,7 +488,14 @@ function useDockPopover({
       document.removeEventListener("pointerdown", closeOnOutsidePress);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [containerRef, isOpen, popoverRef, setIsOpen, triggerRef]);
+  }, [
+    containerRef,
+    initialFocusSelector,
+    isOpen,
+    popoverRef,
+    setIsOpen,
+    triggerRef,
+  ]);
 }
 
 export function TarotStudio() {
@@ -742,6 +749,7 @@ export function TarotStudio() {
 
   useDockPopover({
     containerRef: deckMenuRef,
+    initialFocusSelector: "[data-deck-current='true']",
     isOpen: isDeckMenuOpen,
     popoverRef: deckPopoverRef,
     setIsOpen: setIsDeckMenuOpen,
@@ -1191,6 +1199,30 @@ export function TarotStudio() {
     window.requestAnimationFrame(() => canvasShellRef.current?.focus());
   }, [activeCardSet, defaultViewZoom, playCardSound]);
 
+  const chooseCardSet = useCallback(
+    (cardSetId: string) => {
+      if (cardSetId !== activeCardSetId) {
+        const nextCardSet = getCardSet(cardSetId);
+
+        activeArrangementRef.current = null;
+        setIsDeckMoveMode(false);
+        setIsInspectorCollapsed(true);
+        setIsSceneLayoutReady(false);
+        setActiveCardSetId(nextCardSet.id);
+        playCardSound("shuffle");
+        dispatch({ type: "new-shuffle", cardSet: nextCardSet });
+        setViewZoom(defaultViewZoom);
+        setViewPan([0, 0]);
+      }
+
+      setIsDeckMenuOpen(false);
+      window.requestAnimationFrame(() =>
+        deckMenuTriggerRef.current?.focus({ preventScroll: true })
+      );
+    },
+    [activeCardSetId, defaultViewZoom, playCardSound]
+  );
+
   const showTarotCollection = useCallback(
     (collection: TarotCollectionId) => {
       if (activeCardSet.kind !== "tarot") {
@@ -1582,6 +1614,8 @@ export function TarotStudio() {
         category:
           activeCardSet.kind === "lenormand"
             ? "lenormand"
+            : activeCardSet.kind === "oracle"
+              ? "oracle"
             : selectedDefinition?.arcana === "major"
               ? "major"
               : "minor",
@@ -1711,42 +1745,16 @@ export function TarotStudio() {
               <div
                 ref={deckPopoverRef}
                 id="deck-actions"
-                className="tarot-set-picker tarot-mobile-popover"
+                className="tarot-deck-chooser-popover tarot-mobile-popover"
                 role="dialog"
                 aria-label={messages.chooseDeck}
               >
-                <label htmlFor="card-set">{messages.deck}</label>
-                <select
-                  id="card-set"
-                  name="card-set"
-                  autoComplete="off"
-                  value={activeCardSetId}
-                  onChange={(event) => {
-                    const nextCardSet = getCardSet(event.target.value);
-                    activeArrangementRef.current = null;
-                    setIsDeckMoveMode(false);
-                    setIsSceneLayoutReady(false);
-                    setActiveCardSetId(nextCardSet.id);
-                    playCardSound("shuffle");
-                    dispatch({ type: "new-shuffle", cardSet: nextCardSet });
-                    setViewZoom(defaultViewZoom);
-                    setViewPan([0, 0]);
-                    setIsDeckMenuOpen(false);
-                    window.requestAnimationFrame(() =>
-                      deckMenuTriggerRef.current?.focus()
-                    );
-                  }}
-                >
-                  {cardSets.map((cardSet) => (
-                    <option key={cardSet.id} value={cardSet.id}>
-                      {getCardSetDisplayLabel(cardSet, locale)}
-                    </option>
-                  ))}
-                </select>
-                <p className="tarot-set-picker-description">
-                  {getCardSetDisplayDescription(activeCardSet, locale)}
-                </p>
-                <span>{messages.cardsInDeck(deckCardCount)}</span>
+                <DeckChooser
+                  activeCardSetId={activeCardSetId}
+                  locale={locale}
+                  messages={messages}
+                  onChoose={chooseCardSet}
+                />
               </div>
             </MobilePopoverPortal>
           )}
