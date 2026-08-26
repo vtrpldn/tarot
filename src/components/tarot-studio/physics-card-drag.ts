@@ -1,6 +1,90 @@
-import type { Vector3 } from "three";
-
 type CardUvPoint = { x: number; y: number };
+
+type QuaternionLike = {
+  w: number;
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type FlipHandoffAction = "animate" | "commit" | "reset";
+export type FlipHandoffResolution = "flip" | "reconcile" | "settled";
+
+/**
+ * Separates the last visual flip frame from the next frame that receives
+ * Rapier's physical half-turn. Resetting the nested visual group only after
+ * that sync prevents a one-frame flash of the old physical face.
+ */
+export function getFlipHandoffAction({
+  handoffPending,
+  visualComplete,
+}: {
+  handoffPending: boolean;
+  visualComplete: boolean;
+}): FlipHandoffAction {
+  if (handoffPending) {
+    return "reset";
+  }
+
+  return visualComplete ? "commit" : "animate";
+}
+
+/** Replays every authority change that can arrive during the handoff frame. */
+export function getFlipHandoffResolution({
+  currentFaceUp,
+  currentSceneAuthorityKey,
+  targetFaceUp,
+  targetSceneAuthorityKey,
+}: {
+  currentFaceUp: boolean;
+  currentSceneAuthorityKey: string | null;
+  targetFaceUp: boolean;
+  targetSceneAuthorityKey: string;
+}): FlipHandoffResolution {
+  if (currentFaceUp !== targetFaceUp) {
+    return "flip";
+  }
+
+  return currentSceneAuthorityKey === targetSceneAuthorityKey
+    ? "settled"
+    : "reconcile";
+}
+
+/**
+ * Converts a world-up presentation lift into card-local coordinates. This
+ * stays world-up for face-down and collision-tilted cards without moving the
+ * physical collider out of its contact band.
+ */
+export function getLocalOffsetForWorldUp({
+  distance,
+  quaternion,
+}: {
+  distance: number;
+  quaternion: QuaternionLike;
+}): [number, number, number] {
+  const magnitude = Math.hypot(
+    quaternion.x,
+    quaternion.y,
+    quaternion.z,
+    quaternion.w
+  );
+
+  if (!Number.isFinite(magnitude) || magnitude === 0 || !Number.isFinite(distance)) {
+    return [0, 0, 0];
+  }
+
+  const x = quaternion.x / magnitude;
+  const y = quaternion.y / magnitude;
+  const z = quaternion.z / magnitude;
+  const w = quaternion.w / magnitude;
+
+  // R^T * [0, 0, distance]: the local vector whose world transform is up.
+  return [
+    2 * (x * z - w * y) * distance,
+    2 * (y * z + w * x) * distance,
+    (1 - 2 * (x * x + y * y)) * distance,
+  ];
+}
 
 /** Keeps ordinary border grabs movable while reserving corners for rotation. */
 export function isNearCardRotationCorner(
@@ -13,21 +97,66 @@ export function isNearCardRotationCorner(
   );
 }
 
-/** Keeps a press/click at its captured physical pose instead of the drag lift. */
-export function getMoveReleaseTranslation(
-  moved: boolean,
-  startTranslation: Vector3,
-  target: Vector3
-): Vector3 {
-  return moved ? target : startTranslation;
-}
-
 /** A pointer press becomes a physics drag only when it first crosses its threshold. */
 export function shouldTakeDragPhysicsOwnership(
   wasMoved: boolean,
   moved: boolean
 ): boolean {
   return !wasMoved && moved;
+}
+
+/**
+ * Caps one kinematic sweep so a coalesced pointer event cannot tunnel through
+ * a card before Rapier has a chance to generate contact impulses.
+ */
+export function getKinematicDragStep({
+  current,
+  maximumDistance,
+  target,
+}: {
+  current: readonly [number, number, number];
+  maximumDistance: number;
+  target: readonly [number, number, number];
+}): [number, number, number] {
+  const deltaX = target[0] - current[0];
+  const deltaY = target[1] - current[1];
+  const deltaZ = target[2] - current[2];
+  const distance = Math.hypot(deltaX, deltaY, deltaZ);
+
+  if (!Number.isFinite(distance) || distance === 0) {
+    return [current[0], current[1], current[2]];
+  }
+
+  const safeMaximumDistance = Math.max(0, maximumDistance);
+  const scale = Math.min(1, safeMaximumDistance / distance);
+
+  return [
+    current[0] + deltaX * scale,
+    current[1] + deltaY * scale,
+    current[2] + deltaZ * scale,
+  ];
+}
+
+/**
+ * Intentional overlap layouts need static rest layers: a dynamic 78-card
+ * stack cannot retain its authored height under a mobile-safe solver budget.
+ */
+export function shouldStabilizeRestingLayer({
+  hasAuthoredOverlap,
+  hasLaunch,
+  minimumRestingZ,
+  restingZ,
+}: {
+  hasAuthoredOverlap: boolean;
+  hasLaunch: boolean;
+  minimumRestingZ: number;
+  restingZ: number;
+}): boolean {
+  return (
+    hasAuthoredOverlap &&
+    !hasLaunch &&
+    restingZ >= minimumRestingZ - 0.0001
+  );
 }
 
 /**

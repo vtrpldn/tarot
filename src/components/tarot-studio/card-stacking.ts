@@ -68,6 +68,39 @@ function cardsOverlap(
 }
 
 /**
+ * Identifies every card in an authored XY-overlap component, including the
+ * bottom layer. Stabilizing only the upper layers would let a falling bottom
+ * card hit and scramble the layer stack before React can lock it in place.
+ */
+export function getOverlappingTableCardIds({
+  cards,
+  footprint,
+  layout,
+}: {
+  cards: TableCard[];
+  footprint: CardFootprint;
+  layout: SceneTableLayout;
+}): Set<string> {
+  const overlappingIds = new Set<string>();
+  const footprints = cards.map((card) => createRotatedCard(card, layout));
+
+  for (let firstIndex = 0; firstIndex < cards.length; firstIndex += 1) {
+    for (
+      let secondIndex = firstIndex + 1;
+      secondIndex < cards.length;
+      secondIndex += 1
+    ) {
+      if (cardsOverlap(footprints[firstIndex], footprints[secondIndex], footprint)) {
+        overlappingIds.add(cards[firstIndex].id);
+        overlappingIds.add(cards[secondIndex].id);
+      }
+    }
+  }
+
+  return overlappingIds;
+}
+
+/**
  * Gives intentional XY overlaps a deterministic physical layer. The caller
  * supplies the Rapier footprint rather than the visible card dimensions, so
  * every height corresponds to a collider contact that can actually occur.

@@ -43,22 +43,36 @@ function createWorld() {
 function createCard(
   world: RAPIER.World,
   {
+    bodyType = "dynamic",
+    canSleep = false,
+    collisionEvents = false,
+    kinematicCollisions = false,
     position,
     velocity = [0, 0, 0],
   }: {
+    bodyType?: "dynamic" | "kinematic";
+    canSleep?: boolean;
+    collisionEvents?: boolean;
+    kinematicCollisions?: boolean;
     position: [number, number, number];
     velocity?: [number, number, number];
   }
 ) {
-  const body = world.createRigidBody(
-    RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(...position)
+  const descriptor =
+    bodyType === "kinematic"
+      ? RAPIER.RigidBodyDesc.kinematicPositionBased()
+      : RAPIER.RigidBodyDesc.dynamic();
+  descriptor.setTranslation(...position).setCanSleep(canSleep);
+
+  if (bodyType === "dynamic") {
+    descriptor
       .setLinvel(...velocity)
       .setLinearDamping(CARD_PHYSICS.linearDamping)
       .setAngularDamping(CARD_PHYSICS.angularDamping)
-      .setCcdEnabled(true)
-      .setCanSleep(false)
-  );
+      .setCcdEnabled(true);
+  }
+
+  const body = world.createRigidBody(descriptor);
   const collider = world.createCollider(
     RAPIER.ColliderDesc.cuboid(
       CARD_HALF_WIDTH,
@@ -71,6 +85,16 @@ function createCard(
       .setContactSkin(CARD_PHYSICS.contactSkin),
     body
   );
+
+  if (collisionEvents) {
+    collider.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+  }
+  if (kinematicCollisions) {
+    collider.setActiveCollisionTypes(
+      RAPIER.ActiveCollisionTypes.DEFAULT |
+        RAPIER.ActiveCollisionTypes.KINEMATIC_KINEMATIC
+    );
+  }
 
   return { body, collider };
 }
@@ -175,6 +199,226 @@ describe("configured Tarot card colliders in Rapier", () => {
       );
       expect(Math.abs(target.body.linvel().x)).toBeLessThan(0.08);
       expect(Math.abs(projectile.body.linvel().x)).toBeLessThan(0.08);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("lets a contact-height pointer drag wake and push a resting table card", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const target = createCard(world, {
+        canSleep: true,
+        position: [0, 0, tableHeight],
+      });
+      const driver = createCard(world, {
+        bodyType: "kinematic",
+        position: [-2.1, 0, tableHeight + 0.006],
+      });
+      target.body.sleep();
+
+      for (let frame = 1; frame <= 32; frame += 1) {
+        driver.body.setNextKinematicTranslation({
+          x: -2.1 + frame * 0.01,
+          y: 0,
+          z: tableHeight + 0.006,
+        });
+        world.step();
+      }
+
+      expect(target.body.isSleeping()).toBe(false);
+      expect(target.body.translation().x).toBeGreaterThan(0.1);
+      expect(target.body.translation().z).toBeGreaterThanOrEqual(
+        CARD_HALF_DEPTH - 0.0006
+      );
+    } finally {
+      world.free();
+    }
+  });
+
+  test("wakes a sleeping table card when a max-speed release reaches it", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const target = createCard(world, {
+        canSleep: true,
+        position: [0, 0, tableHeight],
+      });
+      const release = getReleaseKinematics({
+        grabOffset: [0, 0],
+        pointerVelocity: [CARD_PHYSICS.maxPlanarSpeed, 0],
+        reducedMotion: false,
+      });
+      const projectile = createCard(world, {
+        position: [-CARD_WIDTH - 0.2, 0, tableHeight + 0.006],
+        // Non-deck table releases suppress the vertical arc so their collider
+        // remains in the target card's contact band.
+        velocity: [release.linearVelocity[0], release.linearVelocity[1], 0],
+      });
+      target.body.sleep();
+
+      step(world, 24);
+
+      expect(target.body.isSleeping()).toBe(false);
+      expect(target.body.translation().x).toBeGreaterThan(0.04);
+      expect(projectile.body.translation().x).toBeLessThan(
+        target.body.translation().x
+      );
+    } finally {
+      world.free();
+    }
+  });
+
+  test("promotes an authored kinematic layer after a card impact", () => {
+    const world = createWorld();
+    const events = new RAPIER.EventQueue(true);
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const target = createCard(world, {
+        bodyType: "kinematic",
+        collisionEvents: true,
+        position: [0, 0, tableHeight],
+      });
+      const projectile = createCard(world, {
+        collisionEvents: true,
+        position: [-CARD_WIDTH - 0.2, 0, tableHeight],
+        velocity: [CARD_PHYSICS.maxPlanarSpeed, 0, 0],
+      });
+      let promoted = false;
+
+      for (let frame = 0; frame < 90; frame += 1) {
+        world.step(events);
+        events.drainCollisionEvents((first, second, started) => {
+          if (
+            !started ||
+            promoted ||
+            (first !== target.collider.handle && second !== target.collider.handle)
+          ) {
+            return;
+          }
+
+          const incoming = projectile.body.linvel();
+          const planarSpeed = Math.hypot(incoming.x, incoming.y);
+          const transferScale = Math.min(
+            0.55,
+            CARD_PHYSICS.maxPlanarSpeed / planarSpeed
+          );
+          target.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+          target.body.setLinvel(
+            {
+              x: incoming.x * transferScale,
+              y: incoming.y * transferScale,
+              z: 0,
+            },
+            true
+          );
+          promoted = true;
+        });
+      }
+
+      expect(promoted).toBe(true);
+      expect(target.body.bodyType()).toBe(RAPIER.RigidBodyType.Dynamic);
+      expect(target.body.translation().x).toBeGreaterThan(0.1);
+    } finally {
+      events.free();
+      world.free();
+    }
+  });
+
+  test("activates an authored layer when a contact-height kinematic drag reaches it", () => {
+    const world = createWorld();
+    const events = new RAPIER.EventQueue(true);
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const target = createCard(world, {
+        bodyType: "kinematic",
+        collisionEvents: true,
+        kinematicCollisions: true,
+        position: [0, 0, tableHeight],
+      });
+      const driver = createCard(world, {
+        bodyType: "kinematic",
+        collisionEvents: true,
+        kinematicCollisions: true,
+        position: [-2.1, 0, tableHeight + 0.006],
+      });
+      let promoted = false;
+
+      for (let frame = 1; frame <= 90; frame += 1) {
+        driver.body.setNextKinematicTranslation({
+          x: -2.1 + Math.min(frame, 32) * 0.01,
+          y: 0,
+          z: tableHeight + 0.006,
+        });
+        world.step(events);
+        events.drainCollisionEvents((first, second, started) => {
+          if (
+            !started ||
+            promoted ||
+            (first !== target.collider.handle && second !== target.collider.handle)
+          ) {
+            return;
+          }
+
+          const incoming = driver.body.linvel();
+          const planarSpeed = Math.hypot(incoming.x, incoming.y);
+          const transferScale = Math.min(
+            0.55,
+            CARD_PHYSICS.maxPlanarSpeed / planarSpeed
+          );
+          target.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+          target.body.setLinvel(
+            {
+              x: incoming.x * transferScale,
+              y: incoming.y * transferScale,
+              z: 0,
+            },
+            true
+          );
+          promoted = true;
+        });
+      }
+
+      expect(promoted).toBe(true);
+      expect(target.body.bodyType()).toBe(RAPIER.RigidBodyType.Dynamic);
+      expect(target.body.translation().x).toBeGreaterThan(0.1);
+    } finally {
+      events.free();
+      world.free();
+    }
+  });
+
+  test("keeps authored overlapping rest layers stable without solver compression", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const layerStep = CARD_HALF_DEPTH * 2 + CARD_PHYSICS.contactSkin * 2;
+      const bottom = createCard(world, {
+        bodyType: "kinematic",
+        position: [0, 0, tableHeight],
+      });
+      const layers = Array.from({ length: 11 }, (_, index) =>
+        createCard(world, {
+          bodyType: "kinematic",
+          position: [0, 0, tableHeight + (index + 1) * layerStep],
+        })
+      );
+
+      step(world, 360);
+
+      const top = layers.at(-1)?.body.translation().z ?? 0;
+      expect(bottom.body.translation().z).toBeGreaterThanOrEqual(
+        CARD_HALF_DEPTH - 0.0006
+      );
+      expect(top - bottom.body.translation().z).toBeGreaterThanOrEqual(
+        11 * (CARD_THICKNESS - 0.001)
+      );
     } finally {
       world.free();
     }

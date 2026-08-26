@@ -72,7 +72,10 @@ import { ConstellationReading } from "./ConstellationReading";
 import { DeckPhysics } from "./DeckPhysics";
 import { PhysicsCard } from "./PhysicsCard";
 import { TablePhysics } from "./TablePhysics";
-import { getTableCardRestingHeights } from "./card-stacking";
+import {
+  getOverlappingTableCardIds,
+  getTableCardRestingHeights,
+} from "./card-stacking";
 import {
   createSceneTableLayout,
   clampViewPan,
@@ -1831,6 +1834,23 @@ function TarotTable({
       tableColliderHalfWidth,
     ]
   );
+  const authoredOverlapCardIds = useMemo(
+    () =>
+      getOverlappingTableCardIds({
+        cards: tableCards,
+        footprint: {
+          halfHeight: tableColliderHalfHeight,
+          halfWidth: tableColliderHalfWidth,
+        },
+        layout,
+      }),
+    [
+      layout,
+      tableCards,
+      tableColliderHalfHeight,
+      tableColliderHalfWidth,
+    ]
+  );
   const highestTableCardZ = Math.max(
     baseTableCardZ,
     ...Array.from(tableCardRestingHeights.values())
@@ -1851,6 +1871,37 @@ function TarotTable({
     () => layout.toWorld(resolvedDeckPosition),
     [layout, resolvedDeckPosition]
   );
+  // A fast table-card release only needs its elevated deck-crossing arc when
+  // its centre path can reach the deck's real collider. Expand the deck by
+  // the moving card's collider so this remains a centre-point test.
+  const deckClearanceBounds = useMemo(() => {
+    if (deckCount === 0) {
+      return undefined;
+    }
+
+    const deckHalfWidth = Math.max(
+      0.01,
+      layout.cardWidth / 2 - CARD_PHYSICS.colliderInset
+    );
+    const deckHalfHeight = Math.max(
+      0.01,
+      layout.cardHeight / 2 - CARD_PHYSICS.colliderInset
+    );
+
+    return {
+      bottom: deckPosition[1] - deckHalfHeight - tableColliderHalfHeight,
+      left: deckPosition[0] - deckHalfWidth - tableColliderHalfWidth,
+      right: deckPosition[0] + deckHalfWidth + tableColliderHalfWidth,
+      top: deckPosition[1] + deckHalfHeight + tableColliderHalfHeight,
+    };
+  }, [
+    deckCount,
+    deckPosition,
+    layout.cardHeight,
+    layout.cardWidth,
+    tableColliderHalfHeight,
+    tableColliderHalfWidth,
+  ]);
   const previewDeckPosition = useCallback(
     (position: TablePoint | null) => {
       deckPreviewPositionRef.current = position;
@@ -2184,6 +2235,7 @@ function TarotTable({
             cardSet={cardSet}
             cardHeight={layout.cardHeight}
             cardWidth={layout.cardWidth}
+            deckClearanceBounds={deckClearanceBounds}
             definition={definition}
             dragBounds={layout.dragBounds}
             dropIndex={tableIndex}
@@ -2200,6 +2252,7 @@ function TarotTable({
             reducedMotion={reducedMotion}
             selected={session.selectedCardId === card.id}
             slabGeometry={slabGeometry}
+            stabilizeAtRest={authoredOverlapCardIds.has(card.id)}
             restingZ={
               tableCardRestingHeights.get(card.id) ?? baseTableCardZ
             }

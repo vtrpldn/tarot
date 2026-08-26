@@ -2,8 +2,10 @@ import { describe, expect, test } from "vitest";
 import {
   advanceFlipElapsed,
   CARD_PHYSICS,
+  clampAngularVelocity,
   clampPhysicsPointToBounds,
   constrainReleaseToBounds,
+  doesPlanarRayEnterBounds,
   constrainVelocityForNextPhysicsStep,
   createCardQuaternion,
   createPhysicsAuthorityKey,
@@ -16,6 +18,7 @@ import {
   hasMeaningfulPoseChange,
   isPhysicsLaunchForMountedCard,
   isPhysicsLaunchForTarget,
+  shouldUseDeckClearanceArc,
   normalizeRotation,
 } from "./card-physics";
 
@@ -67,6 +70,61 @@ describe("card orientation", () => {
 });
 
 describe("card release", () => {
+  test("only preserves a launch arc for a ray that reaches the deck footprint", () => {
+    const bounds = { bottom: -1, left: -1, right: 1, top: 1 };
+
+    expect(
+      doesPlanarRayEnterBounds({
+        bounds,
+        origin: [3, 0],
+        velocity: [-4.2, 0],
+      })
+    ).toBe(true);
+    expect(
+      doesPlanarRayEnterBounds({
+        bounds,
+        origin: [3, 0],
+        velocity: [0, 4.2],
+      })
+    ).toBe(false);
+  });
+
+  test("keeps a slow deckward push in contact with the deck edge", () => {
+    const bounds = { bottom: -1, left: -1, right: 1, top: 1 };
+    const fastThrow = getReleaseKinematics({
+      grabOffset: [0, 0],
+      pointerVelocity: [-CARD_PHYSICS.maxPlanarSpeed, 0],
+      reducedMotion: false,
+    });
+    const slowPush = getReleaseKinematics({
+      grabOffset: [0, 0],
+      pointerVelocity: [-1.2, 0],
+      reducedMotion: false,
+    });
+
+    expect(
+      shouldUseDeckClearanceArc({
+        bounds,
+        kinematics: fastThrow,
+        origin: [3, 0],
+      })
+    ).toBe(true);
+    expect(
+      shouldUseDeckClearanceArc({
+        bounds,
+        kinematics: slowPush,
+        origin: [3, 0],
+      })
+    ).toBe(false);
+    expect(
+      shouldUseDeckClearanceArc({
+        bounds,
+        kinematics: fastThrow,
+        origin: [-3, 0],
+      })
+    ).toBe(false);
+  });
+
   test("retains flick momentum through 50-64ms final pointer samples", () => {
     const fastSample = getSmoothedPointerVelocity({
       delta: [0.2, 0],
@@ -176,6 +234,31 @@ describe("card release", () => {
     expect(counterClockwise.angularVelocity[2]).toBeLessThan(0);
   });
 
+  test("caps off-centre spin without reducing planar flick inertia", () => {
+    const centered = getReleaseKinematics({
+      grabOffset: [0, 0],
+      pointerVelocity: [0, CARD_PHYSICS.maxPlanarSpeed],
+      reducedMotion: false,
+    });
+    const edgeGrab = getReleaseKinematics({
+      grabOffset: [3, 0],
+      pointerVelocity: [0, CARD_PHYSICS.maxPlanarSpeed],
+      reducedMotion: false,
+    });
+
+    expect(edgeGrab.linearVelocity).toEqual(centered.linearVelocity);
+    expect(edgeGrab.angularVelocity[2]).toBe(CARD_PHYSICS.maxAngularSpeed);
+    expect(Math.abs(edgeGrab.angularVelocity[2])).toBeLessThanOrEqual(6);
+  });
+
+  test("caps collision-added angular velocity while retaining its direction", () => {
+    const capped = clampAngularVelocity([3, -4, 12]);
+
+    expect(Math.hypot(...capped)).toBeCloseTo(CARD_PHYSICS.maxAngularSpeed);
+    expect(capped[0] / capped[1]).toBeCloseTo(3 / -4);
+    expect(capped[2]).toBeGreaterThan(0);
+  });
+
   test("removes release momentum for reduced motion", () => {
     expect(
       getReleaseKinematics({
@@ -246,18 +329,19 @@ describe("controlled flip presentation", () => {
     ).toBe(0.42);
   });
 
-  test("squeezes flat at the midpoint and restores full size", () => {
+  test("turns continuously around the vertical axis without a midpoint swap", () => {
     expect(getFlipVisualState(0)).toEqual({
-      rotationX: 0,
+      rotationY: 0,
       scaleX: 1,
       scaleY: 1,
     });
-    expect(getFlipVisualState(0.5)).toMatchObject({
-      rotationX: Math.PI,
-      scaleY: 0.12,
+    expect(getFlipVisualState(0.5)).toEqual({
+      rotationY: Math.PI / 2,
+      scaleX: 1,
+      scaleY: 1,
     });
-    expect(getFlipVisualState(1)).toMatchObject({
-      rotationX: Math.PI,
+    expect(getFlipVisualState(1)).toEqual({
+      rotationY: Math.PI,
       scaleX: 1,
       scaleY: 1,
     });

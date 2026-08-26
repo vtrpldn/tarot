@@ -1,7 +1,9 @@
 import type { TablePoint } from "@/types";
 
 export const CARD_PHYSICS = {
-  angularDamping: 3.2,
+  // Keep a deliberate off-centre flick readable without letting a light card
+  // continue into several distracting revolutions after release.
+  angularDamping: 5.5,
   cardFriction: 0.28,
   cardMassKilograms: 0.0018,
   cardRestitution: 0.035,
@@ -10,7 +12,7 @@ export const CARD_PHYSICS = {
   dragLift: 0.18,
   gravity: [0, 0, -9.81] as const,
   linearDamping: 0.85,
-  maxAngularSpeed: 14,
+  maxAngularSpeed: 6,
   maxPlanarSpeed: 4.2,
   throwArcMinimumPlanarSpeed: 1.4,
   throwArcMaximumVerticalSpeed: 1.45,
@@ -40,7 +42,7 @@ export type PhysicsCardPoseUpdate = PhysicsCardPose & {
 };
 
 export type PhysicsFlipVisualState = {
-  rotationX: number;
+  rotationY: number;
   scaleX: number;
   scaleY: number;
 };
@@ -137,6 +139,89 @@ export type ReleaseKinematics = {
   linearVelocity: [x: number, y: number, z: number];
 };
 
+/**
+ * Whether a forward planar release path reaches an axis-aligned footprint.
+ * This deliberately works with an expanded collider footprint so the moving
+ * card's own half extents are accounted for at the call site.
+ */
+export function doesPlanarRayEnterBounds({
+  bounds,
+  origin,
+  velocity,
+}: {
+  bounds: PhysicsTableBounds;
+  origin: TablePoint;
+  velocity: TablePoint;
+}): boolean {
+  const left = Math.min(bounds.left, bounds.right);
+  const right = Math.max(bounds.left, bounds.right);
+  const bottom = Math.min(bounds.bottom, bounds.top);
+  const top = Math.max(bounds.bottom, bounds.top);
+  const [originX, originY] = origin;
+  const [velocityX, velocityY] = velocity;
+
+  if (
+    !Number.isFinite(originX) ||
+    !Number.isFinite(originY) ||
+    !Number.isFinite(velocityX) ||
+    !Number.isFinite(velocityY) ||
+    Math.hypot(velocityX, velocityY) < 0.000001
+  ) {
+    return false;
+  }
+
+  let entry = -Infinity;
+  let exit = Infinity;
+  const axes: Array<[number, number, number, number]> = [
+    [originX, velocityX, left, right],
+    [originY, velocityY, bottom, top],
+  ];
+
+  for (const [coordinate, speed, minimum, maximum] of axes) {
+    if (Math.abs(speed) < 0.000001) {
+      if (coordinate < minimum || coordinate > maximum) {
+        return false;
+      }
+      continue;
+    }
+
+    const firstHit = (minimum - coordinate) / speed;
+    const secondHit = (maximum - coordinate) / speed;
+    entry = Math.max(entry, Math.min(firstHit, secondHit));
+    exit = Math.min(exit, Math.max(firstHit, secondHit));
+  }
+
+  return exit >= Math.max(0, entry);
+}
+
+/**
+ * Uses the elevated crossing path only for an actual throw whose forward
+ * trajectory reaches the deck. A slow push has no vertical launch component,
+ * so it must remain in the table contact plane and meet the deck edge.
+ */
+export function shouldUseDeckClearanceArc({
+  bounds,
+  kinematics,
+  origin,
+}: {
+  bounds: PhysicsTableBounds | undefined;
+  kinematics: ReleaseKinematics;
+  origin: TablePoint;
+}): boolean {
+  return Boolean(
+    bounds &&
+      kinematics.linearVelocity[2] > 0.0001 &&
+      doesPlanarRayEnterBounds({
+        bounds,
+        origin,
+        velocity: [
+          kinematics.linearVelocity[0],
+          kinematics.linearVelocity[1],
+        ],
+      })
+  );
+}
+
 type QuaternionLike = {
   w: number;
   x: number;
@@ -183,6 +268,25 @@ export function clampPhysicsPointToBounds(
   ];
 }
 
+/** Limits collision-added rotation without changing its physical direction. */
+export function clampAngularVelocity(
+  velocity: [x: number, y: number, z: number]
+): [x: number, y: number, z: number] {
+  const magnitude = Math.hypot(velocity[0], velocity[1], velocity[2]);
+
+  if (!Number.isFinite(magnitude)) {
+    return [0, 0, 0];
+  }
+
+  if (magnitude <= CARD_PHYSICS.maxAngularSpeed || magnitude === 0) {
+    return velocity;
+  }
+
+  const scale = CARD_PHYSICS.maxAngularSpeed / magnitude;
+
+  return [velocity[0] * scale, velocity[1] * scale, velocity[2] * scale];
+}
+
 export function createCardQuaternion(
   rotationDegrees: number,
   faceUp: boolean
@@ -191,23 +295,23 @@ export function createCardQuaternion(
   const sine = Math.sin(halfYaw);
   const cosine = Math.cos(halfYaw);
 
-  // Yaw is applied after the face-down half-turn around local X. Keeping the
-  // local X axis stable makes persisted table rotation recoverable on either
+  // Yaw is applied after the face-down half-turn around local Y. Keeping the
+  // local Y axis stable makes persisted table rotation recoverable on either
   // face without relying on Euler-angle decomposition near 180 degrees.
   return faceUp
     ? [0, 0, sine, cosine]
-    : [cosine, sine, 0, 0];
+    : [-sine, cosine, 0, 0];
 }
 
-/** Turns a card over around its local X axis without changing its yaw. */
+/** Turns a card over around its local Y axis without changing its yaw. */
 export function flipCardQuaternion(
   quaternion: QuaternionLike
 ): PhysicsQuaternion {
   return [
+    -quaternion.z,
     quaternion.w,
-    quaternion.z,
+    quaternion.x,
     -quaternion.y,
-    -quaternion.x,
   ];
 }
 
@@ -217,13 +321,12 @@ export function getCardPose(
 ): PhysicsCardPose {
   const normalZ =
     1 - 2 * (quaternion.x * quaternion.x + quaternion.y * quaternion.y);
-  const localXAxisX =
-    1 - 2 * (quaternion.y * quaternion.y + quaternion.z * quaternion.z);
-  const localXAxisY =
-    2 *
-    (quaternion.x * quaternion.y + quaternion.w * quaternion.z);
+  const localYAxisX =
+    2 * (quaternion.x * quaternion.y - quaternion.w * quaternion.z);
+  const localYAxisY =
+    1 - 2 * (quaternion.x * quaternion.x + quaternion.z * quaternion.z);
   const rawRotation =
-    (Math.atan2(localXAxisY, localXAxisX) * 180) / Math.PI;
+    (Math.atan2(-localYAxisX, localYAxisY) * 180) / Math.PI;
 
   return {
     faceUp: normalZ >= 0,
@@ -254,9 +357,11 @@ export function getReleaseKinematics({
     CARD_PHYSICS.maxPlanarSpeed
   );
   const torque = grabOffset[0] * velocityY - grabOffset[1] * velocityX;
+  // Pointer coordinates are in world units, so an edge grab can otherwise
+  // produce a much larger torque than the planar throw warrants.
   const angularZ = Math.max(
     -CARD_PHYSICS.maxAngularSpeed,
-    Math.min(CARD_PHYSICS.maxAngularSpeed, torque * 5.4)
+    Math.min(CARD_PHYSICS.maxAngularSpeed, torque * 3.6)
   );
   const planarSpeed = Math.hypot(velocityX, velocityY);
   const throwArcProgress = Math.max(
@@ -352,12 +457,16 @@ export function getFlipVisualState(progress: number): PhysicsFlipVisualState {
   const boundedProgress = Math.max(0, Math.min(1, progress));
   const eased =
     boundedProgress * boundedProgress * (3 - 2 * boundedProgress);
-  const envelope = Math.sin(Math.PI * eased);
 
   return {
-    rotationX: eased < 0.5 ? 0 : Math.PI,
-    scaleX: 1 - envelope * 0.006,
-    scaleY: Math.max(0.12, Math.abs(Math.cos(Math.PI * eased))),
+    // The front and back artwork planes face opposite local-Z directions.
+    // Turning their shared group through local Y lets normal backface culling
+    // reveal exactly one face at a left-to-right edge-on midpoint. It
+    // avoids the previous half-turn snap while the card still had visible
+    // height, which read as a flicker.
+    rotationY: Math.PI * eased,
+    scaleX: 1,
+    scaleY: 1,
   };
 }
 

@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import type { TableCard } from "@/types";
 import type { SceneTableLayout } from "./table-layout";
-import { getTableCardRestingHeights } from "./card-stacking";
+import {
+  getOverlappingTableCardIds,
+  getTableCardRestingHeights,
+} from "./card-stacking";
 
 const layout = {
   cardHeight: 3,
@@ -27,6 +30,22 @@ function createTableCard(
 }
 
 describe("getTableCardRestingHeights", () => {
+  test("includes the bottom card when an authored overlap needs stabilization", () => {
+    const cards = [
+      createTableCard("bottom", [0, 0], 1),
+      createTableCard("top", [0.05, 0.02], 2),
+      createTableCard("separate", [5, 0], 3),
+    ];
+
+    expect(
+      getOverlappingTableCardIds({
+        cards,
+        footprint: { halfHeight: 1.45, halfWidth: 0.95 },
+        layout,
+      })
+    ).toEqual(new Set(["bottom", "top"]));
+  });
+
   test("layers intentional collider overlaps by z-index without changing XY", () => {
     const cards = [
       createTableCard("top", [0.08, 0.04], 3),
