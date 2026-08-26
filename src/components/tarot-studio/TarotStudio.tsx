@@ -673,6 +673,7 @@ export function TarotStudio() {
   const isInspectorOpen =
     hasSelectedTableCard && !isInspectorCollapsed && !isDeckMoveMode;
   const isDockPinned =
+    hasSelectedTableCard ||
     isDeckMenuOpen ||
     isZoomMenuOpen ||
     isSpreadMenuOpen ||

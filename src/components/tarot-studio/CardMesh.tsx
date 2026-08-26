@@ -50,6 +50,7 @@ import {
   CardPaperMaterial,
   getPaperSeed,
 } from "./CardPaperMaterial";
+import { isNearCardRotationCorner } from "./physics-card-drag";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
 const DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
@@ -397,10 +398,7 @@ function isNearCardEdge(event: ThreeEvent<PointerEvent>): boolean {
     return false;
   }
 
-  return (
-    Math.min(uv.x, 1 - uv.x, uv.y, 1 - uv.y) <=
-    ROTATION_EDGE_THRESHOLD
-  );
+  return isNearCardRotationCorner(uv, ROTATION_EDGE_THRESHOLD);
 }
 
 function getThrownRotation({

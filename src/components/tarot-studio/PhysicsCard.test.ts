@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   getMoveReleaseTranslation,
   isFaceOnlyAuthorityChange,
+  isNearCardRotationCorner,
   shouldTakeDragPhysicsOwnership,
 } from "./physics-card-drag";
 
@@ -25,6 +26,18 @@ describe("PhysicsCard move release", () => {
     expect(shouldTakeDragPhysicsOwnership(false, false)).toBe(false);
     expect(shouldTakeDragPhysicsOwnership(false, true)).toBe(true);
     expect(shouldTakeDragPhysicsOwnership(true, true)).toBe(false);
+  });
+
+  test("reserves corners for rotation without stealing ordinary edge drags", () => {
+    expect(isNearCardRotationCorner({ x: 0.04, y: 0.05 }, 0.14)).toBe(
+      true
+    );
+    expect(isNearCardRotationCorner({ x: 0.04, y: 0.5 }, 0.14)).toBe(
+      false
+    );
+    expect(isNearCardRotationCorner({ x: 0.5, y: 0.5 }, 0.14)).toBe(
+      false
+    );
   });
 
   test("recognizes a face-only authority change", () => {

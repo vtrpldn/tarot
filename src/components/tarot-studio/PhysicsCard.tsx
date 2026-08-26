@@ -7,7 +7,7 @@ import {
   useBeforePhysicsStep,
   useRapier,
 } from "@react-three/rapier";
-import { type ThreeEvent, useThree } from "@react-three/fiber";
+import { type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
 import {
   type MutableRefObject,
   Suspense,
@@ -36,6 +36,7 @@ import type {
 } from "@/types";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
+  advanceFlipElapsed,
   CARD_PHYSICS,
   clampPhysicsPointToBounds,
   constrainReleaseToBounds,
@@ -60,6 +61,7 @@ import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import {
   getMoveReleaseTranslation,
   isFaceOnlyAuthorityChange,
+  isNearCardRotationCorner,
   shouldTakeDragPhysicsOwnership,
   type DurableCardPose,
 } from "./physics-card-drag";
@@ -163,9 +165,7 @@ function isNearCardEdge(event: ThreeEvent<PointerEvent>) {
   const uv = event.uv;
 
   return Boolean(
-    uv &&
-      Math.min(uv.x, 1 - uv.x, uv.y, 1 - uv.y) <=
-        ROTATION_EDGE_THRESHOLD
+    uv && isNearCardRotationCorner(uv, ROTATION_EDGE_THRESHOLD)
   );
 }
 
@@ -763,6 +763,82 @@ export function PhysicsCard({
     [canvas, clearFallback, clearLostPointerCapture]
   );
 
+  useFrame((_, delta) => {
+    const body = bodyRef.current;
+    const flip = flipRef.current;
+
+    if (!body || !flip) {
+      return;
+    }
+
+    const visual = visualRef.current;
+    // A demand-rendered scene can sit idle for seconds before this frame.
+    // Clamp that stale delta so a flip still paints its intermediate poses.
+    flip.elapsed = advanceFlipElapsed({
+      durationSeconds: FLIP_DURATION_SECONDS,
+      elapsedSeconds: flip.elapsed,
+      frameDeltaSeconds: delta,
+      reducedMotion,
+    });
+    const progress = flip.elapsed / FLIP_DURATION_SECONDS;
+    const flipVisual = getFlipVisualState(progress);
+
+    if (visual) {
+      visual.position.z = 0;
+      visual.rotation.x = flipVisual.rotationX;
+      visual.scale.set(flipVisual.scaleX, flipVisual.scaleY, 1);
+    }
+
+    // Keep the real card flat at its existing depth while only its nested
+    // presentation turns over.
+    body.setNextKinematicRotation(flip.rotation);
+    body.setNextKinematicTranslation(flip.position);
+
+    if (progress < 1) {
+      invalidate();
+      return;
+    }
+
+    const latestAuthority = latestAuthorityRef.current;
+    const [x, y, z, w] = createCardQuaternion(
+      latestAuthority.rotation,
+      latestAuthority.faceUp
+    );
+
+    if (visual) {
+      visual.position.set(0, 0, 0);
+      visual.rotation.set(0, 0, 0);
+      visual.scale.set(1, 1, 1);
+    }
+    body.setRotation({ x, y, z, w }, true);
+    body.setTranslation(
+      {
+        x: latestAuthority.position[0],
+        y: latestAuthority.position[1],
+        z: Math.max(
+          flip.position.z,
+          tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin
+        ),
+      },
+      true
+    );
+    body.setBodyType(rapier.RigidBodyType.Dynamic, true);
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    mountedCardIdRef.current = card.id;
+    lastLayerKeyRef.current = layerKey;
+    reconciledAuthorityKeyRef.current = latestAuthority.authorityKey;
+    reconciledSceneAuthorityKeyRef.current =
+      latestAuthority.sceneAuthorityKey;
+    durablePoseRef.current = {
+      faceUp: latestAuthority.faceUp,
+      layerKey,
+      position: latestAuthority.position,
+      rotation: latestAuthority.rotation,
+    };
+    flipRef.current = null;
+  });
+
   useBeforePhysicsStep(() => {
     const body = bodyRef.current;
     const externalDrag = externalDragRef?.current;
@@ -775,72 +851,10 @@ export function PhysicsCard({
     const flip = flipRef.current;
 
     if (flip) {
-      const visual = visualRef.current;
-      flip.elapsed = reducedMotion
-        ? FLIP_DURATION_SECONDS
-        : Math.min(
-            FLIP_DURATION_SECONDS,
-            flip.elapsed + CARD_PHYSICS.timeStep
-          );
-      const progress = flip.elapsed / FLIP_DURATION_SECONDS;
-      const flipVisual = getFlipVisualState(progress);
-
-      if (visual) {
-        visual.position.z = 0;
-        visual.rotation.x = flipVisual.rotationX;
-        visual.scale.set(
-          flipVisual.scaleX,
-          flipVisual.scaleY,
-          1
-        );
-      }
-
-      // The collider stays flat and stationary. Only the nested render group
-      // flips, so deterministic UI choreography cannot sweep nearby bodies.
+      // A flip never moves the collider. Its visual timing is driven by
+      // rendered-frame delta above, independent from fixed physics substeps.
       body.setNextKinematicRotation(flip.rotation);
       body.setNextKinematicTranslation(flip.position);
-
-      if (progress >= 1) {
-        const latestAuthority = latestAuthorityRef.current;
-        const [x, y, z, w] = createCardQuaternion(
-          latestAuthority.rotation,
-          latestAuthority.faceUp
-        );
-
-        if (visual) {
-          visual.position.set(0, 0, 0);
-          visual.rotation.set(0, 0, 0);
-          visual.scale.set(1, 1, 1);
-        }
-        body.setRotation({ x, y, z, w }, true);
-        body.setTranslation(
-          {
-            x: latestAuthority.position[0],
-            y: latestAuthority.position[1],
-            z: Math.max(
-              flip.position.z,
-              tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin
-            ),
-          },
-          true
-        );
-        body.setBodyType(rapier.RigidBodyType.Dynamic, true);
-        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        mountedCardIdRef.current = card.id;
-        lastLayerKeyRef.current = layerKey;
-        reconciledAuthorityKeyRef.current = latestAuthority.authorityKey;
-        reconciledSceneAuthorityKeyRef.current =
-          latestAuthority.sceneAuthorityKey;
-        durablePoseRef.current = {
-          faceUp: latestAuthority.faceUp,
-          layerKey,
-          position: latestAuthority.position,
-          rotation: latestAuthority.rotation,
-        };
-        flipRef.current = null;
-      }
-
       return;
     }
 

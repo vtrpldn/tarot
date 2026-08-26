@@ -1,5 +1,18 @@
 import type { Vector3 } from "three";
 
+type CardUvPoint = { x: number; y: number };
+
+/** Keeps ordinary border grabs movable while reserving corners for rotation. */
+export function isNearCardRotationCorner(
+  uv: CardUvPoint,
+  threshold: number
+): boolean {
+  return (
+    Math.min(uv.x, 1 - uv.x) <= threshold &&
+    Math.min(uv.y, 1 - uv.y) <= threshold
+  );
+}
+
 /** Keeps a press/click at its captured physical pose instead of the drag lift. */
 export function getMoveReleaseTranslation(
   moved: boolean,

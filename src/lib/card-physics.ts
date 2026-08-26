@@ -45,6 +45,27 @@ export type PhysicsFlipVisualState = {
   scaleY: number;
 };
 
+export function advanceFlipElapsed({
+  durationSeconds,
+  elapsedSeconds,
+  frameDeltaSeconds,
+  reducedMotion,
+}: {
+  durationSeconds: number;
+  elapsedSeconds: number;
+  frameDeltaSeconds: number;
+  reducedMotion: boolean;
+}): number {
+  if (reducedMotion) {
+    return durationSeconds;
+  }
+
+  return Math.min(
+    durationSeconds,
+    elapsedSeconds + Math.min(Math.max(0, frameDeltaSeconds), 1 / 30)
+  );
+}
+
 export function getSmoothedPointerVelocity({
   delta,
   elapsedSeconds,

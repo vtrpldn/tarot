@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  advanceFlipElapsed,
   CARD_PHYSICS,
   clampPhysicsPointToBounds,
   constrainReleaseToBounds,
@@ -185,6 +186,25 @@ describe("card release", () => {
 });
 
 describe("controlled flip presentation", () => {
+  test("does not consume a long idle gap as one flip frame", () => {
+    expect(
+      advanceFlipElapsed({
+        durationSeconds: 0.42,
+        elapsedSeconds: 0,
+        frameDeltaSeconds: 5,
+        reducedMotion: false,
+      })
+    ).toBeCloseTo(1 / 30);
+    expect(
+      advanceFlipElapsed({
+        durationSeconds: 0.42,
+        elapsedSeconds: 0,
+        frameDeltaSeconds: 5,
+        reducedMotion: true,
+      })
+    ).toBe(0.42);
+  });
+
   test("squeezes flat at the midpoint and restores full size", () => {
     expect(getFlipVisualState(0)).toEqual({
       rotationX: 0,
