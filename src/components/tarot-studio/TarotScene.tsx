@@ -104,6 +104,7 @@ const CARD_FACE_PLANE_OFFSET = 0.002;
 const AMBIENT_FILL_INTENSITY = 2.1;
 const SPOTLIGHT_ANGLE = 1.54;
 const SPOTLIGHT_INTENSITY = 172;
+const SPOTLIGHT_SHADOW_FOCUS = 0.48;
 const SPOTLIGHT_SHADOW_RADIUS = 3;
 const CUT_DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const CELESTIAL_MARKS = [
@@ -1706,6 +1707,7 @@ function SceneSpotlight({
         shadow-bias={-0.00035}
         shadow-camera-far={18}
         shadow-camera-near={0.2}
+        shadow-focus={SPOTLIGHT_SHADOW_FOCUS}
         shadow-mapSize-height={shadowMapSize}
         shadow-mapSize-width={shadowMapSize}
         shadow-normalBias={0.001}
