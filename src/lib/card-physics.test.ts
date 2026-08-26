@@ -112,6 +112,32 @@ describe("card release", () => {
     );
   });
 
+  test("adds a bounded upward arc only to intentional fast flicks", () => {
+    const slowRelease = getReleaseKinematics({
+      grabOffset: [0, 0],
+      pointerVelocity: [CARD_PHYSICS.throwArcMinimumPlanarSpeed - 0.01, 0],
+      reducedMotion: false,
+    });
+    const fastRelease = getReleaseKinematics({
+      grabOffset: [0, 0],
+      pointerVelocity: [CARD_PHYSICS.maxPlanarSpeed, 0],
+      reducedMotion: false,
+    });
+    const cappedRelease = getReleaseKinematics({
+      grabOffset: [0, 0],
+      pointerVelocity: [CARD_PHYSICS.maxPlanarSpeed * 10, 0],
+      reducedMotion: false,
+    });
+
+    expect(slowRelease.linearVelocity[2]).toBe(0);
+    expect(fastRelease.linearVelocity[2]).toBe(
+      CARD_PHYSICS.throwArcMaximumVerticalSpeed
+    );
+    expect(cappedRelease.linearVelocity[2]).toBe(
+      CARD_PHYSICS.throwArcMaximumVerticalSpeed
+    );
+  });
+
   test("derives opposite yaw from opposite off-centre throws", () => {
     const clockwise = getReleaseKinematics({
       grabOffset: [0.3, 0],

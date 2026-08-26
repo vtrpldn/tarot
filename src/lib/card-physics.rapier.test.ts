@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, test } from "vitest";
 import {
   CARD_PHYSICS,
   getCardColliderHalfExtents,
+  getReleaseKinematics,
   getSmoothedPointerVelocity,
 } from "./card-physics";
 
@@ -11,6 +12,8 @@ const CARD_HEIGHT = 3.5;
 const CARD_THICKNESS = 0.018;
 const [CARD_HALF_WIDTH, CARD_HALF_HEIGHT, CARD_HALF_DEPTH] =
   getCardColliderHalfExtents(CARD_WIDTH, CARD_HEIGHT, CARD_THICKNESS);
+const DECK_HALF_DEPTH = 0.035;
+const DECK_TOP = DECK_HALF_DEPTH * 2;
 
 beforeAll(async () => {
   await RAPIER.init();
@@ -67,6 +70,23 @@ function createCard(
   );
 
   return { body, collider };
+}
+
+function createDeck(world: RAPIER.World) {
+  const deck = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+
+  return world.createCollider(
+    RAPIER.ColliderDesc.cuboid(
+      CARD_HALF_WIDTH,
+      CARD_HALF_HEIGHT,
+      DECK_HALF_DEPTH
+    )
+      .setTranslation(0, 0, DECK_HALF_DEPTH)
+      .setFriction(CARD_PHYSICS.cardFriction)
+      .setRestitution(CARD_PHYSICS.cardRestitution)
+      .setContactSkin(CARD_PHYSICS.contactSkin),
+    deck
+  );
 }
 
 function step(world: RAPIER.World, frames: number) {
@@ -128,6 +148,77 @@ describe("configured Tarot card colliders in Rapier", () => {
       );
     } finally {
       world.free();
+    }
+  });
+
+  test("transfers a configured-speed throw into a visible card interaction", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const target = createCard(world, {
+        position: [0, 0, tableHeight],
+      });
+      const projectile = createCard(world, {
+        position: [-2.2, 0, tableHeight],
+        velocity: [CARD_PHYSICS.maxPlanarSpeed, 0, 0],
+      });
+
+      step(world, 180);
+
+      expect(target.body.translation().x).toBeGreaterThan(0.18);
+      expect(projectile.body.translation().x).toBeLessThan(
+        target.body.translation().x
+      );
+      expect(Math.abs(target.body.linvel().x)).toBeLessThan(0.08);
+      expect(Math.abs(projectile.body.linvel().x)).toBeLessThan(0.08);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("lets a max flick travel across the deck while a slow push is stopped at its edge", () => {
+    const fastWorld = createWorld();
+    const slowWorld = createWorld();
+
+    try {
+      createDeck(fastWorld);
+      createDeck(slowWorld);
+      const releaseHeight =
+        CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin + CARD_PHYSICS.dragLift;
+      const fastRelease = getReleaseKinematics({
+        grabOffset: [0, 0],
+        pointerVelocity: [-CARD_PHYSICS.maxPlanarSpeed, 0],
+        reducedMotion: false,
+      });
+      const slowRelease = getReleaseKinematics({
+        grabOffset: [0, 0],
+        pointerVelocity: [-1.2, 0],
+        reducedMotion: false,
+      });
+      const fastCard = createCard(fastWorld, {
+        position: [2.2, 0, releaseHeight],
+        velocity: fastRelease.linearVelocity,
+      });
+      const slowCard = createCard(slowWorld, {
+        position: [2, 0, releaseHeight],
+        velocity: slowRelease.linearVelocity,
+      });
+
+      step(fastWorld, 180);
+      step(slowWorld, 180);
+
+      expect(fastCard.body.translation().x).toBeLessThan(1.2);
+      expect(fastCard.body.translation().z).toBeGreaterThan(DECK_TOP);
+      expect(slowCard.body.translation().x).toBeGreaterThan(1.55);
+      expect(slowCard.body.translation().x).toBeLessThan(1.95);
+      expect(slowCard.body.translation().z).toBeLessThan(DECK_TOP);
+      expect(fastCard.body.translation().x).toBeLessThan(
+        slowCard.body.translation().x - 0.35
+      );
+    } finally {
+      fastWorld.free();
+      slowWorld.free();
     }
   });
 

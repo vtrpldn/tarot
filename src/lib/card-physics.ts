@@ -12,6 +12,8 @@ export const CARD_PHYSICS = {
   linearDamping: 0.85,
   maxAngularSpeed: 14,
   maxPlanarSpeed: 4.2,
+  throwArcMinimumPlanarSpeed: 1.4,
+  throwArcMaximumVerticalSpeed: 1.45,
   settleAngularSpeed: 0.035,
   settleLinearSpeed: 0.018,
   spawnLift: 0.14,
@@ -223,10 +225,22 @@ export function getReleaseKinematics({
     -CARD_PHYSICS.maxAngularSpeed,
     Math.min(CARD_PHYSICS.maxAngularSpeed, torque * 5.4)
   );
+  const planarSpeed = Math.hypot(velocityX, velocityY);
+  const throwArcProgress = Math.max(
+    0,
+    Math.min(
+      1,
+      (planarSpeed - CARD_PHYSICS.throwArcMinimumPlanarSpeed) /
+        (CARD_PHYSICS.maxPlanarSpeed -
+          CARD_PHYSICS.throwArcMinimumPlanarSpeed)
+    )
+  );
+  const verticalVelocity =
+    CARD_PHYSICS.throwArcMaximumVerticalSpeed * throwArcProgress;
 
   return {
     angularVelocity: [0, 0, angularZ],
-    linearVelocity: [velocityX, velocityY, 0],
+    linearVelocity: [velocityX, velocityY, verticalVelocity],
   };
 }
 
