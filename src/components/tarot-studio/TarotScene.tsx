@@ -51,6 +51,7 @@ import {
   CARD_PHYSICS,
   constrainReleaseToBounds,
   createPhysicsAuthorityKey,
+  getCardColliderHalfExtents,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
   isPhysicsLaunchForMountedCard,
@@ -71,6 +72,7 @@ import { ConstellationReading } from "./ConstellationReading";
 import { DeckPhysics } from "./DeckPhysics";
 import { PhysicsCard } from "./PhysicsCard";
 import { TablePhysics } from "./TablePhysics";
+import { getTableCardRestingHeights } from "./card-stacking";
 import {
   createSceneTableLayout,
   clampViewPan,
@@ -1794,6 +1796,54 @@ function TarotTable({
         .sort((first, second) => first.zIndex - second.zIndex),
     [session.cards]
   );
+  const [tableColliderHalfWidth, tableColliderHalfHeight, tableColliderHalfDepth] =
+    useMemo(
+      () =>
+        getCardColliderHalfExtents(
+          layout.cardWidth,
+          layout.cardHeight,
+          CARD_THICKNESS
+        ),
+      [layout.cardHeight, layout.cardWidth]
+    );
+  const baseTableCardZ =
+    TABLE_SURFACE_Z + tableColliderHalfDepth + CARD_PHYSICS.contactSkin;
+  const tableCardRestingHeights = useMemo(
+    () =>
+      getTableCardRestingHeights({
+        cards: tableCards,
+        footprint: {
+          halfHeight: tableColliderHalfHeight,
+          halfWidth: tableColliderHalfWidth,
+        },
+        layout,
+        baseHeight: baseTableCardZ,
+        // Both cuboid colliders use contact skin, so reserve it on both faces.
+        layerStep:
+          tableColliderHalfDepth * 2 + CARD_PHYSICS.contactSkin * 2,
+      }),
+    [
+      baseTableCardZ,
+      layout,
+      tableCards,
+      tableColliderHalfDepth,
+      tableColliderHalfHeight,
+      tableColliderHalfWidth,
+    ]
+  );
+  const highestTableCardZ = Math.max(
+    baseTableCardZ,
+    ...Array.from(tableCardRestingHeights.values())
+  );
+  const maximumThrowArcHeight =
+    (CARD_PHYSICS.throwArcMaximumVerticalSpeed ** 2) /
+    (2 * Math.abs(CARD_PHYSICS.gravity[2]));
+  const tableRailTopZ =
+    highestTableCardZ +
+    CARD_PHYSICS.dragLift +
+    maximumThrowArcHeight +
+    CARD_THICKNESS / 2 +
+    CARD_PHYSICS.contactSkin;
   const deckCount = deckCards.length;
   const resolvedDeckPosition =
     session.deckPosition ?? layout.defaultDeckPosition;
@@ -2001,6 +2051,7 @@ function TarotTable({
         cardHeight={layout.cardHeight}
         cardWidth={layout.cardWidth}
         dragBounds={layout.dragBounds}
+        railTopZ={tableRailTopZ}
         surfaceZ={TABLE_SURFACE_Z}
       />
       <ConstellationReading
@@ -2149,6 +2200,9 @@ function TarotTable({
             reducedMotion={reducedMotion}
             selected={session.selectedCardId === card.id}
             slabGeometry={slabGeometry}
+            restingZ={
+              tableCardRestingHeights.get(card.id) ?? baseTableCardZ
+            }
             tableSurfaceZ={TABLE_SURFACE_Z}
             worldPosition={layout.toWorld(card.position)}
           />

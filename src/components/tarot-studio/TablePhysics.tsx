@@ -16,6 +16,8 @@ type TablePhysicsProps = {
   cardWidth: number;
   surfaceZ: number;
   dragBounds: SceneBounds;
+  /** World-space rail top required by the current scripted layout. */
+  railTopZ?: number;
 };
 
 const finiteOrZero = (value: number) => (Number.isFinite(value) ? value : 0);
@@ -28,6 +30,7 @@ export function TablePhysics({
   cardWidth,
   surfaceZ,
   dragBounds,
+  railTopZ,
 }: TablePhysicsProps) {
   const left = Math.min(
     finiteOrZero(dragBounds.left),
@@ -58,7 +61,18 @@ export function TablePhysics({
   );
   const physicalHalfWidth = halfWidth + cardRadius;
   const physicalHalfHeight = halfHeight + cardRadius;
-  const railCenterZ = surfaceZ + RAIL_HALF_HEIGHT;
+  // A stack may intentionally raise its top card well above the normal drag
+  // lift. Extend the invisible walls only in that case, otherwise a fast
+  // release could pass over a rail before gravity returns it to the cloth.
+  const railTop = Math.max(
+    surfaceZ + RAIL_HALF_HEIGHT * 2,
+    Number.isFinite(railTopZ) ? railTopZ ?? surfaceZ : surfaceZ
+  );
+  const railHalfHeight = Math.max(
+    RAIL_HALF_HEIGHT,
+    (railTop - surfaceZ) / 2
+  );
+  const railCenterZ = surfaceZ + railHalfHeight;
 
   return (
     <RigidBody type="fixed" colliders={false}>
@@ -77,7 +91,7 @@ export function TablePhysics({
         args={[
           RAIL_THICKNESS / 2,
           physicalHalfHeight + RAIL_THICKNESS,
-          RAIL_HALF_HEIGHT,
+          railHalfHeight,
         ]}
         position={[
           right + cardRadius + RAIL_THICKNESS / 2,
@@ -91,7 +105,7 @@ export function TablePhysics({
         args={[
           RAIL_THICKNESS / 2,
           physicalHalfHeight + RAIL_THICKNESS,
-          RAIL_HALF_HEIGHT,
+          railHalfHeight,
         ]}
         position={[
           left - cardRadius - RAIL_THICKNESS / 2,
@@ -105,7 +119,7 @@ export function TablePhysics({
         args={[
           physicalHalfWidth + RAIL_THICKNESS,
           RAIL_THICKNESS / 2,
-          RAIL_HALF_HEIGHT,
+          railHalfHeight,
         ]}
         position={[
           centerX,
@@ -119,7 +133,7 @@ export function TablePhysics({
         args={[
           physicalHalfWidth + RAIL_THICKNESS,
           RAIL_THICKNESS / 2,
-          RAIL_HALF_HEIGHT,
+          railHalfHeight,
         ]}
         position={[
           centerX,

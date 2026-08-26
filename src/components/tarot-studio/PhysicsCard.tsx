@@ -61,6 +61,7 @@ import {
 } from "./CardMesh";
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import {
+  canPersistSettledPhysicsPose,
   getMoveReleaseTranslation,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
@@ -153,6 +154,8 @@ export type PhysicsCardProps = {
   ) => void;
   onSound: CardSoundPlayer;
   reducedMotion: boolean;
+  /** Ephemeral collider-centre height derived from the current table layout. */
+  restingZ?: number;
   selected: boolean;
   slabGeometry: ExtrudeGeometry;
   /** Table collider height in the Rapier scene. Defaults to 0. */
@@ -231,6 +234,7 @@ export function PhysicsCard({
   onSettle,
   onSound,
   reducedMotion,
+  restingZ: requestedRestingZ,
   selected,
   slabGeometry,
   tableSurfaceZ = 0,
@@ -245,6 +249,7 @@ export function PhysicsCard({
     useRef<LostPointerCaptureBinding | null>(null);
   const mountedCardIdRef = useRef<string | null>(null);
   const lastLayerKeyRef = useRef(layerKey);
+  const lastRestingZRef = useRef<number | null>(null);
   const reconciledAuthorityKeyRef = useRef<string | null>(null);
   const reconciledSceneAuthorityKeyRef = useRef<string | null>(null);
   const skipNextAuthorityReconciliationRef = useRef(false);
@@ -267,7 +272,12 @@ export function PhysicsCard({
   const dropLift =
     CARD_PHYSICS.spawnLift +
     Math.min(12, Math.max(0, dropIndex)) * CARD_THICKNESS * 0.7;
-  const initialZ = tableSurfaceZ + CARD_THICKNESS / 2 + dropLift;
+  const minimumRestingZ =
+    tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin;
+  const restingZ = Number.isFinite(requestedRestingZ)
+    ? Math.max(minimumRestingZ, requestedRestingZ ?? minimumRestingZ)
+    : minimumRestingZ;
+  const initialZ = restingZ + dropLift;
   const worldX = worldPosition[0];
   const worldY = worldPosition[1];
   const initialLaunchRef = useRef<PhysicsCardLaunch | undefined>(
@@ -284,6 +294,7 @@ export function PhysicsCard({
     authorityKey,
     worldX,
     worldY,
+    restingZ,
     tableSurfaceZ,
   ].join("|");
   const latestAuthorityRef = useRef({
@@ -305,7 +316,7 @@ export function PhysicsCard({
     resolvedInitialLaunch
       ? Math.max(
           resolvedInitialLaunch.position[2],
-          tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin
+          restingZ
         )
       : initialZ,
   ]);
@@ -435,7 +446,8 @@ export function PhysicsCard({
         drag.target.set(
           targetX,
           targetY,
-          tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.dragLift
+          Math.max(restingZ, drag.startTranslation.z) +
+            CARD_PHYSICS.dragLift
         );
         drag.moved ||= point.distanceToSquared(drag.origin) > DRAG_THRESHOLD * DRAG_THRESHOLD;
       }
@@ -456,7 +468,7 @@ export function PhysicsCard({
       dragBounds,
       invalidate,
       rapier.RigidBodyType.KinematicPositionBased,
-      tableSurfaceZ,
+      restingZ,
     ]
   );
 
@@ -638,6 +650,7 @@ export function PhysicsCard({
     }
 
     const layerChanged = lastLayerKeyRef.current !== layerKey;
+    const restingHeightChanged = lastRestingZRef.current !== restingZ;
     const currentPose = getCardPose(body.translation(), body.rotation());
     const targetPose: PhysicsCardPose = {
       faceUp: card.faceUp,
@@ -657,6 +670,7 @@ export function PhysicsCard({
 
     mountedCardIdRef.current = card.id;
     lastLayerKeyRef.current = layerKey;
+    lastRestingZRef.current = restingZ;
     reconciledAuthorityKeyRef.current = authorityKey;
     reconciledSceneAuthorityKeyRef.current = sceneAuthorityKey;
 
@@ -672,7 +686,7 @@ export function PhysicsCard({
       return;
     }
 
-    if (!isNewBody && !poseChanged && !layerChanged) {
+    if (!isNewBody && !poseChanged && !layerChanged && !restingHeightChanged) {
       durablePoseRef.current = nextDurablePose;
       return;
     }
@@ -682,7 +696,6 @@ export function PhysicsCard({
       launch?.rotation ?? targetPose.rotation,
       launch?.faceUp ?? targetPose.faceUp
     );
-    const restingZ = tableSurfaceZ + CARD_THICKNESS / 2;
     const nextZ = isNewBody
       ? initialPositionRef.current[2]
       : Math.max(restingZ + dropLiftRef.current, body.translation().z);
@@ -733,6 +746,7 @@ export function PhysicsCard({
     invalidate,
     onLaunchConsumed,
     rapier.RigidBodyType.Dynamic,
+    restingZ,
     sceneAuthorityKey,
     tableSurfaceZ,
     worldX,
@@ -804,6 +818,35 @@ export function PhysicsCard({
       rotation: latestAuthority.rotation,
     };
     flipRef.current = null;
+    // The rigid-body render sync runs earlier in the demand frame that
+    // completes this presentation. Schedule one more frame so a sleeping
+    // body's new physical half-turn reaches its Three.js object without
+    // waking it or introducing another solver impulse.
+    invalidate();
+    const reconciledAuthorityKey = reconciledAuthorityKeyRef.current;
+
+    // Rapier can put a moving body to sleep during the presentation-only
+    // flip. Its onSleep callback correctly rejects that in-flight state, so
+    // persist once here after the body has the final physical half-turn.
+    if (
+      body.isSleeping() &&
+      reconciledAuthorityKey &&
+      canPersistSettledPhysicsPose({
+        hasActiveDrag: dragRef.current !== null,
+        hasActiveFlip: false,
+        hasExternalDrag: externalDragActiveRef.current,
+        latestSceneAuthorityKey: latestAuthority.sceneAuthorityKey,
+        reconciledAuthorityKey,
+        reconciledSceneAuthorityKey:
+          reconciledSceneAuthorityKeyRef.current,
+      })
+    ) {
+      onSettle(
+        card.id,
+        getCardPose(body.translation(), body.rotation()),
+        reconciledAuthorityKey
+      );
+    }
   });
 
   useBeforePhysicsStep(() => {
@@ -846,7 +889,7 @@ export function PhysicsCard({
       body.setNextKinematicTranslation({
         x: externalDrag.position[0],
         y: externalDrag.position[1],
-        z: tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.dragLift,
+        z: restingZ + CARD_PHYSICS.dragLift,
       });
       return;
     }
@@ -926,7 +969,7 @@ export function PhysicsCard({
       target: new Vector3(
         translation.x,
         translation.y,
-        tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.dragLift
+        Math.max(restingZ, translation.z) + CARD_PHYSICS.dragLift
       ),
       startAngle: Math.atan2(point.y - translation.y, point.x - translation.x),
       startQuaternion: {
@@ -1080,11 +1123,15 @@ export function PhysicsCard({
         if (
           !body ||
           !reconciledAuthorityKey ||
-          reconciledSceneAuthorityKeyRef.current !==
-            latestAuthority.sceneAuthorityKey ||
-          dragRef.current ||
-          flipRef.current ||
-          externalDragActiveRef.current
+          !canPersistSettledPhysicsPose({
+            hasActiveDrag: dragRef.current !== null,
+            hasActiveFlip: flipRef.current !== null,
+            hasExternalDrag: externalDragActiveRef.current,
+            latestSceneAuthorityKey: latestAuthority.sceneAuthorityKey,
+            reconciledAuthorityKey,
+            reconciledSceneAuthorityKey:
+              reconciledSceneAuthorityKeyRef.current,
+          })
         ) {
           return;
         }

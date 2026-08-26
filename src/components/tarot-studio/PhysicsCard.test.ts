@@ -1,6 +1,7 @@
 import { Vector3 } from "three";
 import { describe, expect, test } from "vitest";
 import {
+  canPersistSettledPhysicsPose,
   getMoveReleaseTranslation,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
@@ -26,6 +27,35 @@ describe("PhysicsCard move release", () => {
     expect(shouldTakeDragPhysicsOwnership(false, false)).toBe(false);
     expect(shouldTakeDragPhysicsOwnership(false, true)).toBe(true);
     expect(shouldTakeDragPhysicsOwnership(true, true)).toBe(false);
+  });
+
+  test("persists a sleeping card after its visual flip completes", () => {
+    const authority = "1:0.4:-0.2:15:3";
+
+    // Rapier's onSleep path must reject the in-flight visual phase.
+    expect(
+      canPersistSettledPhysicsPose({
+        hasActiveDrag: false,
+        hasActiveFlip: true,
+        hasExternalDrag: false,
+        latestSceneAuthorityKey: authority,
+        reconciledAuthorityKey: authority,
+        reconciledSceneAuthorityKey: authority,
+      })
+    ).toBe(false);
+
+    // Completion clears the visual owner and can commit the same sleeping
+    // body's final pose through the matching authority key.
+    expect(
+      canPersistSettledPhysicsPose({
+        hasActiveDrag: false,
+        hasActiveFlip: false,
+        hasExternalDrag: false,
+        latestSceneAuthorityKey: authority,
+        reconciledAuthorityKey: authority,
+        reconciledSceneAuthorityKey: authority,
+      })
+    ).toBe(true);
   });
 
   test("reserves corners for rotation without stealing ordinary edge drags", () => {

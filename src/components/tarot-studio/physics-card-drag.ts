@@ -30,6 +30,34 @@ export function shouldTakeDragPhysicsOwnership(
   return !wasMoved && moved;
 }
 
+/**
+ * A settled solver pose is valid only while no interaction owns the card and
+ * the durable session revision still matches the body that produced it.
+ */
+export function canPersistSettledPhysicsPose({
+  hasActiveDrag,
+  hasActiveFlip,
+  hasExternalDrag,
+  latestSceneAuthorityKey,
+  reconciledAuthorityKey,
+  reconciledSceneAuthorityKey,
+}: {
+  hasActiveDrag: boolean;
+  hasActiveFlip: boolean;
+  hasExternalDrag: boolean;
+  latestSceneAuthorityKey: string;
+  reconciledAuthorityKey: string | null;
+  reconciledSceneAuthorityKey: string | null;
+}): boolean {
+  return Boolean(
+    reconciledAuthorityKey &&
+      reconciledSceneAuthorityKey === latestSceneAuthorityKey &&
+      !hasActiveDrag &&
+      !hasActiveFlip &&
+      !hasExternalDrag
+  );
+}
+
 export type DurableCardPose = {
   faceUp: boolean;
   layerKey: number;
