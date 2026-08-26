@@ -199,6 +199,18 @@ export function createCardQuaternion(
     : [cosine, sine, 0, 0];
 }
 
+/** Turns a card over around its local X axis without changing its yaw. */
+export function flipCardQuaternion(
+  quaternion: QuaternionLike
+): PhysicsQuaternion {
+  return [
+    quaternion.w,
+    quaternion.z,
+    -quaternion.y,
+    -quaternion.x,
+  ];
+}
+
 export function getCardPose(
   translation: TranslationLike,
   quaternion: QuaternionLike
@@ -294,6 +306,46 @@ export function constrainReleaseToBounds({
     angularVelocity: [...kinematics.angularVelocity],
     linearVelocity: [boundedVelocityX, boundedVelocityY, velocityZ],
   };
+}
+
+export function constrainVelocityForNextPhysicsStep({
+  bounds,
+  position,
+  timeStepSeconds,
+  velocity,
+}: {
+  bounds: PhysicsTableBounds;
+  position: TablePoint;
+  timeStepSeconds: number;
+  velocity: [x: number, y: number, z: number];
+}): [x: number, y: number, z: number] {
+  const left = Math.min(bounds.left, bounds.right);
+  const right = Math.max(bounds.left, bounds.right);
+  const bottom = Math.min(bounds.bottom, bounds.top);
+  const top = Math.max(bounds.bottom, bounds.top);
+  const step = Math.max(0.0001, timeStepSeconds);
+  const constrainAxis = (
+    coordinate: number,
+    speed: number,
+    minimum: number,
+    maximum: number
+  ) => {
+    if (speed > 0) {
+      return Math.min(speed, Math.max(0, (maximum - coordinate) / step));
+    }
+
+    if (speed < 0) {
+      return Math.max(speed, Math.min(0, (minimum - coordinate) / step));
+    }
+
+    return speed;
+  };
+
+  return [
+    constrainAxis(position[0], velocity[0], left, right),
+    constrainAxis(position[1], velocity[1], bottom, top),
+    velocity[2],
+  ];
 }
 
 export function getFlipVisualState(progress: number): PhysicsFlipVisualState {

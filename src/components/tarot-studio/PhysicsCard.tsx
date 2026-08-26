@@ -40,7 +40,9 @@ import {
   CARD_PHYSICS,
   clampPhysicsPointToBounds,
   constrainReleaseToBounds,
+  constrainVelocityForNextPhysicsStep,
   createCardQuaternion,
+  flipCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
   getFlipVisualState,
@@ -112,8 +114,6 @@ type LostPointerCaptureBinding = {
 
 type FlipState = {
   elapsed: number;
-  position: Vector3;
-  rotation: { w: number; x: number; y: number; z: number };
 };
 
 const FLIP_DURATION_SECONDS = 0.42;
@@ -460,32 +460,17 @@ export function PhysicsCard({
     ]
   );
 
-  const beginVisualFlip = useCallback(
-    (body: RapierRigidBody) => {
-      const translation = body.translation();
-      const rotation = body.rotation();
-      const visual = visualRef.current;
+  const beginVisualFlip = useCallback(() => {
+    const visual = visualRef.current;
 
-      body.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
-      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-      visual?.position.set(0, 0, 0);
-      visual?.rotation.set(0, 0, 0);
-      visual?.scale.set(1, 1, 1);
-      flipRef.current = {
-        elapsed: 0,
-        position: new Vector3(translation.x, translation.y, translation.z),
-        rotation: {
-          w: rotation.w,
-          x: rotation.x,
-          y: rotation.y,
-          z: rotation.z,
-        },
-      };
-      invalidate();
-    },
-    [invalidate, rapier.RigidBodyType.KinematicPositionBased]
-  );
+    visual?.position.set(0, 0, 0);
+    visual?.rotation.set(0, 0, 0);
+    visual?.scale.set(1, 1, 1);
+    flipRef.current = {
+      elapsed: 0,
+    };
+    invalidate();
+  }, [invalidate]);
 
   const finishDrag = useCallback(
     ({ cancelled, pointerId, point, timestamp }: {
@@ -524,7 +509,7 @@ export function PhysicsCard({
         // A face command can arrive while this pointer owns the card. Complete
         // it here so a later sleep callback cannot restore the stale face.
         if (faceUp !== latestAuthority.faceUp) {
-          beginVisualFlip(body);
+          beginVisualFlip();
         } else {
           invalidate();
         }
@@ -613,7 +598,7 @@ export function PhysicsCard({
       dragRef.current = null;
       canvas.style.cursor = "grab";
       if (cancelled && faceUp !== latestAuthority.faceUp) {
-        beginVisualFlip(body);
+        beginVisualFlip();
       }
       invalidate();
       return true;
@@ -683,7 +668,7 @@ export function PhysicsCard({
 
     if (faceOnlyAuthorityChange) {
       durablePoseRef.current = nextDurablePose;
-      beginVisualFlip(body);
+      beginVisualFlip();
       return;
     }
 
@@ -789,42 +774,24 @@ export function PhysicsCard({
       visual.scale.set(flipVisual.scaleX, flipVisual.scaleY, 1);
     }
 
-    // Keep the real card flat at its existing depth while only its nested
-    // presentation turns over.
-    body.setNextKinematicRotation(flip.rotation);
-    body.setNextKinematicTranslation(flip.position);
-
     if (progress < 1) {
       invalidate();
       return;
     }
 
     const latestAuthority = latestAuthorityRef.current;
-    const [x, y, z, w] = createCardQuaternion(
-      latestAuthority.rotation,
-      latestAuthority.faceUp
-    );
+    const currentRotation = body.rotation();
+    const currentPose = getCardPose(body.translation(), currentRotation);
 
     if (visual) {
       visual.position.set(0, 0, 0);
       visual.rotation.set(0, 0, 0);
       visual.scale.set(1, 1, 1);
     }
-    body.setRotation({ x, y, z, w }, true);
-    body.setTranslation(
-      {
-        x: latestAuthority.position[0],
-        y: latestAuthority.position[1],
-        z: Math.max(
-          flip.position.z,
-          tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin
-        ),
-      },
-      true
-    );
-    body.setBodyType(rapier.RigidBodyType.Dynamic, true);
-    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    if (currentPose.faceUp !== latestAuthority.faceUp) {
+      const [x, y, z, w] = flipCardQuaternion(currentRotation);
+      body.setRotation({ x, y, z, w }, !body.isSleeping());
+    }
     mountedCardIdRef.current = card.id;
     lastLayerKeyRef.current = layerKey;
     reconciledAuthorityKeyRef.current = latestAuthority.authorityKey;
@@ -848,13 +815,25 @@ export function PhysicsCard({
       return;
     }
 
+    if (body.bodyType() === rapier.RigidBodyType.Dynamic) {
+      const translation = body.translation();
+      const velocity = body.linvel();
+      const [x, y, z] = constrainVelocityForNextPhysicsStep({
+        bounds: dragBounds,
+        position: [translation.x, translation.y],
+        timeStepSeconds: CARD_PHYSICS.timeStep,
+        velocity: [velocity.x, velocity.y, velocity.z],
+      });
+
+      if (x !== velocity.x || y !== velocity.y) {
+        body.setLinvel({ x, y, z }, true);
+      }
+    }
+
     const flip = flipRef.current;
 
     if (flip) {
-      // A flip never moves the collider. Its visual timing is driven by
-      // rendered-frame delta above, independent from fixed physics substeps.
-      body.setNextKinematicRotation(flip.rotation);
-      body.setNextKinematicTranslation(flip.position);
+      // Physics stays fully dynamic while the nested presentation turns.
       return;
     }
 
@@ -1079,7 +1058,7 @@ export function PhysicsCard({
       return;
     }
 
-    beginVisualFlip(body);
+    beginVisualFlip();
     onFlip(card.id);
   };
 

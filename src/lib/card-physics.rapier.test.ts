@@ -2,7 +2,10 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { beforeAll, describe, expect, test } from "vitest";
 import {
   CARD_PHYSICS,
+  constrainVelocityForNextPhysicsStep,
+  flipCardQuaternion,
   getCardColliderHalfExtents,
+  getCardPose,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
 } from "./card-physics";
@@ -219,6 +222,86 @@ describe("configured Tarot card colliders in Rapier", () => {
     } finally {
       fastWorld.free();
       slowWorld.free();
+    }
+  });
+
+  test("turns a moving card over without changing its dynamic momentum", () => {
+    const world = createWorld();
+
+    try {
+      const card = createCard(world, {
+        position: [0, 0, 1],
+        velocity: [1.2, -0.4, 0.3],
+      });
+      card.body.setAngvel({ x: 0, y: 0, z: 2 }, true);
+      const initialRotation = card.body.rotation();
+      const initialFace = getCardPose(
+        card.body.translation(),
+        initialRotation
+      ).faceUp;
+      const [x, y, z, w] = flipCardQuaternion(initialRotation);
+
+      card.body.setRotation({ x, y, z, w }, true);
+
+      expect(card.body.bodyType()).toBe(RAPIER.RigidBodyType.Dynamic);
+      expect(card.body.linvel()).toMatchObject({
+        x: expect.closeTo(1.2, 6),
+        y: expect.closeTo(-0.4, 6),
+        z: expect.closeTo(0.3, 6),
+      });
+      expect(card.body.angvel()).toMatchObject({
+        x: expect.closeTo(0, 6),
+        y: expect.closeTo(0, 6),
+        z: expect.closeTo(2, 6),
+      });
+      expect(
+        getCardPose(card.body.translation(), card.body.rotation()).faceUp
+      ).toBe(!initialFace);
+
+      step(world, 1);
+
+      expect(card.body.translation().x).toBeGreaterThan(0);
+      expect(card.body.linvel().x).toBeGreaterThan(1);
+      expect(card.body.angvel().z).toBeGreaterThan(1.5);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("brakes an airborne flick at the durable centre boundary", () => {
+    const world = createWorld();
+
+    try {
+      const right = 3;
+      const card = createCard(world, {
+        position: [right - 0.01, 0, CARD_HALF_DEPTH + CARD_PHYSICS.dragLift],
+        velocity: [
+          CARD_PHYSICS.maxPlanarSpeed,
+          0,
+          CARD_PHYSICS.throwArcMaximumVerticalSpeed,
+        ],
+      });
+      let maximumX = card.body.translation().x;
+
+      for (let frame = 0; frame < 180; frame += 1) {
+        const translation = card.body.translation();
+        const velocity = card.body.linvel();
+        const [x, y, z] = constrainVelocityForNextPhysicsStep({
+          bounds: { bottom: -2, left: -3, right, top: 2 },
+          position: [translation.x, translation.y],
+          timeStepSeconds: CARD_PHYSICS.timeStep,
+          velocity: [velocity.x, velocity.y, velocity.z],
+        });
+
+        card.body.setLinvel({ x, y, z }, true);
+        world.step();
+        maximumX = Math.max(maximumX, card.body.translation().x);
+      }
+
+      expect(maximumX).toBeLessThanOrEqual(right + 0.001);
+      expect(card.body.translation().x).toBeGreaterThan(right - 0.02);
+    } finally {
+      world.free();
     }
   });
 

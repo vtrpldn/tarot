@@ -4,8 +4,10 @@ import {
   CARD_PHYSICS,
   clampPhysicsPointToBounds,
   constrainReleaseToBounds,
+  constrainVelocityForNextPhysicsStep,
   createCardQuaternion,
   createPhysicsAuthorityKey,
+  flipCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
   getFlipVisualState,
@@ -33,6 +35,25 @@ describe("card orientation", () => {
       position: [1.2, -0.4],
       rotation: expect.closeTo(rotation, 10),
     });
+  });
+
+  test.for([
+    [0, true],
+    [72, true],
+    [-145, true],
+    [0, false],
+    [72, false],
+    [-145, false],
+  ] as const)("flips a %s degree, face-up=%s pose without changing yaw", ([rotation, faceUp]) => {
+    const [x, y, z, w] = createCardQuaternion(rotation, faceUp);
+    const [nextX, nextY, nextZ, nextW] = flipCardQuaternion({ x, y, z, w });
+    const pose = getCardPose(
+      { x: 0, y: 0 },
+      { x: nextX, y: nextY, z: nextZ, w: nextW }
+    );
+
+    expect(pose.faceUp).toBe(!faceUp);
+    expect(pose.rotation).toBeCloseTo(rotation, 10);
   });
 
   test.for([
@@ -182,6 +203,26 @@ describe("card release", () => {
       angularVelocity: [0, 0, 2],
       linearVelocity: [0, 1.5, 0],
     });
+  });
+
+  test("brakes the next solver step at the durable centre boundary", () => {
+    expect(
+      constrainVelocityForNextPhysicsStep({
+        bounds: { bottom: -2, left: -3, right: 3, top: 2 },
+        position: [2.99, -1.99],
+        timeStepSeconds: 1 / 60,
+        velocity: [4.2, -4.2, 1.45],
+      })
+    ).toEqual([expect.closeTo(0.6, 8), expect.closeTo(-0.6, 8), 1.45]);
+
+    expect(
+      constrainVelocityForNextPhysicsStep({
+        bounds: { bottom: -2, left: -3, right: 3, top: 2 },
+        position: [2.99, 0],
+        timeStepSeconds: 1 / 60,
+        velocity: [-4.2, 0, 0],
+      })
+    ).toEqual([-4.2, 0, 0]);
   });
 });
 
