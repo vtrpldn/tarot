@@ -1,4 +1,9 @@
 import { describe, expect, test } from "vitest";
+import {
+  CARD_GEOMETRY,
+  CARD_PHYSICS,
+  getCardColliderHalfExtents,
+} from "@/lib/card-physics";
 import type { TableCard } from "@/types";
 import type { SceneTableLayout } from "./table-layout";
 import {
@@ -11,6 +16,14 @@ const layout = {
   cardWidth: 2,
   toWorld: ([x, y]: [number, number]) => [x, y] as [number, number],
 } as SceneTableLayout;
+const [halfWidth, halfHeight, halfDepth] = getCardColliderHalfExtents(
+  layout.cardWidth,
+  layout.cardHeight,
+  CARD_GEOMETRY.thickness
+);
+const footprint = { halfHeight, halfWidth };
+const baseHeight = halfDepth + CARD_PHYSICS.contactSkin;
+const layerStep = (halfDepth + CARD_PHYSICS.contactSkin) * 2;
 
 function createTableCard(
   id: string,
@@ -40,7 +53,7 @@ describe("getTableCardRestingHeights", () => {
     expect(
       getOverlappingTableCardIds({
         cards,
-        footprint: { halfHeight: 1.45, halfWidth: 0.95 },
+        footprint,
         layout,
       })
     ).toEqual(new Set(["bottom", "top"]));
@@ -55,15 +68,18 @@ describe("getTableCardRestingHeights", () => {
 
     const heights = getTableCardRestingHeights({
       cards,
-      footprint: { halfHeight: 1.45, halfWidth: 0.95 },
+      footprint,
       layout,
-      baseHeight: 0.01,
-      layerStep: 0.02,
+      baseHeight,
+      layerStep,
     });
 
-    expect(heights.get("bottom")).toBe(0.01);
-    expect(heights.get("middle")).toBeCloseTo(0.03);
-    expect(heights.get("top")).toBeCloseTo(0.05);
+    expect(heights.get("bottom")).toBe(0.012);
+    expect(heights.get("middle")).toBeCloseTo(0.036);
+    expect(heights.get("top")).toBeCloseTo(0.06);
+    expect(layerStep - CARD_GEOMETRY.visibleHalfDepth * 2).toBeCloseTo(
+      CARD_PHYSICS.contactSkin * 2
+    );
     expect(cards.map((card) => card.position)).toEqual([
       [0.08, 0.04],
       [0, 0],
@@ -77,25 +93,24 @@ describe("getTableCardRestingHeights", () => {
         createTableCard("left", [-3, 0], 1),
         createTableCard("right", [3, 0], 2),
       ],
-      footprint: { halfHeight: 1.45, halfWidth: 0.95 },
+      footprint,
       layout,
-      baseHeight: 0.01,
-      layerStep: 0.02,
+      baseHeight,
+      layerStep,
     });
 
-    expect(heights.get("left")).toBe(0.01);
-    expect(heights.get("right")).toBe(0.01);
+    expect(heights.get("left")).toBe(baseHeight);
+    expect(heights.get("right")).toBe(baseHeight);
   });
 
   test("returns both cards to the cloth when an upper overlap is separated", () => {
-    const footprint = { halfHeight: 1.45, halfWidth: 0.95 };
     const layeredCards = [
       createTableCard("bottom", [0, 0], 1),
       createTableCard("top", [0.05, 0.02], 2),
     ];
     const separatedCards = [
       layeredCards[0],
-      { ...layeredCards[1], position: [2, 0] as [number, number] },
+      { ...layeredCards[1], position: [2.1, 0] as [number, number] },
     ];
 
     expect(
@@ -105,11 +120,11 @@ describe("getTableCardRestingHeights", () => {
       cards: layeredCards,
       footprint,
       layout,
-      baseHeight: 0.01,
-      layerStep: 0.02,
+      baseHeight,
+      layerStep,
     });
-    expect(layeredHeights.get("bottom")).toBe(0.01);
-    expect(layeredHeights.get("top")).toBeCloseTo(0.03);
+    expect(layeredHeights.get("bottom")).toBe(baseHeight);
+    expect(layeredHeights.get("top")).toBeCloseTo(baseHeight + layerStep);
 
     expect(
       getOverlappingTableCardIds({ cards: separatedCards, footprint, layout })
@@ -118,16 +133,15 @@ describe("getTableCardRestingHeights", () => {
       cards: separatedCards,
       footprint,
       layout,
-      baseHeight: 0.01,
-      layerStep: 0.02,
+      baseHeight,
+      layerStep,
     });
 
-    expect(heights.get("bottom")).toBe(0.01);
-    expect(heights.get("top")).toBe(0.01);
+    expect(heights.get("bottom")).toBe(baseHeight);
+    expect(heights.get("top")).toBe(baseHeight);
   });
 
   test("does not disturb an independent overlap component when another separates", () => {
-    const footprint = { halfHeight: 1.45, halfWidth: 0.95 };
     const cards = [
       createTableCard("first-bottom", [0, 0], 1),
       createTableCard("first-top", [0.05, 0.02], 2),
@@ -136,15 +150,15 @@ describe("getTableCardRestingHeights", () => {
     ];
     const separatedCards = [
       cards[0],
-      { ...cards[1], position: [2, 0] as [number, number] },
+      { ...cards[1], position: [2.1, 0] as [number, number] },
       cards[2],
       cards[3],
     ];
     const options = {
       footprint,
       layout,
-      baseHeight: 0.01,
-      layerStep: 0.02,
+      baseHeight,
+      layerStep,
     };
     const originalHeights = getTableCardRestingHeights({ cards, ...options });
     const separatedHeights = getTableCardRestingHeights({
@@ -152,8 +166,12 @@ describe("getTableCardRestingHeights", () => {
       ...options,
     });
 
-    expect(originalHeights.get("first-top")).toBeCloseTo(0.03);
-    expect(originalHeights.get("second-top")).toBeCloseTo(0.03);
+    expect(originalHeights.get("first-top")).toBeCloseTo(
+      baseHeight + layerStep
+    );
+    expect(originalHeights.get("second-top")).toBeCloseTo(
+      baseHeight + layerStep
+    );
     expect(
       getOverlappingTableCardIds({
         cards: separatedCards,
@@ -161,8 +179,8 @@ describe("getTableCardRestingHeights", () => {
         layout,
       })
     ).toEqual(new Set(["second-bottom", "second-top"]));
-    expect(separatedHeights.get("first-bottom")).toBe(0.01);
-    expect(separatedHeights.get("first-top")).toBe(0.01);
+    expect(separatedHeights.get("first-bottom")).toBe(baseHeight);
+    expect(separatedHeights.get("first-top")).toBe(baseHeight);
     expect(separatedHeights.get("second-bottom")).toBe(
       originalHeights.get("second-bottom")
     );
@@ -171,27 +189,41 @@ describe("getTableCardRestingHeights", () => {
     );
   });
 
-  test("treats an exact overlap-epsilon edge as separated", () => {
-    const footprint = { halfHeight: 1.45, halfWidth: 0.95 };
-    const cards = [
+  test("layers every visual overlap and releases exact edge contact", () => {
+    const overlappingCards = [
       createTableCard("left", [0, 0], 1),
-      // Two half-widths minus the strict 0.001 overlap epsilon: equality here
-      // must release the authored layer rather than retain a phantom stack.
-      createTableCard("right", [1.899, 0], 2),
+      createTableCard("right", [2.011, 0], 2),
+    ];
+    const touchingCards = [
+      createTableCard("left", [0, 0], 1),
+      createTableCard("right", [2.012, 0], 2),
     ];
 
     expect(
-      getOverlappingTableCardIds({ cards, footprint, layout })
-    ).toEqual(new Set());
-    const heights = getTableCardRestingHeights({
-      cards,
+      getOverlappingTableCardIds({
+        cards: overlappingCards,
+        footprint,
+        layout,
+      })
+    ).toEqual(new Set(["left", "right"]));
+    const overlappingHeights = getTableCardRestingHeights({
+      cards: overlappingCards,
       footprint,
       layout,
-      baseHeight: 0.01,
-      layerStep: 0.02,
+      baseHeight,
+      layerStep,
+    });
+    const touchingHeights = getTableCardRestingHeights({
+      cards: touchingCards,
+      footprint,
+      layout,
+      baseHeight,
+      layerStep,
     });
 
-    expect(heights.get("left")).toBe(0.01);
-    expect(heights.get("right")).toBe(0.01);
+    expect(overlappingHeights.get("left")).toBe(baseHeight);
+    expect(overlappingHeights.get("right")).toBe(baseHeight + layerStep);
+    expect(touchingHeights.get("left")).toBe(baseHeight);
+    expect(touchingHeights.get("right")).toBe(baseHeight);
   });
 });

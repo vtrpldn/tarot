@@ -1,3 +1,5 @@
+import { CARD_GEOMETRY } from "@/lib/card-physics";
+
 type CardUvPoint = { x: number; y: number };
 
 type QuaternionLike = {
@@ -397,9 +399,11 @@ export function getLayerTransitionClearance({
   cardWidth: number;
   contactSkin: number;
 }): number {
-  return (
-    Math.hypot(Math.max(0, cardWidth), Math.max(0, cardHeight)) +
-    Math.max(0, contactSkin) * 2
+  const support = Math.max(0, contactSkin);
+
+  return 2 * Math.hypot(
+    Math.max(0, cardWidth) / 2 + CARD_GEOMETRY.bevelSize + support,
+    Math.max(0, cardHeight) / 2 + CARD_GEOMETRY.bevelSize + support
   );
 }
 
@@ -520,6 +524,13 @@ export function getLayerTransitionPosition({
       offset[1] * offsetProgress,
     height,
   ];
+}
+
+/** Changes authored yaw only after the card has fully cleared its old layer. */
+export function shouldApplyLayerTransitionTargetRotation(
+  progress: number
+): boolean {
+  return Number.isFinite(progress) && progress >= 0.35;
 }
 
 /**

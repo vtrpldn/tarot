@@ -39,7 +39,9 @@ import type {
 } from "@/types";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
+  CARD_GEOMETRY,
   constrainReleaseToBounds,
+  getFlipVisualState,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
   type PhysicsCardLaunchInput,
@@ -64,15 +66,12 @@ const MIN_THROW_SPEED = 0.7;
 const MAX_THROW_ROTATION = 11;
 const FLIP_DURATION_SECONDS = 0.46;
 const FLIP_SURFACE_CLEARANCE = 0.0005;
-const FLIP_MIN_WIDTH_SCALE = 0.12;
 const DRAG_SCALE = 1.035;
 
-export const CARD_THICKNESS = 0.018;
-const CARD_FACE_PLANE_OFFSET = 0.002;
-const CARD_VISIBLE_HALF_DEPTH =
-  CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET;
+export const CARD_THICKNESS = CARD_GEOMETRY.thickness;
+const CARD_VISIBLE_HALF_DEPTH = CARD_GEOMETRY.visibleHalfDepth;
 const CARD_CORNER_RADIUS = 0.16;
-const CARD_BEVEL_SIZE = 0.006;
+const CARD_BEVEL_SIZE = CARD_GEOMETRY.bevelSize;
 const CARD_BEVEL_THICKNESS = 0.003;
 
 type PointerCaptureTarget = Mesh & {
@@ -178,7 +177,7 @@ type CardMeshProps = {
     rotation?: number
   ) => void;
   onMoveDeck: (position: TablePoint) => void;
-  onPreviewDeckPosition: (position: TablePoint | null) => void;
+  onPreviewDeckPosition: (position: TablePoint | null) => TablePoint | null;
   onMove: (
     cardId: string,
     position: TablePoint,
@@ -613,20 +612,21 @@ export const CardMesh = memo(function CardMesh({
 
   const setDeckPreview = useCallback(
     (position: TablePoint | null) => {
+      const resolvedPosition = onPreviewDeckPosition(position);
       const current = deckPreviewRef.current;
       const unchanged =
-        current === position ||
+        current === resolvedPosition ||
         (current !== null &&
-          position !== null &&
-          Math.abs(current[0] - position[0]) <= 0.0005 &&
-          Math.abs(current[1] - position[1]) <= 0.0005);
+          resolvedPosition !== null &&
+          Math.abs(current[0] - resolvedPosition[0]) <= 0.0005 &&
+          Math.abs(current[1] - resolvedPosition[1]) <= 0.0005);
 
       if (unchanged) {
-        return;
+        return resolvedPosition;
       }
 
-      deckPreviewRef.current = position;
-      onPreviewDeckPosition(position);
+      deckPreviewRef.current = resolvedPosition;
+      return resolvedPosition;
     },
     [onPreviewDeckPosition]
   );
@@ -861,8 +861,8 @@ export const CardMesh = memo(function CardMesh({
         return true;
       }
 
-      const nextX = point.x - drag.offset.x;
-      const nextY = point.y - drag.offset.y;
+      let nextX = point.x - drag.offset.x;
+      let nextY = point.y - drag.offset.y;
       const [deltaX, deltaY] = sampleDragVelocity(drag, point, timestamp);
 
       if (!drag.moved && point.distanceTo(drag.origin) > DRAG_THRESHOLD) {
@@ -883,11 +883,22 @@ export const CardMesh = memo(function CardMesh({
 
       drag.tiltX = MathUtils.clamp(-deltaY * 0.48, -0.13, 0.13);
       drag.tiltY = MathUtils.clamp(deltaX * 0.48, -0.13, 0.13);
+      if (drag.mode === "move-deck") {
+        const safeDeckPosition = setDeckPreview([
+          nextX - deckOffset[0],
+          nextY - deckOffset[1],
+        ]);
+
+        if (safeDeckPosition) {
+          nextX = safeDeckPosition[0] + deckOffset[0];
+          nextY = safeDeckPosition[1] + deckOffset[1];
+        }
+      }
       drag.target.set(nextX, nextY, group.position.z);
       invalidate();
       return true;
     },
-    [invalidate, onSound]
+    [deckOffset, invalidate, onSound, setDeckPreview]
   );
 
   const finishDragAt = useCallback(
@@ -944,14 +955,25 @@ export const CardMesh = memo(function CardMesh({
             glideY *= glideScale;
           }
 
-          const nextPoint =
+          let nextPoint =
             drag.mode === "move-deck"
               ? layout.toDeckPoint(
                   releaseX + glideX - deckOffset[0],
                   releaseY + glideY - deckOffset[1]
                 )
               : layout.toPoint(releaseX + glideX, releaseY + glideY);
-          const nextWorldAnchor = layout.toWorld(nextPoint);
+          let nextWorldAnchor = layout.toWorld(nextPoint);
+
+          if (drag.mode === "move-deck") {
+            const safeDeckPosition =
+              setDeckPreview(nextWorldAnchor) ?? nextWorldAnchor;
+            nextPoint = layout.toDeckPoint(
+              safeDeckPosition[0],
+              safeDeckPosition[1]
+            );
+            nextWorldAnchor = layout.toWorld(nextPoint);
+          }
+
           const nextWorldPosition: TablePoint =
             drag.mode === "move-deck"
               ? [
@@ -1108,20 +1130,12 @@ export const CardMesh = memo(function CardMesh({
         flipAnimation.elapsed + Math.min(delta, 1 / 30)
       );
       const progress = flipAnimation.elapsed / FLIP_DURATION_SECONDS;
-      const easedProgress =
-        progress < 0.5
-          ? 4 * progress * progress * progress
-          : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+      const flipVisual = getFlipVisualState(progress);
 
-      const turnEnvelope = Math.sin(Math.PI * easedProgress);
-
-      flipScaleX = Math.max(
-        FLIP_MIN_WIDTH_SCALE,
-        Math.abs(Math.cos(Math.PI * easedProgress))
-      );
-      flipScaleY = 1 - turnEnvelope * 0.006;
+      flipScaleX = flipVisual.scaleX;
+      flipScaleY = flipVisual.scaleY;
       flippingCard.rotation.y =
-        easedProgress < 0.5 ? flipAnimation.from : flipAnimation.to;
+        flipVisual.rotationY === 0 ? flipAnimation.from : flipAnimation.to;
       flippingCard.rotation.x = 0;
       flipIsActive = progress < 1;
 
@@ -1251,7 +1265,7 @@ export const CardMesh = memo(function CardMesh({
     const zBase =
       externalDrag || (drag?.moved && drag.mode !== "move-deck")
         ? draggingZ
-        : restingZ + (drag?.mode === "move-deck" ? 0.006 : 0);
+        : restingZ;
     const zTarget = zBase + projectedSurfaceLift;
 
     if (reducedMotion) {

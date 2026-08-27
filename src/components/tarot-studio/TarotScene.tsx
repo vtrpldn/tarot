@@ -48,10 +48,12 @@ import { getCardStackOffset } from "@/lib/card-stack-layout";
 import { getDeckCards } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
+  CARD_GEOMETRY,
   CARD_PHYSICS,
   constrainReleaseToBounds,
   createPhysicsAuthorityKey,
   getCardColliderHalfExtents,
+  getOffsetCollisionFootprint,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
   isPhysicsLaunchForMountedCard,
@@ -69,7 +71,10 @@ import {
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { TableClothMaterial } from "./TableClothMaterial";
 import { ConstellationReading } from "./ConstellationReading";
-import { DeckPhysics } from "./DeckPhysics";
+import {
+  DeckPhysics,
+  type DeckPositionResolver,
+} from "./DeckPhysics";
 import { PhysicsCard } from "./PhysicsCard";
 import { TablePhysics } from "./TablePhysics";
 import {
@@ -105,7 +110,6 @@ const CUT_RAIL_PIXEL_SIZE = 44;
 const CUT_DRAG_THRESHOLD = 0.045;
 const CUT_MAX_POINTER_SPEED = 7.5;
 const PHYSICS_LAUNCH_EXPIRY_MS = 5_000;
-const CARD_FACE_PLANE_OFFSET = 0.002;
 const AMBIENT_FILL_INTENSITY = 2.1;
 const SPOTLIGHT_ANGLE = 1.54;
 const SPOTLIGHT_INTENSITY = 172;
@@ -650,7 +654,9 @@ function getDeckMetrics(cardCount: number, deckCapacity: number) {
     bottomCardCenter,
     cardThickness,
     depthScale:
-      safeCount > 0 ? Math.min(1, cardThickness / CARD_THICKNESS) : 1,
+      safeCount > 0
+        ? Math.min(1, cardThickness / CARD_GEOMETRY.visibleThickness)
+        : 1,
     stackHeight,
     topCardCenter:
       safeCount > 0 ? topSurface - cardThickness / 2 : topSurface,
@@ -821,6 +827,7 @@ function PhysicalDeck({
   backUrl,
   capacity,
   depthScale,
+  draggingZ,
   externalDragRef,
   height,
   layout,
@@ -843,6 +850,7 @@ function PhysicalDeck({
   backUrl: string;
   capacity: number;
   depthScale: number;
+  draggingZ: number;
   externalDragRef: MutableRefObject<ExternalCardDrag | null>;
   height: number;
   layout: SceneTableLayout;
@@ -1003,7 +1011,7 @@ function PhysicalDeck({
 
       dummy.position.z =
         currentPosition.z +
-        (CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET) * nextDepthScale;
+        CARD_GEOMETRY.visibleHalfDepth * nextDepthScale;
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       backInstances.setMatrixAt(index, dummy.matrix);
@@ -1182,7 +1190,7 @@ function PhysicalDeck({
           position: [
             worldPosition[0],
             worldPosition[1],
-            topSurface + CARD_THICKNESS / 2 + 0.035,
+            draggingZ,
           ],
           rotation: drag.rotation,
           targetPosition: worldPosition,
@@ -1746,6 +1754,7 @@ function TarotTable({
   const size = useThree((state) => state.size);
   const invalidate = useThree((state) => state.invalidate);
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
+  const deckPositionResolverRef = useRef<DeckPositionResolver | null>(null);
   const externalDeckDragRef = useRef<ExternalCardDrag | null>(null);
   const physicsLaunchesRef = useRef(new Map<string, PhysicsCardLaunch>());
   const physicsLaunchSequenceRef = useRef(0);
@@ -1862,7 +1871,7 @@ function TarotTable({
     highestTableCardZ +
     CARD_PHYSICS.dragLift +
     maximumThrowArcHeight +
-    CARD_THICKNESS / 2 +
+    tableColliderHalfDepth +
     CARD_PHYSICS.contactSkin;
   const deckCount = deckCards.length;
   const resolvedDeckPosition =
@@ -1870,6 +1879,22 @@ function TarotTable({
   const deckPosition = useMemo(
     () => layout.toWorld(resolvedDeckPosition),
     [layout, resolvedDeckPosition]
+  );
+  const deckOffsets = useMemo(
+    () =>
+      deckCards.map((_, index) =>
+        getDeckLayerOffset(index, deckCards.length, layout)
+      ),
+    [deckCards, layout]
+  );
+  const deckCollisionFootprint = useMemo(
+    () =>
+      getOffsetCollisionFootprint({
+        halfHeight: tableColliderHalfHeight,
+        halfWidth: tableColliderHalfWidth,
+        offsets: deckOffsets,
+      }),
+    [deckOffsets, tableColliderHalfHeight, tableColliderHalfWidth]
   );
   // A fast table-card release only needs its elevated deck-crossing arc when
   // its centre path can reach the deck's real collider. Expand the deck by
@@ -1879,33 +1904,50 @@ function TarotTable({
       return undefined;
     }
 
-    const deckHalfWidth = Math.max(
-      0.01,
-      layout.cardWidth / 2 - CARD_PHYSICS.colliderInset
-    );
-    const deckHalfHeight = Math.max(
-      0.01,
-      layout.cardHeight / 2 - CARD_PHYSICS.colliderInset
-    );
+    const deckCenterX =
+      deckPosition[0] + deckCollisionFootprint.centerOffset[0];
+    const deckCenterY =
+      deckPosition[1] + deckCollisionFootprint.centerOffset[1];
+    const combinedSkin = CARD_PHYSICS.contactSkin * 2;
 
     return {
-      bottom: deckPosition[1] - deckHalfHeight - tableColliderHalfHeight,
-      left: deckPosition[0] - deckHalfWidth - tableColliderHalfWidth,
-      right: deckPosition[0] + deckHalfWidth + tableColliderHalfWidth,
-      top: deckPosition[1] + deckHalfHeight + tableColliderHalfHeight,
+      bottom:
+        deckCenterY -
+        deckCollisionFootprint.halfHeight -
+        tableColliderHalfHeight -
+        combinedSkin,
+      left:
+        deckCenterX -
+        deckCollisionFootprint.halfWidth -
+        tableColliderHalfWidth -
+        combinedSkin,
+      right:
+        deckCenterX +
+        deckCollisionFootprint.halfWidth +
+        tableColliderHalfWidth +
+        combinedSkin,
+      top:
+        deckCenterY +
+        deckCollisionFootprint.halfHeight +
+        tableColliderHalfHeight +
+        combinedSkin,
     };
   }, [
     deckCount,
+    deckCollisionFootprint,
     deckPosition,
-    layout.cardHeight,
-    layout.cardWidth,
     tableColliderHalfHeight,
     tableColliderHalfWidth,
   ]);
   const previewDeckPosition = useCallback(
     (position: TablePoint | null) => {
-      deckPreviewPositionRef.current = position;
+      const resolvedPosition =
+        position === null
+          ? null
+          : deckPositionResolverRef.current?.(position) ?? position;
+      deckPreviewPositionRef.current = resolvedPosition;
       invalidate();
+      return resolvedPosition;
     },
     [invalidate]
   );
@@ -1980,13 +2022,6 @@ function TarotTable({
     []
   );
   const deckMetrics = getDeckMetrics(deckCount, cardSet.cards.length);
-  const deckOffsets = useMemo(
-    () =>
-      deckCards.map((_, index) =>
-        getDeckLayerOffset(index, deckCards.length, layout)
-      ),
-    [deckCards, layout]
-  );
   const deckLayers = useMemo<DeckCardLayer[]>(
     () =>
       deckCards.map((card, index) => ({
@@ -2021,7 +2056,13 @@ function TarotTable({
     () => new Map(deckCards.map((card, index) => [card.id, index])),
     [deckCards]
   );
-  const draggingZ = deckMetrics.topSurface + CARD_THICKNESS + 0.035;
+  const draggingZ =
+    Math.max(
+      deckMetrics.topSurface,
+      highestTableCardZ + tableColliderHalfDepth
+    ) +
+    tableColliderHalfDepth +
+    0.035;
 
   useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
 
@@ -2118,12 +2159,14 @@ function TarotTable({
       />
       <DeckPhysics
         bottomZ={DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE}
-        height={layout.cardHeight}
+        centerOffset={deckCollisionFootprint.centerOffset}
+        halfHeight={deckCollisionFootprint.halfHeight}
+        halfWidth={deckCollisionFootprint.halfWidth}
         maxStackHeight={MAX_DECK_STACK_HEIGHT}
         position={deckPosition}
+        positionResolverRef={deckPositionResolverRef}
         previewPositionRef={deckPreviewPositionRef}
         stackHeight={deckMetrics.stackHeight}
-        width={layout.cardWidth}
       />
       <Suspense fallback={null}>
         <PhysicalDeck
@@ -2132,6 +2175,7 @@ function TarotTable({
           backUrl={cardSet.back.preview}
           capacity={cardSet.cards.length}
           depthScale={deckMetrics.depthScale}
+          draggingZ={draggingZ}
           externalDragRef={externalDeckDragRef}
           height={layout.cardHeight}
           layout={layout}

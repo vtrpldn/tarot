@@ -16,6 +16,7 @@ import {
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldStabilizeRestingLayer,
+  shouldApplyLayerTransitionTargetRotation,
   shouldSuppressCardContextMenu,
   shouldTakeDragPhysicsOwnership,
 } from "./physics-card-drag";
@@ -256,6 +257,12 @@ describe("PhysicsCard move release", () => {
     ).toEqual([0, 0, 0.03]);
   });
 
+  test("waits for full lateral clearance before applying authored yaw", () => {
+    expect(shouldApplyLayerTransitionTargetRotation(0.349)).toBe(false);
+    expect(shouldApplyLayerTransitionTargetRotation(0.35)).toBe(true);
+    expect(shouldApplyLayerTransitionTargetRotation(1)).toBe(true);
+  });
+
   test("turns a layer transition inward when its preferred lane reaches the rail", () => {
     const bounds = { bottom: -5, left: -5, right: 5, top: 5 };
 
@@ -292,7 +299,7 @@ describe("PhysicsCard move release", () => {
         cardWidth: 2,
         contactSkin: 0.001,
       })
-    ).toBeCloseTo(Math.hypot(2, 3.5) + 0.002);
+    ).toBeCloseTo(2 * Math.hypot(1.007, 1.757));
   });
 
   test("reconciles when a passive card leaves authored overlap mode", () => {

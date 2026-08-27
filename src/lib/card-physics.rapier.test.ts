@@ -1,6 +1,7 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import { beforeAll, describe, expect, test } from "vitest";
 import {
+  CARD_GEOMETRY,
   CARD_PHYSICS,
   constrainVelocityForNextPhysicsStep,
   flipCardQuaternion,
@@ -41,6 +42,7 @@ function createWorld() {
   world.createCollider(
     RAPIER.ColliderDesc.cuboid(12, 12, 0.04)
       .setTranslation(0, 0, -0.04)
+      .setContactSkin(CARD_PHYSICS.contactSkin)
       .setFriction(CARD_PHYSICS.tableFriction)
       .setRestitution(CARD_PHYSICS.tableRestitution),
     table
@@ -148,8 +150,10 @@ describe("configured Tarot card colliders in Rapier", () => {
       expect(body.translation().z).toBeLessThan(1);
 
       step(world, 180);
-      expect(body.translation().z).toBeGreaterThanOrEqual(
-        CARD_HALF_DEPTH - 0.0006
+      expect(
+        body.translation().z - CARD_GEOMETRY.visibleHalfDepth
+      ).toBeGreaterThanOrEqual(
+        -0.0001
       );
       expect(body.translation().z).toBeLessThan(CARD_HALF_DEPTH + 0.02);
       expect(Math.abs(body.linvel().z)).toBeLessThan(0.03);
@@ -170,14 +174,26 @@ describe("configured Tarot card colliders in Rapier", () => {
         position: [-2.7, 0, tableHeight],
         velocity: [25, 0, 0],
       });
+      let deepestPenetration = 0;
 
-      step(world, 12);
+      for (let frame = 0; frame < 12; frame += 1) {
+        world.step();
+        const contact = projectile.collider.contactCollider(
+          target.collider,
+          CARD_PHYSICS.contactSkin * 2
+        );
+        deepestPenetration = Math.min(
+          deepestPenetration,
+          contact?.distance ?? 0
+        );
+      }
 
       const projectileX = projectile.body.translation().x;
       const targetX = target.body.translation().x;
 
       expect(projectileX).toBeLessThan(targetX + CARD_WIDTH);
       expect(targetX).toBeGreaterThan(0.04);
+      expect(deepestPenetration).toBeGreaterThanOrEqual(-0.00005);
       expect(target.body.linvel().x).toBeGreaterThan(0);
       expect(target.body.translation().z).toBeGreaterThanOrEqual(
         CARD_HALF_DEPTH - 0.0006
@@ -261,6 +277,7 @@ describe("configured Tarot card colliders in Rapier", () => {
       });
       target.body.sleep();
       let driverPassedTarget = false;
+      let deepestPenetration = 0;
 
       for (let frame = 0; frame < 90; frame += 1) {
         const current = driver.body.translation();
@@ -280,11 +297,20 @@ describe("configured Tarot card colliders in Rapier", () => {
         world.step();
         driverPassedTarget ||=
           driver.body.translation().x > target.body.translation().x;
+        const contact = driver.collider.contactCollider(
+          target.collider,
+          CARD_PHYSICS.contactSkin * 2
+        );
+        deepestPenetration = Math.min(
+          deepestPenetration,
+          contact?.distance ?? 0
+        );
       }
 
       expect(target.body.isSleeping()).toBe(false);
       expect(target.body.translation().x).toBeGreaterThan(0.2);
       expect(driverPassedTarget).toBe(false);
+      expect(deepestPenetration).toBeGreaterThanOrEqual(-0.00005);
       expect(driver.body.translation().x).toBeLessThan(
         target.body.translation().x
       );
@@ -696,11 +722,127 @@ describe("configured Tarot card colliders in Rapier", () => {
       step(world, 360);
 
       const top = layers.at(-1)?.body.translation().z ?? 0;
-      expect(bottom.body.translation().z).toBeGreaterThanOrEqual(
-        CARD_HALF_DEPTH - 0.0006
+      const bodies = [bottom, ...layers];
+
+      expect(
+        bottom.body.translation().z - CARD_GEOMETRY.visibleHalfDepth
+      ).toBeGreaterThanOrEqual(0);
+      expect(top - bottom.body.translation().z).toBeCloseTo(
+        11 * layerStep
       );
-      expect(top - bottom.body.translation().z).toBeGreaterThanOrEqual(
-        11 * (CARD_THICKNESS - 0.001)
+
+      for (let index = 1; index < bodies.length; index += 1) {
+        const lower = bodies[index - 1].body.translation().z;
+        const upper = bodies[index].body.translation().z;
+        const visibleGap =
+          upper - lower - CARD_GEOMETRY.visibleThickness;
+
+        expect(visibleGap).toBeGreaterThanOrEqual(
+          CARD_PHYSICS.contactSkin * 2 - 0.000001
+        );
+      }
+    } finally {
+      world.free();
+    }
+  });
+
+  test("detects a blocked yaw before a kinematic card can enter its neighbour", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const driver = createCard(world, {
+        bodyType: "kinematic",
+        position: [0, 0, tableHeight],
+      });
+      const neighbour = createCard(world, {
+        bodyType: "kinematic",
+        position: [2.2, 0, tableHeight],
+      });
+      const queryShape = new RAPIER.Cuboid(
+        CARD_HALF_WIDTH + CARD_PHYSICS.contactSkin,
+        CARD_HALF_HEIGHT + CARD_PHYSICS.contactSkin,
+        CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin
+      );
+      const startRotation = { w: 1, x: 0, y: 0, z: 0 };
+      const quarterTurn = {
+        w: Math.cos(Math.PI / 4),
+        x: 0,
+        y: 0,
+        z: Math.sin(Math.PI / 4),
+      };
+
+      world.updateSceneQueries();
+
+      expect(
+        world.intersectionWithShape(
+          driver.body.translation(),
+          startRotation,
+          queryShape,
+          undefined,
+          undefined,
+          undefined,
+          driver.body,
+          (collider) => collider === neighbour.collider
+        )
+      ).toBeNull();
+      expect(
+        world.intersectionWithShape(
+          driver.body.translation(),
+          quarterTurn,
+          queryShape,
+          undefined,
+          undefined,
+          undefined,
+          driver.body,
+          (collider) => collider === neighbour.collider
+        )
+      ).toBe(neighbour.collider);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("sweeps a moving deck footprint to the first table-card contact", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const obstacle = createCard(world, {
+        bodyType: "kinematic",
+        position: [0, 0, tableHeight],
+      });
+      const deckHalfWidth = CARD_HALF_WIDTH + 0.18;
+      const deckHalfHeight = CARD_HALF_HEIGHT + 0.12;
+      const deckHalfDepth = 0.05;
+      const deckShape = new RAPIER.Cuboid(
+        deckHalfWidth,
+        deckHalfHeight,
+        deckHalfDepth
+      );
+      const origin = { x: -4, y: 0, z: deckHalfDepth };
+      const velocity = { x: 8, y: 0, z: 0 };
+
+      world.updateSceneQueries();
+      const hit = world.castShape(
+        origin,
+        { w: 1, x: 0, y: 0, z: 0 },
+        velocity,
+        deckShape,
+        CARD_PHYSICS.contactSkin,
+        1,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (collider) => collider === obstacle.collider
+      );
+
+      expect(hit).not.toBeNull();
+      const contactX = origin.x + velocity.x * (hit?.time_of_impact ?? 1);
+      expect(contactX + deckHalfWidth).toBeLessThanOrEqual(
+        obstacle.body.translation().x - CARD_HALF_WIDTH
       );
     } finally {
       world.free();

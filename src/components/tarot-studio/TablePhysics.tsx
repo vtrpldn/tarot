@@ -1,7 +1,11 @@
 "use client";
 
 import { CuboidCollider, RigidBody } from "@react-three/rapier";
-import { CARD_PHYSICS } from "@/lib/card-physics";
+import {
+  CARD_GEOMETRY,
+  CARD_PHYSICS,
+  getCardColliderHalfExtents,
+} from "@/lib/card-physics";
 import type { SceneBounds } from "./table-layout";
 
 const FLOOR_HALF_DEPTH = 0.04;
@@ -55,9 +59,14 @@ export function TablePhysics({
   // The durable bounds describe card centres. Put the physical rail one card
   // radius farther out so a centre can reach every valid persisted position
   // without spawning the collider inside a wall.
+  const [cardHalfWidth, cardHalfHeight] = getCardColliderHalfExtents(
+    cardWidth,
+    cardHeight,
+    CARD_GEOMETRY.thickness
+  );
   const cardRadius = Math.hypot(
-    Math.max(MINIMUM_HALF_EXTENT, cardWidth / 2 - CARD_PHYSICS.colliderInset),
-    Math.max(MINIMUM_HALF_EXTENT, cardHeight / 2 - CARD_PHYSICS.colliderInset)
+    Math.max(MINIMUM_HALF_EXTENT, cardHalfWidth + CARD_PHYSICS.contactSkin),
+    Math.max(MINIMUM_HALF_EXTENT, cardHalfHeight + CARD_PHYSICS.contactSkin)
   );
   const physicalHalfWidth = halfWidth + cardRadius;
   const physicalHalfHeight = halfHeight + cardRadius;
@@ -79,6 +88,7 @@ export function TablePhysics({
       <CuboidCollider
         args={[physicalHalfWidth, physicalHalfHeight, FLOOR_HALF_DEPTH]}
         position={[centerX, centerY, surfaceZ - FLOOR_HALF_DEPTH]}
+        contactSkin={CARD_PHYSICS.contactSkin}
         friction={CARD_PHYSICS.tableFriction}
         restitution={CARD_PHYSICS.tableRestitution}
       />

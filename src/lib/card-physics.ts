@@ -1,5 +1,17 @@
 import type { TablePoint } from "@/types";
 
+const CARD_THICKNESS = 0.018;
+const CARD_FACE_PLANE_OFFSET = 0.002;
+
+/** Shared rendered-card bounds used by geometry, colliders, and layout. */
+export const CARD_GEOMETRY = {
+  bevelSize: 0.006,
+  facePlaneOffset: CARD_FACE_PLANE_OFFSET,
+  thickness: CARD_THICKNESS,
+  visibleHalfDepth: CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET,
+  visibleThickness: CARD_THICKNESS + CARD_FACE_PLANE_OFFSET * 2,
+} as const;
+
 export const CARD_PHYSICS = {
   // Keep a deliberate off-centre flick readable without letting a light card
   // continue into several distracting revolutions after release.
@@ -7,7 +19,6 @@ export const CARD_PHYSICS = {
   cardFriction: 0.28,
   cardMassKilograms: 0.0018,
   cardRestitution: 0.035,
-  colliderInset: 0.025,
   contactSkin: 0.001,
   dragLift: 0.18,
   gravity: [0, 0, -9.81] as const,
@@ -457,88 +468,16 @@ export function getFlipVisualState(progress: number): PhysicsFlipVisualState {
   const boundedProgress = Math.max(0, Math.min(1, progress));
   const eased =
     boundedProgress * boundedProgress * (3 - 2 * boundedProgress);
+  const horizontalFold = Math.abs(Math.cos(Math.PI * eased));
 
   return {
-    // The front and back artwork planes face opposite local-Z directions.
-    // Turning their shared group through local Y lets normal backface culling
-    // reveal exactly one face at a left-to-right edge-on midpoint. It
-    // avoids the previous half-turn snap while the card still had visible
-    // height, which read as a flicker.
-    rotationY: Math.PI * eased,
-    scaleX: 1,
+    // Stay in the card's physical plane: squeeze horizontally, swap the
+    // already-opposed face planes while edge-on, then reopen. A real nested
+    // quarter-turn would leave the collider hull and intersect nearby cards.
+    rotationY: eased < 0.5 ? 0 : Math.PI,
+    scaleX: Math.max(0.02, horizontalFold),
     scaleY: 1,
   };
-}
-
-/**
- * Returns the world-up offset that keeps every visible card corner above the
- * table while a nested visual group turns around its local Y axis.
- */
-export function getFlipSurfaceClearanceLift({
-  bodyCenterZ,
-  bodyRotation,
-  cardHeight,
-  cardWidth,
-  localRotationY,
-  surfaceClearance,
-  tableSurfaceZ,
-  visibleHalfDepth,
-}: {
-  bodyCenterZ: number;
-  bodyRotation: QuaternionLike;
-  cardHeight: number;
-  cardWidth: number;
-  localRotationY: number;
-  surfaceClearance: number;
-  tableSurfaceZ: number;
-  visibleHalfDepth: number;
-}): number {
-  const quaternionMagnitude = Math.hypot(
-    bodyRotation.x,
-    bodyRotation.y,
-    bodyRotation.z,
-    bodyRotation.w
-  );
-
-  if (
-    !Number.isFinite(quaternionMagnitude) ||
-    quaternionMagnitude === 0 ||
-    ![
-      bodyCenterZ,
-      cardHeight,
-      cardWidth,
-      localRotationY,
-      surfaceClearance,
-      tableSurfaceZ,
-      visibleHalfDepth,
-    ].every(Number.isFinite)
-  ) {
-    return 0;
-  }
-
-  const bodyX = bodyRotation.x / quaternionMagnitude;
-  const bodyY = bodyRotation.y / quaternionMagnitude;
-  const bodyZ = bodyRotation.z / quaternionMagnitude;
-  const bodyW = bodyRotation.w / quaternionMagnitude;
-  const halfAngle = localRotationY / 2;
-  const localY = Math.sin(halfAngle);
-  const localW = Math.cos(halfAngle);
-
-  // Parent-body rotation followed by the nested local-Y presentation turn.
-  const x = bodyX * localW - bodyZ * localY;
-  const y = bodyW * localY + bodyY * localW;
-  const z = bodyX * localY + bodyZ * localW;
-  const w = bodyW * localW - bodyY * localY;
-
-  // World-Z projections of the visible slab's local X, Y, and Z axes.
-  const projectedHalfDepth =
-    Math.abs(2 * (x * z - w * y)) * (Math.abs(cardWidth) / 2) +
-    Math.abs(2 * (y * z + w * x)) * (Math.abs(cardHeight) / 2) +
-    Math.abs(1 - 2 * (x * x + y * y)) * Math.abs(visibleHalfDepth);
-  const minimumCenterZ =
-    tableSurfaceZ + Math.max(0, surfaceClearance) + projectedHalfDepth;
-
-  return Math.max(0, minimumCenterZ - bodyCenterZ);
 }
 
 export function isPhysicsLaunchForTarget(
@@ -568,10 +507,47 @@ export function getCardColliderHalfExtents(
   thickness: number
 ): [x: number, y: number, z: number] {
   return [
-    Math.max(0.01, width / 2 - CARD_PHYSICS.colliderInset),
-    Math.max(0.01, height / 2 - CARD_PHYSICS.colliderInset),
-    Math.max(0.001, thickness / 2),
+    Math.max(0.01, Math.abs(width) / 2 + CARD_GEOMETRY.bevelSize),
+    Math.max(0.01, Math.abs(height) / 2 + CARD_GEOMETRY.bevelSize),
+    Math.max(
+      0.001,
+      Math.abs(thickness) / 2 + CARD_GEOMETRY.facePlaneOffset
+    ),
   ];
+}
+
+/** Bounds a cascaded card stack around the midpoint of all layer offsets. */
+export function getOffsetCollisionFootprint({
+  halfHeight,
+  halfWidth,
+  offsets,
+}: {
+  halfHeight: number;
+  halfWidth: number;
+  offsets: readonly TablePoint[];
+}): {
+  centerOffset: TablePoint;
+  halfHeight: number;
+  halfWidth: number;
+} {
+  const finiteOffsets = offsets.filter(
+    ([x, y]) => Number.isFinite(x) && Number.isFinite(y)
+  );
+  const points =
+    finiteOffsets.length > 0 ? finiteOffsets : [[0, 0] as TablePoint];
+  const minimumX = Math.min(...points.map(([x]) => x));
+  const maximumX = Math.max(...points.map(([x]) => x));
+  const minimumY = Math.min(...points.map(([, y]) => y));
+  const maximumY = Math.max(...points.map(([, y]) => y));
+
+  return {
+    centerOffset: [
+      (minimumX + maximumX) / 2,
+      (minimumY + maximumY) / 2,
+    ],
+    halfHeight: Math.max(0, halfHeight) + (maximumY - minimumY) / 2,
+    halfWidth: Math.max(0, halfWidth) + (maximumX - minimumX) / 2,
+  };
 }
 
 export function hasMeaningfulPoseChange(

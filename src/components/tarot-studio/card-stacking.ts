@@ -13,8 +13,6 @@ type CardFootprint = {
   halfWidth: number;
 };
 
-const OVERLAP_EPSILON = 0.001;
-
 function dot(first: Axis, second: Axis): number {
   return first[0] * second[0] + first[1] * second[1];
 }
@@ -63,7 +61,7 @@ function cardsOverlap(
       projectionRadius(first, axis, footprint) +
       projectionRadius(second, axis, footprint);
 
-    return centerDistance < combinedRadius - OVERLAP_EPSILON;
+    return centerDistance < combinedRadius;
   });
 }
 
@@ -102,8 +100,8 @@ export function getOverlappingTableCardIds({
 
 /**
  * Gives intentional XY overlaps a deterministic physical layer. The caller
- * supplies the Rapier footprint rather than the visible card dimensions, so
- * every height corresponds to a collider contact that can actually occur.
+ * supplies the shared visual collision footprint, so every rendered overlap
+ * receives a physical layer with enough depth to remain separated.
  */
 export function getTableCardRestingHeights({
   cards,

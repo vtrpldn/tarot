@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { Quaternion, Vector3 } from "three";
 import {
   advanceFlipElapsed,
+  CARD_GEOMETRY,
   CARD_PHYSICS,
   clampAngularVelocity,
   clampPhysicsPointToBounds,
@@ -13,8 +13,8 @@ import {
   flipCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
-  getFlipSurfaceClearanceLift,
   getFlipVisualState,
+  getOffsetCollisionFootprint,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
   hasMeaningfulPoseChange,
@@ -331,15 +331,15 @@ describe("controlled flip presentation", () => {
     ).toBe(0.42);
   });
 
-  test("turns continuously around the vertical axis without a midpoint swap", () => {
+  test("squeezes horizontally and swaps faces only while edge-on", () => {
     expect(getFlipVisualState(0)).toEqual({
       rotationY: 0,
       scaleX: 1,
       scaleY: 1,
     });
     expect(getFlipVisualState(0.5)).toEqual({
-      rotationY: Math.PI / 2,
-      scaleX: 1,
+      rotationY: Math.PI,
+      scaleX: 0.02,
       scaleY: 1,
     });
     expect(getFlipVisualState(1)).toEqual({
@@ -349,105 +349,54 @@ describe("controlled flip presentation", () => {
     });
   });
 
-  test("keeps every visible corner above the table through a horizontal turn", () => {
-    const bodyCenterZ = 0.01;
-    const cardHeight = 3;
-    const cardWidth = 2;
-    const surfaceClearance = 0.0005;
-    const tableSurfaceZ = 0;
-    const visibleHalfDepth = 0.011;
-    const yAxis = new Vector3(0, 1, 0);
-    const authoredRotations = ([
-      [0, true],
-      [37, true],
-      [-121.5, true],
-      [0, false],
-      [37, false],
-      [-121.5, false],
-    ] as const).map(([yaw, faceUp]) => {
-      const [x, y, z, w] = createCardQuaternion(yaw, faceUp);
-      return { x, y, z, w };
-    });
-    const tiltedRotation = new Quaternion(
-      ...createCardQuaternion(37, true)
-    ).multiply(
-      new Quaternion().setFromAxisAngle(
-        new Vector3(1, 0, 0),
-        Math.PI / 5
-      )
-    );
-    const bodyRotations = [
-      ...authoredRotations,
-      {
-        x: tiltedRotation.x,
-        y: tiltedRotation.y,
-        z: tiltedRotation.z,
-        w: tiltedRotation.w,
-      },
-    ];
+  test("never expands outside the physical card envelope", () => {
+    for (let step = 0; step <= 120; step += 1) {
+      const state = getFlipVisualState(step / 120);
 
-    for (const bodyRotation of bodyRotations) {
-      let lowestCornerZ = Infinity;
-
-      for (let step = 0; step <= 120; step += 1) {
-        const { rotationY } = getFlipVisualState(step / 120);
-        const lift = getFlipSurfaceClearanceLift({
-          bodyCenterZ,
-          bodyRotation,
-          cardHeight,
-          cardWidth,
-          localRotationY: rotationY,
-          surfaceClearance,
-          tableSurfaceZ,
-          visibleHalfDepth,
-        });
-        const combinedRotation = new Quaternion(
-          bodyRotation.x,
-          bodyRotation.y,
-          bodyRotation.z,
-          bodyRotation.w
-        ).multiply(new Quaternion().setFromAxisAngle(yAxis, rotationY));
-
-        for (const x of [-cardWidth / 2, cardWidth / 2]) {
-          for (const y of [-cardHeight / 2, cardHeight / 2]) {
-            for (const z of [-visibleHalfDepth, visibleHalfDepth]) {
-              const cornerZ =
-                new Vector3(x, y, z).applyQuaternion(combinedRotation).z +
-                bodyCenterZ +
-                lift;
-              lowestCornerZ = Math.min(lowestCornerZ, cornerZ);
-            }
-          }
-        }
-      }
-
-      expect(lowestCornerZ).toBeGreaterThanOrEqual(
-        tableSurfaceZ + surfaceClearance - 1e-10
-      );
+      expect([0, Math.PI]).toContain(state.rotationY);
+      expect(state.scaleX).toBeGreaterThanOrEqual(0.02);
+      expect(state.scaleX).toBeLessThanOrEqual(1);
+      expect(state.scaleY).toBe(1);
     }
-
-    expect(
-      getFlipSurfaceClearanceLift({
-        bodyCenterZ,
-        bodyRotation: { x: 0, y: 0, z: 0, w: 1 },
-        cardHeight,
-        cardWidth,
-        localRotationY: Math.PI / 2,
-        surfaceClearance,
-        tableSurfaceZ,
-        visibleHalfDepth,
-      })
-    ).toBeCloseTo(0.9905);
   });
 });
 
 describe("card collider and persistence tolerances", () => {
-  test("keeps the collider inside the rounded visual slab", () => {
+  test("contains the complete rounded visual slab", () => {
     expect(getCardColliderHalfExtents(2, 3, 0.018)).toEqual([
-      0.975,
-      1.475,
-      0.009,
+      1.006,
+      1.506,
+      0.011,
     ]);
+    expect(CARD_GEOMETRY.visibleHalfDepth).toBe(0.011);
+  });
+
+  test("contains every offset card in a cascaded deck footprint", () => {
+    const offsets: Array<[number, number]> = [
+      [-0.2, 0.1],
+      [0.3, -0.4],
+    ];
+    const footprint = getOffsetCollisionFootprint({
+      halfHeight: 1.756,
+      halfWidth: 1.006,
+      offsets,
+    });
+
+    expect(footprint.centerOffset).toEqual([
+      expect.closeTo(0.05),
+      expect.closeTo(-0.15),
+    ]);
+    expect(footprint.halfWidth).toBeCloseTo(1.256);
+    expect(footprint.halfHeight).toBeCloseTo(2.006);
+
+    for (const [x, y] of offsets) {
+      expect(Math.abs(x - footprint.centerOffset[0]) + 1.006).toBeLessThanOrEqual(
+        footprint.halfWidth
+      );
+      expect(Math.abs(y - footprint.centerOffset[1]) + 1.756).toBeLessThanOrEqual(
+        footprint.halfHeight
+      );
+    }
   });
 
   test("ignores solver noise but keeps user-visible pose changes", () => {

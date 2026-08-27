@@ -39,6 +39,7 @@ import type {
 import type { CardSoundPlayer } from "@/lib/card-sounds";
 import {
   advanceFlipElapsed,
+  CARD_GEOMETRY,
   CARD_PHYSICS,
   clampAngularVelocity,
   clampPhysicsPointToBounds,
@@ -48,12 +49,12 @@ import {
   flipCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
-  getFlipSurfaceClearanceLift,
   getFlipVisualState,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
   hasMeaningfulPoseChange,
   isPhysicsLaunchForTarget,
+  normalizeRotation,
   shouldUseDeckClearanceArc,
   type PhysicsCardLaunch,
   type PhysicsCardPose,
@@ -76,19 +77,18 @@ import {
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
-  getLocalOffsetForWorldUp,
   getTiltedCardQuaternion,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldSuppressCardContextMenu,
+  shouldApplyLayerTransitionTargetRotation,
   shouldStabilizeRestingLayer,
   shouldTakeDragPhysicsOwnership,
   type DurableCardPose,
 } from "./physics-card-drag";
 import { TAROT_SCENE_PALETTE } from "./theme";
 
-const CARD_FACE_PLANE_OFFSET = 0.002;
-const CARD_VISIBLE_HALF_DEPTH = CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET;
+const CARD_VISIBLE_HALF_DEPTH = CARD_GEOMETRY.visibleHalfDepth;
 const DRAG_THRESHOLD = 0.035;
 const ROTATION_EDGE_THRESHOLD = 0.14;
 const MAX_POINTER_SPEED = 8;
@@ -105,7 +105,6 @@ const RIGHT_DRAG_TILT_SCALE = 0.52;
 const RIGHT_DRAG_MAX_TILT = MathUtils.degToRad(28);
 const LAYER_TRANSITION_DURATION_SECONDS = 0.54;
 const LAYER_TRANSITION_LIFT = 0.12;
-const FLIP_SURFACE_CLEARANCE = 0.0005;
 const POINTER_CONTROLLED_BODY_HANDLES = new Set<number>();
 
 type PointerCaptureTarget = Mesh & {
@@ -126,6 +125,10 @@ type DragState = {
   lastTimestamp: number;
   pointerVelocity: Vector3;
   target: Vector3;
+  appliedElevationLeanRadians: number;
+  appliedQuaternion: { w: number; x: number; y: number; z: number };
+  appliedRotation: number;
+  appliedTiltRadians: number;
   startAngle: number;
   startRotation: number;
   previewRotation: number;
@@ -141,6 +144,7 @@ type LayerTransitionState = {
   elapsed: number;
   offset: [x: number, y: number];
   start: [x: number, y: number, z: number];
+  startQuaternion: { w: number; x: number; y: number; z: number };
   target: [x: number, y: number, z: number];
   targetBodyType: number;
   targetQuaternion: { w: number; x: number; y: number; z: number };
@@ -320,7 +324,7 @@ export function PhysicsCard({
   const collisionActivatedRef = useRef(false);
   const raycasterRef = useRef(new Raycaster());
   const pointerRef = useRef(new Vector2());
-  const { rapier } = useRapier();
+  const { rapier, world } = useRapier();
   const canvas = useThree((state) => state.gl.domElement);
   const camera = useThree((state) => state.camera);
   const invalidate = useThree((state) => state.invalidate);
@@ -332,6 +336,164 @@ export function PhysicsCard({
     () => getCardColliderHalfExtents(cardWidth, cardHeight, CARD_THICKNESS),
     [cardHeight, cardWidth]
   );
+  const collisionQueryShape = useMemo(
+    () =>
+      new rapier.Cuboid(
+        colliderWidth + CARD_PHYSICS.contactSkin,
+        colliderHeight + CARD_PHYSICS.contactSkin,
+        colliderDepth + CARD_PHYSICS.contactSkin
+      ),
+    [colliderDepth, colliderHeight, colliderWidth, rapier]
+  );
+  const isCardPoseBlocked = useCallback(
+    ({
+      position,
+      rotation,
+    }: {
+      position: { x: number; y: number; z: number };
+      rotation: { w: number; x: number; y: number; z: number };
+    }) => {
+      const body = bodyRef.current;
+
+      if (!body) {
+        return false;
+      }
+
+      return Boolean(
+        world.intersectionWithShape(
+          position,
+          rotation,
+          collisionQueryShape,
+          undefined,
+          undefined,
+          undefined,
+          body,
+          (collider) => {
+            const userData = collider.parent()?.userData;
+            const kind =
+              typeof userData === "object" && userData !== null &&
+              "kind" in userData
+                ? (userData as { kind?: unknown }).kind
+                : undefined;
+
+            return (
+              !collider.isSensor() && (kind === "card" || kind === "deck")
+            );
+          }
+        )
+      );
+    },
+    [collisionQueryShape, world]
+  );
+  const getCollisionSafeYaw = useCallback(
+    ({
+      faceUp,
+      position,
+      startQuaternion,
+      startRotation,
+      targetRotation,
+    }: {
+      faceUp: boolean;
+      position: { x: number; y: number; z: number };
+      startQuaternion: { w: number; x: number; y: number; z: number };
+      startRotation: number;
+      targetRotation: number;
+    }) => {
+      const rotationDelta = normalizeRotation(targetRotation - startRotation);
+      const sampleCount = Math.max(1, Math.ceil(Math.abs(rotationDelta) / 2));
+      let safeQuaternion = startQuaternion;
+      let safeRotation = startRotation;
+
+      for (let sample = 1; sample <= sampleCount; sample += 1) {
+        const candidateRotation =
+          startRotation + (rotationDelta * sample) / sampleCount;
+        const [x, y, z, w] = createCardQuaternion(
+          candidateRotation,
+          faceUp
+        );
+        const candidateQuaternion = { x, y, z, w };
+
+        if (
+          isCardPoseBlocked({
+            position,
+            rotation: candidateQuaternion,
+          })
+        ) {
+          break;
+        }
+
+        safeQuaternion = candidateQuaternion;
+        safeRotation = candidateRotation;
+      }
+
+      return { quaternion: safeQuaternion, rotation: safeRotation };
+    },
+    [isCardPoseBlocked]
+  );
+  const getCollisionSafeTilt = useCallback(
+    ({
+      baseQuaternion,
+      position,
+      startElevationLeanRadians,
+      startAppliedQuaternion,
+      startTiltRadians,
+      targetElevationLeanRadians,
+      targetTiltRadians,
+    }: {
+      baseQuaternion: { w: number; x: number; y: number; z: number };
+      position: { x: number; y: number; z: number };
+      startElevationLeanRadians: number;
+      startAppliedQuaternion: { w: number; x: number; y: number; z: number };
+      startTiltRadians: number;
+      targetElevationLeanRadians: number;
+      targetTiltRadians: number;
+    }) => {
+      const tiltDelta = targetTiltRadians - startTiltRadians;
+      const leanDelta =
+        targetElevationLeanRadians - startElevationLeanRadians;
+      const maximumStep = MathUtils.degToRad(2);
+      const sampleCount = Math.max(
+        1,
+        Math.ceil(Math.max(Math.abs(tiltDelta), Math.abs(leanDelta)) / maximumStep)
+      );
+      let safeElevationLeanRadians = startElevationLeanRadians;
+      let safeQuaternion = startAppliedQuaternion;
+      let safeTiltRadians = startTiltRadians;
+
+      for (let sample = 1; sample <= sampleCount; sample += 1) {
+        const tiltRadians =
+          startTiltRadians + (tiltDelta * sample) / sampleCount;
+        const elevationLeanRadians =
+          startElevationLeanRadians + (leanDelta * sample) / sampleCount;
+        const [x, y, z, w] = getTiltedCardQuaternion(
+          baseQuaternion,
+          tiltRadians,
+          elevationLeanRadians
+        );
+        const candidateQuaternion = { x, y, z, w };
+
+        if (
+          isCardPoseBlocked({
+            position,
+            rotation: candidateQuaternion,
+          })
+        ) {
+          break;
+        }
+
+        safeElevationLeanRadians = elevationLeanRadians;
+        safeQuaternion = candidateQuaternion;
+        safeTiltRadians = tiltRadians;
+      }
+
+      return {
+        elevationLeanRadians: safeElevationLeanRadians,
+        quaternion: safeQuaternion,
+        tiltRadians: safeTiltRadians,
+      };
+    },
+    [isCardPoseBlocked]
+  );
   const [authorityReconciliationVersion, requestAuthorityReconciliation] =
     useReducer((version: number) => version + 1, 0);
   const paperSeed = useMemo(() => getPaperSeed(card.id), [card.id]);
@@ -339,7 +501,7 @@ export function PhysicsCard({
     CARD_PHYSICS.spawnLift +
     Math.min(12, Math.max(0, dropIndex)) * CARD_THICKNESS * 0.7;
   const minimumRestingZ =
-    tableSurfaceZ + CARD_THICKNESS / 2 + CARD_PHYSICS.contactSkin;
+    tableSurfaceZ + colliderDepth + CARD_PHYSICS.contactSkin;
   const restingZ = Number.isFinite(requestedRestingZ)
     ? Math.max(minimumRestingZ, requestedRestingZ ?? minimumRestingZ)
     : minimumRestingZ;
@@ -761,12 +923,43 @@ export function PhysicsCard({
 
       const translation = body.translation();
       const rotation = body.rotation();
+      const currentFaceUp = getCardPose(translation, rotation).faceUp;
+
+      if (!cancelled && drag.moved && drag.mode === "rotate") {
+        const safeYaw = getCollisionSafeYaw({
+          faceUp: currentFaceUp,
+          position: translation,
+          startQuaternion: drag.appliedQuaternion,
+          startRotation: drag.appliedRotation,
+          targetRotation: drag.previewRotation,
+        });
+        drag.appliedQuaternion = safeYaw.quaternion;
+        drag.appliedRotation = safeYaw.rotation;
+      } else if (
+        !cancelled &&
+        drag.moved &&
+        drag.mode === "elevate-tilt"
+      ) {
+        const safeTilt = getCollisionSafeTilt({
+          baseQuaternion: drag.startQuaternion,
+          position: translation,
+          startAppliedQuaternion: drag.appliedQuaternion,
+          startElevationLeanRadians: drag.appliedElevationLeanRadians,
+          startTiltRadians: drag.appliedTiltRadians,
+          targetElevationLeanRadians: drag.previewElevationLeanRadians,
+          targetTiltRadians: drag.previewTiltRadians,
+        });
+        drag.appliedElevationLeanRadians = safeTilt.elevationLeanRadians;
+        drag.appliedQuaternion = safeTilt.quaternion;
+        drag.appliedTiltRadians = safeTilt.tiltRadians;
+      }
+
       const targetRotation =
         drag.mode === "rotate"
-          ? drag.previewRotation
+          ? drag.appliedRotation
           : getCardPose(translation, rotation).rotation;
       const targetPosition: TablePoint = [translation.x, translation.y];
-      const faceUp = getCardPose(translation, rotation).faceUp;
+      const faceUp = currentFaceUp;
       const latestAuthority = latestAuthorityRef.current;
 
       if (!drag.moved) {
@@ -901,21 +1094,7 @@ export function PhysicsCard({
           // Releasing gives gravity ownership so the card falls and settles.
           // Apply the final target once so a quick down-move-up gesture cannot
           // end before a fixed physics step ever consumes its elevation.
-          const [rotationX, rotationY, rotationZ, rotationW] =
-            getTiltedCardQuaternion(
-              drag.startQuaternion,
-              drag.previewTiltRadians,
-              drag.previewElevationLeanRadians
-            );
-          body.setRotation(
-            {
-              x: rotationX,
-              y: rotationY,
-              z: rotationZ,
-              w: rotationW,
-            },
-            true
-          );
+          body.setRotation(drag.appliedQuaternion, true);
           body.setLinvel({ x: 0, y: 0, z: 0 }, true);
           body.setAngvel({ x: 0, y: 0, z: 0 }, true);
           const releasePosition = body.translation();
@@ -970,6 +1149,8 @@ export function PhysicsCard({
       card.id,
       deckClearanceBounds,
       dragBounds,
+      getCollisionSafeTilt,
+      getCollisionSafeYaw,
       invalidate,
       onMove,
       onRotate,
@@ -1012,7 +1193,8 @@ export function PhysicsCard({
     const stabilizationChanged =
       lastStabilizeAtRestRef.current !== stabilizeAtRest;
     const currentTranslation = body.translation();
-    const currentPose = getCardPose(currentTranslation, body.rotation());
+    const currentBodyRotation = body.rotation();
+    const currentPose = getCardPose(currentTranslation, currentBodyRotation);
     const targetPose: PhysicsCardPose = {
       faceUp: card.faceUp,
       position: [worldX, worldY],
@@ -1107,6 +1289,12 @@ export function PhysicsCard({
           currentTranslation.y,
           currentTranslation.z,
         ],
+        startQuaternion: {
+          w: currentBodyRotation.w,
+          x: currentBodyRotation.x,
+          y: currentBodyRotation.y,
+          z: currentBodyRotation.z,
+        },
         target: [targetPose.position[0], targetPose.position[1], restingZ],
         targetBodyType: rapier.RigidBodyType.KinematicPositionBased,
         targetQuaternion: { x, y, z, w },
@@ -1266,26 +1454,9 @@ export function PhysicsCard({
     });
     const progress = flip.elapsed / FLIP_DURATION_SECONDS;
     const flipVisual = getFlipVisualState(progress);
-    const bodyTranslation = body.translation();
-    const bodyRotation = body.rotation();
-    const flipSurfaceLift = getFlipSurfaceClearanceLift({
-      bodyCenterZ: bodyTranslation.z,
-      bodyRotation,
-      cardHeight,
-      cardWidth,
-      localRotationY: flipVisual.rotationY,
-      surfaceClearance: FLIP_SURFACE_CLEARANCE,
-      tableSurfaceZ,
-      visibleHalfDepth: CARD_VISIBLE_HALF_DEPTH,
-    });
 
     if (visual) {
-      visual.position.set(
-        ...getLocalOffsetForWorldUp({
-          distance: flipSurfaceLift,
-          quaternion: bodyRotation,
-        })
-      );
+      visual.position.set(0, 0, 0);
       visual.rotation.y = flipVisual.rotationY;
       visual.scale.set(flipVisual.scaleX, flipVisual.scaleY, 1);
     }
@@ -1301,6 +1472,8 @@ export function PhysicsCard({
     }
 
     const latestAuthority = latestAuthorityRef.current;
+    const bodyTranslation = body.translation();
+    const bodyRotation = body.rotation();
     const currentRotation = bodyRotation;
     const currentPose = getCardPose(bodyTranslation, currentRotation);
     const completedFaceUp = !flip.startFaceUp;
@@ -1386,17 +1559,50 @@ export function PhysicsCard({
         LAYER_TRANSITION_DURATION_SECONDS,
         layerTransition.elapsed + CARD_PHYSICS.timeStep
       );
-      const progress =
+      let progress =
         layerTransition.elapsed / LAYER_TRANSITION_DURATION_SECONDS;
-      const [x, y, z] = getLayerTransitionPosition({
+      let [x, y, z] = getLayerTransitionPosition({
         lift: LAYER_TRANSITION_LIFT,
         offset: layerTransition.offset,
         progress,
         start: layerTransition.start,
         target: layerTransition.target,
       });
+      let nextRotation = shouldApplyLayerTransitionTargetRotation(progress)
+        ? layerTransition.targetQuaternion
+        : layerTransition.startQuaternion;
+
+      if (
+        isCardPoseBlocked({
+          position: { x, y, z },
+          rotation: nextRotation,
+        })
+      ) {
+        // A third card can occupy the planned escape lane. The authored final
+        // layer is already separated in Z, so finish there atomically instead
+        // of sweeping the kinematic collider through that obstacle.
+        const [targetX, targetY, targetZ] = layerTransition.target;
+
+        if (
+          isCardPoseBlocked({
+            position: { x: targetX, y: targetY, z: targetZ },
+            rotation: layerTransition.targetQuaternion,
+          })
+        ) {
+          layerTransition.elapsed = Math.max(
+            0,
+            layerTransition.elapsed - CARD_PHYSICS.timeStep
+          );
+          invalidate();
+          return;
+        }
+
+        [x, y, z] = [targetX, targetY, targetZ];
+        nextRotation = layerTransition.targetQuaternion;
+        progress = 1;
+      }
       body.setNextKinematicTranslation({ x, y, z });
-      body.setNextKinematicRotation(layerTransition.targetQuaternion);
+      body.setNextKinematicRotation(nextRotation);
 
       if (progress >= 1) {
         body.setTranslation(
@@ -1492,12 +1698,18 @@ export function PhysicsCard({
     }
 
     if (drag.mode === "rotate") {
-      const currentPose = getCardPose(body.translation(), body.rotation());
-      const [x, y, z, w] = createCardQuaternion(
-        drag.previewRotation,
-        currentPose.faceUp
-      );
-      body.setNextKinematicRotation({ x, y, z, w });
+      const currentTranslation = body.translation();
+      const currentPose = getCardPose(currentTranslation, body.rotation());
+      const safeYaw = getCollisionSafeYaw({
+        faceUp: currentPose.faceUp,
+        position: currentTranslation,
+        startQuaternion: drag.appliedQuaternion,
+        startRotation: drag.appliedRotation,
+        targetRotation: drag.previewRotation,
+      });
+      drag.appliedQuaternion = safeYaw.quaternion;
+      drag.appliedRotation = safeYaw.rotation;
+      body.setNextKinematicRotation(safeYaw.quaternion);
     } else {
       const currentTranslation = body.translation();
       const currentVelocity = body.linvel();
@@ -1520,22 +1732,20 @@ export function PhysicsCard({
       body.addForce({ x: forceX, y: forceY, z: forceZ }, true);
 
       if (controlHeight) {
-        const [rotationX, rotationY, rotationZ, rotationW] =
-          getTiltedCardQuaternion(
-            drag.startQuaternion,
-            drag.previewTiltRadians,
-            drag.previewElevationLeanRadians
-          );
+        const safeTilt = getCollisionSafeTilt({
+          baseQuaternion: drag.startQuaternion,
+          position: currentTranslation,
+          startAppliedQuaternion: drag.appliedQuaternion,
+          startElevationLeanRadians: drag.appliedElevationLeanRadians,
+          startTiltRadians: drag.appliedTiltRadians,
+          targetElevationLeanRadians: drag.previewElevationLeanRadians,
+          targetTiltRadians: drag.previewTiltRadians,
+        });
+        drag.appliedElevationLeanRadians = safeTilt.elevationLeanRadians;
+        drag.appliedQuaternion = safeTilt.quaternion;
+        drag.appliedTiltRadians = safeTilt.tiltRadians;
         body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        body.setRotation(
-          {
-            x: rotationX,
-            y: rotationY,
-            z: rotationZ,
-            w: rotationW,
-          },
-          true
-        );
+        body.setRotation(safeTilt.quaternion, true);
       }
 
       if (
@@ -1610,6 +1820,15 @@ export function PhysicsCard({
         translation.y,
         translation.z
       ),
+      appliedElevationLeanRadians: 0,
+      appliedQuaternion: {
+        w: rotation.w,
+        x: rotation.x,
+        y: rotation.y,
+        z: rotation.z,
+      },
+      appliedRotation: currentPose.rotation,
+      appliedTiltRadians: 0,
       startAngle: Math.atan2(point.y - translation.y, point.x - translation.x),
       startQuaternion: {
         w: rotation.w,
@@ -1774,6 +1993,7 @@ export function PhysicsCard({
       ref={bodyRef}
       type="dynamic"
       colliders={false}
+      userData={{ kind: "card", cardId: card.id }}
       position={initialPositionRef.current}
       rotation={initialRotationRef.current}
       ccd
