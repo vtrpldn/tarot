@@ -9,6 +9,12 @@ import {
   getReleaseKinematics,
   getSmoothedPointerVelocity,
 } from "./card-physics";
+import {
+  getDynamicDragVelocity,
+  getLayerTransitionClearance,
+  getLayerTransitionOffset,
+  getLayerTransitionPosition,
+} from "../components/tarot-studio/physics-card-drag";
 
 const CARD_WIDTH = 2;
 const CARD_HEIGHT = 3.5;
@@ -233,6 +239,137 @@ describe("configured Tarot card colliders in Rapier", () => {
       expect(target.body.translation().z).toBeGreaterThanOrEqual(
         CARD_HALF_DEPTH - 0.0006
       );
+    } finally {
+      world.free();
+    }
+  });
+
+  test("keeps a dynamically held card behind the card blocking its pointer target", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const target = createCard(world, {
+        canSleep: true,
+        position: [0, 0, tableHeight],
+      });
+      const driver = createCard(world, {
+        position: [-2.1, 0, tableHeight + 0.006],
+      });
+      driver.body.setGravityScale(0, true);
+      target.body.sleep();
+      let driverPassedTarget = false;
+
+      for (let frame = 0; frame < 90; frame += 1) {
+        const current = driver.body.translation();
+        const [x, y, z] = getDynamicDragVelocity({
+          current: [current.x, current.y, current.z],
+          maximumSpeed: 5.4,
+          target: [2.2, 0, tableHeight + 0.006],
+          timeStepSeconds: CARD_PHYSICS.timeStep,
+        });
+        driver.body.setLinvel({ x, y, z }, true);
+        driver.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        world.step();
+        driverPassedTarget ||=
+          driver.body.translation().x > target.body.translation().x;
+      }
+
+      expect(target.body.isSleeping()).toBe(false);
+      expect(target.body.translation().x).toBeGreaterThan(0.2);
+      expect(driverPassedTarget).toBe(false);
+      expect(driver.body.translation().x).toBeLessThan(
+        target.body.translation().x
+      );
+    } finally {
+      world.free();
+    }
+  });
+
+  test("keeps two 45-degree cards separated throughout a kinematic layer swap", () => {
+    const world = createWorld();
+
+    try {
+      const bottomZ = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const layerStep =
+        CARD_HALF_DEPTH * 2 + CARD_PHYSICS.contactSkin * 2;
+      const lower = createCard(world, {
+        bodyType: "kinematic",
+        kinematicCollisions: true,
+        position: [0, 0, bottomZ],
+      });
+      const upper = createCard(world, {
+        bodyType: "kinematic",
+        kinematicCollisions: true,
+        position: [0, 0, bottomZ + layerStep],
+      });
+      const halfYaw = Math.PI / 8;
+      lower.body.setRotation(
+        { x: 0, y: 0, z: Math.sin(halfYaw), w: Math.cos(halfYaw) },
+        true
+      );
+      upper.body.setRotation(
+        { x: 0, y: 0, z: -Math.sin(halfYaw), w: Math.cos(halfYaw) },
+        true
+      );
+      const bounds = { bottom: -8, left: -8, right: 8, top: 8 };
+      const clearance = getLayerTransitionClearance({
+        cardHeight: CARD_HEIGHT,
+        cardWidth: CARD_WIDTH,
+        contactSkin: CARD_PHYSICS.contactSkin,
+      });
+      const lowerOffset = getLayerTransitionOffset({
+        bounds,
+        clearance,
+        layerDirection: 1,
+        start: [0, 0],
+      });
+      const upperOffset = getLayerTransitionOffset({
+        bounds,
+        clearance,
+        layerDirection: -1,
+        start: [0, 0],
+      });
+      let deepestPenetration = 0;
+
+      for (let frame = 0; frame <= 36; frame += 1) {
+        const progress = frame / 36;
+        const lowerPosition = getLayerTransitionPosition({
+          lift: 0.12,
+          offset: lowerOffset,
+          progress,
+          start: [0, 0, bottomZ],
+          target: [0, 0, bottomZ + layerStep],
+        });
+        const upperPosition = getLayerTransitionPosition({
+          lift: 0.12,
+          offset: upperOffset,
+          progress,
+          start: [0, 0, bottomZ + layerStep],
+          target: [0, 0, bottomZ],
+        });
+        lower.body.setNextKinematicTranslation({
+          x: lowerPosition[0],
+          y: lowerPosition[1],
+          z: lowerPosition[2],
+        });
+        upper.body.setNextKinematicTranslation({
+          x: upperPosition[0],
+          y: upperPosition[1],
+          z: upperPosition[2],
+        });
+        world.step();
+
+        const contact = lower.collider.contactCollider(upper.collider, 0);
+        deepestPenetration = Math.min(
+          deepestPenetration,
+          contact?.distance ?? 0
+        );
+      }
+
+      expect(deepestPenetration).toBeGreaterThanOrEqual(-0.00005);
+      expect(lower.body.translation().z).toBeCloseTo(bottomZ + layerStep);
+      expect(upper.body.translation().z).toBeCloseTo(bottomZ);
     } finally {
       world.free();
     }

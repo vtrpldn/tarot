@@ -66,10 +66,16 @@ import {
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import {
   canPersistSettledPhysicsPose,
+  createPhysicsSceneAuthorityKey,
+  getDynamicDragVelocity,
+  getElevationTiltGesture,
   getFlipHandoffAction,
   getFlipHandoffResolution,
-  getKinematicDragStep,
+  getLayerTransitionClearance,
+  getLayerTransitionOffset,
+  getLayerTransitionPosition,
   getLocalOffsetForWorldUp,
+  getTiltedCardQuaternion,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldStabilizeRestingLayer,
@@ -89,13 +95,20 @@ const PHYSICAL_DRAG_LIFT = 0.006;
 const VISUAL_DRAG_LIFT = CARD_PHYSICS.dragLift - PHYSICAL_DRAG_LIFT;
 const COLLISION_ACTIVATION_TRANSFER = 0.55;
 const COLLISION_ACTIVATION_MIN_SPEED = 0.08;
+const DYNAMIC_DRAG_MAX_SPEED = 5.4;
+const RIGHT_DRAG_ELEVATION_SCALE = 0.82;
+const RIGHT_DRAG_MAX_ELEVATION = 1.1;
+const RIGHT_DRAG_TILT_SCALE = 0.52;
+const RIGHT_DRAG_MAX_TILT = MathUtils.degToRad(28);
+const LAYER_TRANSITION_DURATION_SECONDS = 0.54;
+const LAYER_TRANSITION_LIFT = 0.12;
 
 type PointerCaptureTarget = Mesh & {
   releasePointerCapture?: (pointerId: number) => void;
   setPointerCapture?: (pointerId: number) => void;
 };
 
-type DragMode = "move" | "rotate";
+type DragMode = "move" | "rotate" | "elevate-tilt";
 
 type DragState = {
   mode: DragMode;
@@ -111,10 +124,20 @@ type DragState = {
   startAngle: number;
   startRotation: number;
   previewRotation: number;
+  previewTiltRadians: number;
   startQuaternion: { w: number; x: number; y: number; z: number };
   startBodyType: number;
   startTranslation: Vector3;
   moved: boolean;
+};
+
+type LayerTransitionState = {
+  elapsed: number;
+  offset: [x: number, y: number];
+  start: [x: number, y: number, z: number];
+  target: [x: number, y: number, z: number];
+  targetBodyType: number;
+  targetQuaternion: { w: number; x: number; y: number; z: number };
 };
 
 type PointerFallbackBinding = {
@@ -126,6 +149,11 @@ type PointerFallbackBinding = {
 type LostPointerCaptureBinding = {
   handler: (event: PointerEvent) => void;
   target: HTMLCanvasElement;
+};
+
+type ContextMenuSuppressionBinding = {
+  handler: (event: MouseEvent) => void;
+  timeoutId: number | null;
 };
 
 type FlipState = {
@@ -266,7 +294,11 @@ export function PhysicsCard({
   const dragRef = useRef<DragState | null>(null);
   const flipRef = useRef<FlipState | null>(null);
   const flipHandoffPendingRef = useRef(false);
+  const layerTransitionRef = useRef<LayerTransitionState | null>(null);
   const flipAnimationFrameRef = useRef<number | null>(null);
+  const suppressContextMenuUntilRef = useRef(0);
+  const contextMenuSuppressionRef =
+    useRef<ContextMenuSuppressionBinding | null>(null);
   const visualRef = useRef<Group>(null);
   const fallbackRef = useRef<PointerFallbackBinding | null>(null);
   const lostPointerCaptureRef =
@@ -274,6 +306,7 @@ export function PhysicsCard({
   const mountedCardIdRef = useRef<string | null>(null);
   const lastLayerKeyRef = useRef(layerKey);
   const lastRestingZRef = useRef<number | null>(null);
+  const lastStabilizeAtRestRef = useRef(stabilizeAtRest);
   const reconciledAuthorityKeyRef = useRef<string | null>(null);
   const reconciledSceneAuthorityKeyRef = useRef<string | null>(null);
   const skipNextAuthorityReconciliationRef = useRef(false);
@@ -317,13 +350,13 @@ export function PhysicsCard({
   const initialYaw = MathUtils.degToRad(
     resolvedInitialLaunch?.rotation ?? card.rotation
   );
-  const sceneAuthorityKey = [
+  const sceneAuthorityKey = createPhysicsSceneAuthorityKey({
     authorityKey,
-    worldX,
-    worldY,
+    position: [worldX, worldY],
     restingZ,
     tableSurfaceZ,
-  ].join("|");
+    stabilizeAtRest,
+  });
   const latestAuthorityRef = useRef({
     authorityKey,
     faceUp: card.faceUp,
@@ -385,6 +418,55 @@ export function PhysicsCard({
     lostPointerCaptureRef.current = null;
   }, []);
 
+  const clearContextMenuSuppression = useCallback(() => {
+    const binding = contextMenuSuppressionRef.current;
+
+    if (!binding) {
+      return;
+    }
+
+    document.removeEventListener("contextmenu", binding.handler, true);
+    if (binding.timeoutId !== null) {
+      window.clearTimeout(binding.timeoutId);
+    }
+    contextMenuSuppressionRef.current = null;
+  }, []);
+
+  const beginContextMenuSuppression = useCallback(() => {
+    clearContextMenuSuppression();
+
+    const handler = (event: MouseEvent) => {
+      const activeRightDrag =
+        dragRef.current?.mode === "elevate-tilt" && dragRef.current.moved;
+
+      if (
+        activeRightDrag ||
+        performance.now() <= suppressContextMenuUntilRef.current
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        suppressContextMenuUntilRef.current = 0;
+      }
+      clearContextMenuSuppression();
+    };
+
+    document.addEventListener("contextmenu", handler, true);
+    contextMenuSuppressionRef.current = { handler, timeoutId: null };
+  }, [clearContextMenuSuppression]);
+
+  const scheduleContextMenuSuppressionCleanup = useCallback(() => {
+    const binding = contextMenuSuppressionRef.current;
+
+    if (!binding) {
+      return;
+    }
+
+    if (binding.timeoutId !== null) {
+      window.clearTimeout(binding.timeoutId);
+    }
+    binding.timeoutId = window.setTimeout(clearContextMenuSuppression, 500);
+  }, [clearContextMenuSuppression]);
+
   const setVisualDragLift = useCallback((active: boolean) => {
     const visual = visualRef.current;
 
@@ -418,7 +500,11 @@ export function PhysicsCard({
         flipAnimationFrameRef.current = null;
         invalidate();
 
-        if (flipRef.current || flipHandoffPendingRef.current) {
+        if (
+          flipRef.current ||
+          flipHandoffPendingRef.current ||
+          layerTransitionRef.current
+        ) {
           requestNextFrame();
         }
       });
@@ -439,6 +525,7 @@ export function PhysicsCard({
         !body ||
         !otherBody ||
         dragRef.current ||
+        layerTransitionRef.current ||
         body.bodyType() !== rapier.RigidBodyType.KinematicPositionBased ||
         otherBody.bodyType() === rapier.RigidBodyType.Fixed
       ) {
@@ -556,6 +643,26 @@ export function PhysicsCard({
         if (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
         drag.previewRotation = drag.startRotation + MathUtils.radToDeg(angleDelta);
         drag.moved = Math.abs(drag.previewRotation - drag.startRotation) > 0.7;
+      } else if (drag.mode === "elevate-tilt") {
+        const gesture = getElevationTiltGesture({
+          current: [point.x, point.y],
+          elevationScale: RIGHT_DRAG_ELEVATION_SCALE,
+          maximumElevation: restingZ + RIGHT_DRAG_MAX_ELEVATION,
+          maximumTiltRadians: RIGHT_DRAG_MAX_TILT,
+          minimumElevation: restingZ + PHYSICAL_DRAG_LIFT,
+          origin: [drag.origin.x, drag.origin.y],
+          startElevation: drag.startTranslation.z,
+          tiltScale: RIGHT_DRAG_TILT_SCALE,
+        });
+        drag.target.set(
+          drag.startTranslation.x,
+          drag.startTranslation.y,
+          gesture.elevation
+        );
+        drag.previewTiltRadians = gesture.tiltRadians;
+        drag.moved ||=
+          point.distanceToSquared(drag.origin) >
+          DRAG_THRESHOLD * DRAG_THRESHOLD;
       } else {
         const [targetX, targetY] = clampPhysicsPointToBounds(
           [point.x - drag.grabOffset.x, point.y - drag.grabOffset.y],
@@ -572,10 +679,20 @@ export function PhysicsCard({
       // A press must leave an undisturbed collider alone. Physics ownership
       // starts only once the pointer has crossed the drag threshold.
       if (shouldTakeDragPhysicsOwnership(wasMoved, drag.moved)) {
-        body.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
+        const usesDynamicContact = drag.mode !== "rotate";
+        body.setBodyType(
+          usesDynamicContact
+            ? rapier.RigidBodyType.Dynamic
+            : rapier.RigidBodyType.KinematicPositionBased,
+          true
+        );
+        body.setGravityScale(usesDynamicContact ? 0 : 1, true);
         body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        setVisualDragLift(true);
+        if (usesDynamicContact) {
+          collisionActivatedRef.current = true;
+        }
+        setVisualDragLift(drag.mode === "move");
       }
 
       invalidate();
@@ -585,6 +702,7 @@ export function PhysicsCard({
     [
       dragBounds,
       invalidate,
+      rapier.RigidBodyType.Dynamic,
       rapier.RigidBodyType.KinematicPositionBased,
       restingZ,
       setVisualDragLift,
@@ -595,7 +713,12 @@ export function PhysicsCard({
     const visual = visualRef.current;
     const body = bodyRef.current;
 
-    if (!body || flipRef.current || flipHandoffPendingRef.current) {
+    if (
+      !body ||
+      flipRef.current ||
+      flipHandoffPendingRef.current ||
+      layerTransitionRef.current
+    ) {
       return;
     }
 
@@ -628,22 +751,28 @@ export function PhysicsCard({
         updateDrag(pointerId, point, timestamp);
       }
 
+      const hadRightGesture = drag.mode === "elevate-tilt";
+      const suppressReleasedContextMenu = hadRightGesture && drag.moved;
+      if (suppressReleasedContextMenu) {
+        suppressContextMenuUntilRef.current = performance.now() + 500;
+      }
+
       const translation = body.translation();
       const rotation = body.rotation();
       const targetRotation =
         drag.mode === "rotate"
           ? drag.previewRotation
           : getCardPose(translation, rotation).rotation;
-      const targetPosition: TablePoint =
-        drag.mode === "move"
-          ? [drag.target.x, drag.target.y]
-          : [translation.x, translation.y];
+      const targetPosition: TablePoint = [translation.x, translation.y];
       const faceUp = getCardPose(translation, rotation).faceUp;
       const latestAuthority = latestAuthorityRef.current;
 
       if (!drag.moved) {
         dragRef.current = null;
         canvas.style.cursor = "grab";
+        if (hadRightGesture) {
+          scheduleContextMenuSuppressionCleanup();
+        }
         // A face command can arrive while this pointer owns the card. Complete
         // it here so a later sleep callback cannot restore the stale face.
         if (faceUp !== latestAuthority.faceUp) {
@@ -663,6 +792,7 @@ export function PhysicsCard({
           : rapier.RigidBodyType.Dynamic,
         true
       );
+      body.setGravityScale(1, true);
       if (cancelled) {
         body.setTranslation(drag.startTranslation, true);
         body.setRotation(drag.startQuaternion, true);
@@ -675,7 +805,7 @@ export function PhysicsCard({
           { x, y, z, w },
           true
         );
-      } else {
+      } else if (drag.mode === "move") {
         // Keep the swept physical position instead of teleporting through a
         // card after the final pointer sample.
         const [x, y, z, w] = createCardQuaternion(
@@ -686,15 +816,19 @@ export function PhysicsCard({
       }
 
       if (!cancelled && drag.moved) {
-        // Persist intent before the first dynamic step can turn a collision into a new pose.
-        skipNextAuthorityReconciliationRef.current = true;
         if (drag.mode === "rotate") {
+          // Persist intent before the next authority reconciliation sees the
+          // body that already received this exact rotation.
+          skipNextAuthorityReconciliationRef.current = true;
           if (onRotate) {
             onRotate(card.id, targetRotation - drag.startRotation);
           } else {
             onMove(card.id, targetPosition, targetRotation);
           }
-        } else {
+        } else if (drag.mode === "move") {
+          // Persist the collision-constrained body position, not the pointer
+          // target beyond the card that blocked it.
+          skipNextAuthorityReconciliationRef.current = true;
           onMove(card.id, targetPosition, targetRotation);
           const idleSeconds = Math.max(
             0,
@@ -760,6 +894,11 @@ export function PhysicsCard({
             },
             true
           );
+        } else {
+          // Height and tilt are a physical hold, not a floating durable pose.
+          // Releasing gives gravity ownership so the card falls and settles.
+          body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          body.setAngvel({ x: 0, y: 0, z: 0 }, true);
         }
       } else {
         body.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -767,6 +906,9 @@ export function PhysicsCard({
       }
 
       dragRef.current = null;
+      if (hadRightGesture) {
+        scheduleContextMenuSuppressionCleanup();
+      }
       setVisualDragLift(false);
       canvas.style.cursor = "grab";
       if (cancelled && faceUp !== latestAuthority.faceUp) {
@@ -788,6 +930,7 @@ export function PhysicsCard({
       rapier.RigidBodyType.KinematicPositionBased,
       reducedMotion,
       restingZ,
+      scheduleContextMenuSuppressionCleanup,
       setVisualDragLift,
       updateDrag,
     ]
@@ -801,6 +944,7 @@ export function PhysicsCard({
       dragRef.current ||
       flipRef.current ||
       flipHandoffPendingRef.current ||
+      layerTransitionRef.current ||
       externalDragActiveRef.current
     ) {
       return;
@@ -819,7 +963,10 @@ export function PhysicsCard({
 
     const layerChanged = lastLayerKeyRef.current !== layerKey;
     const restingHeightChanged = lastRestingZRef.current !== restingZ;
-    const currentPose = getCardPose(body.translation(), body.rotation());
+    const stabilizationChanged =
+      lastStabilizeAtRestRef.current !== stabilizeAtRest;
+    const currentTranslation = body.translation();
+    const currentPose = getCardPose(currentTranslation, body.rotation());
     const targetPose: PhysicsCardPose = {
       faceUp: card.faceUp,
       position: [worldX, worldY],
@@ -839,6 +986,7 @@ export function PhysicsCard({
     mountedCardIdRef.current = card.id;
     lastLayerKeyRef.current = layerKey;
     lastRestingZRef.current = restingZ;
+    lastStabilizeAtRestRef.current = stabilizeAtRest;
     reconciledAuthorityKeyRef.current = authorityKey;
     reconciledSceneAuthorityKeyRef.current = sceneAuthorityKey;
 
@@ -854,7 +1002,13 @@ export function PhysicsCard({
       return;
     }
 
-    if (!isNewBody && !poseChanged && !layerChanged && !restingHeightChanged) {
+    if (
+      !isNewBody &&
+      !poseChanged &&
+      !layerChanged &&
+      !restingHeightChanged &&
+      !stabilizationChanged
+    ) {
       durablePoseRef.current = nextDurablePose;
       return;
     }
@@ -872,18 +1026,61 @@ export function PhysicsCard({
       launch?.rotation ?? targetPose.rotation,
       launch?.faceUp ?? targetPose.faceUp
     );
+    const targetBodyType = preserveAuthoredRestingLayer
+      ? rapier.RigidBodyType.KinematicPositionBased
+      : rapier.RigidBodyType.Dynamic;
+    const shouldAnimateLayerTransition =
+      !isNewBody &&
+      !launch &&
+      stabilizeAtRest &&
+      (layerChanged || restingHeightChanged) &&
+      Math.abs(currentTranslation.z - restingZ) > 0.0001;
+
+    if (shouldAnimateLayerTransition) {
+      body.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
+      body.setGravityScale(0, true);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      collisionActivatedRef.current = false;
+      const layerClearance = getLayerTransitionClearance({
+        cardHeight,
+        cardWidth,
+        contactSkin: CARD_PHYSICS.contactSkin,
+      });
+      const layerDirection = restingZ > currentTranslation.z ? 1 : -1;
+      layerTransitionRef.current = {
+        elapsed: 0,
+        offset: getLayerTransitionOffset({
+          bounds: dragBounds,
+          clearance: layerClearance,
+          layerDirection,
+          start: [currentTranslation.x, currentTranslation.y],
+        }),
+        start: [
+          currentTranslation.x,
+          currentTranslation.y,
+          currentTranslation.z,
+        ],
+        target: [targetPose.position[0], targetPose.position[1], restingZ],
+        targetBodyType: rapier.RigidBodyType.KinematicPositionBased,
+        targetQuaternion: { x, y, z, w },
+      };
+      durablePoseRef.current = nextDurablePose;
+      keepFlipFramesRunning();
+      invalidate();
+      return;
+    }
+
     const nextZ = preserveAuthoredRestingLayer
       ? restingZ
       : isNewBody
         ? initialPositionRef.current[2]
-        : Math.max(restingZ + dropLiftRef.current, body.translation().z);
+        : stabilizationChanged && !stabilizeAtRest
+          ? currentTranslation.z
+          : Math.max(restingZ + dropLiftRef.current, currentTranslation.z);
 
-    body.setBodyType(
-      preserveAuthoredRestingLayer
-        ? rapier.RigidBodyType.KinematicPositionBased
-        : rapier.RigidBodyType.Dynamic,
-      true
-    );
+    body.setBodyType(targetBodyType, true);
+    body.setGravityScale(1, true);
     body.setTranslation(
       {
         x: launch?.position[0] ?? targetPose.position[0],
@@ -925,8 +1122,12 @@ export function PhysicsCard({
     card.faceUp,
     card.id,
     card.rotation,
+    cardHeight,
+    cardWidth,
+    dragBounds,
     layerKey,
     invalidate,
+    keepFlipFramesRunning,
     minimumRestingZ,
     onLaunchConsumed,
     rapier.RigidBodyType.Dynamic,
@@ -948,9 +1149,15 @@ export function PhysicsCard({
       }
       clearLostPointerCapture();
       clearFallback();
+      clearContextMenuSuppression();
       canvas.style.cursor = "default";
     },
-    [canvas, clearFallback, clearLostPointerCapture]
+    [
+      canvas,
+      clearContextMenuSuppression,
+      clearFallback,
+      clearLostPointerCapture,
+    ]
   );
 
   useFrame((_, delta) => {
@@ -1105,6 +1312,52 @@ export function PhysicsCard({
       return;
     }
 
+    const layerTransition = layerTransitionRef.current;
+    if (layerTransition) {
+      layerTransition.elapsed = Math.min(
+        LAYER_TRANSITION_DURATION_SECONDS,
+        layerTransition.elapsed + CARD_PHYSICS.timeStep
+      );
+      const progress =
+        layerTransition.elapsed / LAYER_TRANSITION_DURATION_SECONDS;
+      const [x, y, z] = getLayerTransitionPosition({
+        lift: LAYER_TRANSITION_LIFT,
+        offset: layerTransition.offset,
+        progress,
+        start: layerTransition.start,
+        target: layerTransition.target,
+      });
+      body.setNextKinematicTranslation({ x, y, z });
+      body.setNextKinematicRotation(layerTransition.targetQuaternion);
+
+      if (progress >= 1) {
+        body.setTranslation(
+          {
+            x: layerTransition.target[0],
+            y: layerTransition.target[1],
+            z: layerTransition.target[2],
+          },
+          true
+        );
+        body.setRotation(layerTransition.targetQuaternion, true);
+        body.setBodyType(layerTransition.targetBodyType, true);
+        body.setGravityScale(1, true);
+        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        layerTransitionRef.current = null;
+
+        if (
+          reconciledSceneAuthorityKeyRef.current !==
+          latestAuthorityRef.current.sceneAuthorityKey
+        ) {
+          requestAuthorityReconciliation();
+        }
+      }
+
+      invalidate();
+      return;
+    }
+
     if (body.bodyType() === rapier.RigidBodyType.Dynamic) {
       const translation = body.translation();
       const velocity = body.linvel();
@@ -1179,34 +1432,60 @@ export function PhysicsCard({
       body.setNextKinematicRotation({ x, y, z, w });
     } else {
       const currentTranslation = body.translation();
-      const [x, y, z] = getKinematicDragStep({
+      const [x, y, z] = getDynamicDragVelocity({
         current: [
           currentTranslation.x,
           currentTranslation.y,
           currentTranslation.z,
         ],
-        maximumDistance: MAX_POINTER_SPEED * CARD_PHYSICS.timeStep,
+        maximumSpeed: DYNAMIC_DRAG_MAX_SPEED,
         target: [drag.target.x, drag.target.y, drag.target.z],
+        timeStepSeconds: CARD_PHYSICS.timeStep,
       });
-      body.setNextKinematicTranslation({ x, y, z });
+      body.setLinvel({ x, y, z }, true);
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+
+      if (drag.mode === "elevate-tilt") {
+        const [rotationX, rotationY, rotationZ, rotationW] =
+          getTiltedCardQuaternion(
+            drag.startQuaternion,
+            drag.previewTiltRadians
+          );
+        body.setRotation(
+          {
+            x: rotationX,
+            y: rotationY,
+            z: rotationZ,
+            w: rotationW,
+          },
+          true
+        );
+      }
 
       if (
-        Math.hypot(x - drag.target.x, y - drag.target.y, z - drag.target.z) >
+        Math.hypot(
+          currentTranslation.x - drag.target.x,
+          currentTranslation.y - drag.target.y,
+          currentTranslation.z - drag.target.z
+        ) >
         0.00001
       ) {
-        // Continue the capped sweep under a demand frameloop until it reaches
-        // the latest pointer target, giving Rapier a contact step between each
-        // position update.
+        // Continue rendering while the dynamic body follows the pointer or is
+        // visibly resisted by a collision.
         invalidate();
       }
     }
   });
 
   const handlePointerDown = (event: ThreeEvent<PointerEvent>) => {
+    const rightMouseButton =
+      event.nativeEvent.button === 2 &&
+      event.nativeEvent.pointerType !== "touch";
     if (
-      event.nativeEvent.button !== 0 ||
+      (event.nativeEvent.button !== 0 && !rightMouseButton) ||
       flipRef.current ||
       flipHandoffPendingRef.current ||
+      layerTransitionRef.current ||
       externalDragRef?.current?.cardId === card.id
     ) {
       return;
@@ -1222,10 +1501,11 @@ export function PhysicsCard({
     const translation = body.translation();
     const rotation = body.rotation();
     const currentPose = getCardPose(translation, rotation);
-    const mode: DragMode =
-      selected &&
-      event.nativeEvent.pointerType !== "touch" &&
-      isNearCardEdge(event)
+    const mode: DragMode = rightMouseButton
+      ? "elevate-tilt"
+      : selected &&
+          event.nativeEvent.pointerType !== "touch" &&
+          isNearCardEdge(event)
         ? "rotate"
         : "move";
     const target = event.target as unknown as PointerCaptureTarget;
@@ -1251,7 +1531,9 @@ export function PhysicsCard({
       target: new Vector3(
         translation.x,
         translation.y,
-        restingZ + PHYSICAL_DRAG_LIFT
+        mode === "elevate-tilt"
+          ? translation.z
+          : restingZ + PHYSICAL_DRAG_LIFT
       ),
       startAngle: Math.atan2(point.y - translation.y, point.x - translation.x),
       startQuaternion: {
@@ -1268,11 +1550,20 @@ export function PhysicsCard({
         translation.z
       ),
       previewRotation: currentPose.rotation,
+      previewTiltRadians: 0,
       moved: false,
     };
+    if (rightMouseButton) {
+      beginContextMenuSuppression();
+    }
     onSelect(card.id);
     onSound("pickup");
-    canvas.style.cursor = mode === "rotate" ? "crosshair" : "grabbing";
+    canvas.style.cursor =
+      mode === "rotate"
+        ? "crosshair"
+        : mode === "elevate-tilt"
+          ? "move"
+          : "grabbing";
     invalidate();
 
     const handleLostPointerCapture = (lostEvent: PointerEvent) => {
@@ -1384,13 +1675,28 @@ export function PhysicsCard({
       !body ||
       dragRef.current ||
       flipRef.current ||
-      flipHandoffPendingRef.current
+      flipHandoffPendingRef.current ||
+      layerTransitionRef.current
     ) {
       return;
     }
 
     beginVisualFlip();
     onFlip(card.id);
+  };
+
+  const handleContextMenu = (event: ThreeEvent<MouseEvent>) => {
+    const activeRightDrag =
+      dragRef.current?.mode === "elevate-tilt" && dragRef.current.moved;
+
+    if (
+      activeRightDrag ||
+      performance.now() <= suppressContextMenuUntilRef.current
+    ) {
+      event.stopPropagation();
+      event.nativeEvent.preventDefault();
+      suppressContextMenuUntilRef.current = 0;
+    }
   };
 
   return (
@@ -1424,6 +1730,7 @@ export function PhysicsCard({
         ) {
           return;
         }
+        collisionActivatedRef.current = false;
         onSettle(
           card.id,
           getCardPose(body.translation(), body.rotation()),
@@ -1498,6 +1805,7 @@ export function PhysicsCard({
           onHover(null);
           if (!dragRef.current) canvas.style.cursor = "default";
         }}
+        onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
       >
         <planeGeometry args={[cardWidth, cardHeight]} />

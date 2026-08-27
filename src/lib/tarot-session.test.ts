@@ -75,6 +75,30 @@ function settledPose(
   };
 }
 
+describe("move", () => {
+  test("preserves an explicitly reordered layer while updating position and rotation", () => {
+    const reordered = tarotSessionReducer(createSession(), {
+      type: "reorder",
+      cardId: "table-second",
+      direction: "backward",
+    });
+
+    const result = tarotSessionReducer(reordered, {
+      type: "move",
+      cardId: "table-second",
+      position: [0.72, -0.36],
+      rotation: -42,
+    });
+
+    expect(result.cards.find((card) => card.id === "table-second")).toMatchObject({
+      position: [0.72, -0.36],
+      rotation: -42,
+      zIndex: 1,
+    });
+    expect(result.cards.find((card) => card.id === "table-first")?.zIndex).toBe(2);
+  });
+});
+
 describe("sync-physics-poses", () => {
   test("synchronizes a batch of settled table poses without recording history", () => {
     const session = createSession();

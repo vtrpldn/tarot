@@ -1,10 +1,17 @@
 import { describe, expect, test } from "vitest";
 import {
   canPersistSettledPhysicsPose,
+  createPhysicsSceneAuthorityKey,
+  getDynamicDragVelocity,
+  getElevationTiltGesture,
   getFlipHandoffAction,
   getFlipHandoffResolution,
   getKinematicDragStep,
+  getLayerTransitionClearance,
+  getLayerTransitionOffset,
+  getLayerTransitionPosition,
   getLocalOffsetForWorldUp,
+  getTiltedCardQuaternion,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldStabilizeRestingLayer,
@@ -91,6 +98,173 @@ describe("PhysicsCard move release", () => {
         target: [2, 0, 0.016],
       })
     ).toEqual([expect.closeTo(-2 + 8 / 60), 0, expect.closeTo(0.0102)]);
+  });
+
+  test("drives a held dynamic card toward the pointer at a bounded speed", () => {
+    expect(
+      getDynamicDragVelocity({
+        current: [0, 0, 0.01],
+        maximumSpeed: 5.4,
+        target: [2, 0, 0.016],
+        timeStepSeconds: 1 / 60,
+      })
+    ).toEqual([
+      expect.closeTo(5.3999757),
+      0,
+      expect.closeTo(0.0161999),
+    ]);
+    expect(
+      getDynamicDragVelocity({
+        current: [0, 0, 0],
+        maximumSpeed: 5.4,
+        target: [0.03, 0, 0],
+        timeStepSeconds: 1 / 60,
+      })
+    ).toEqual([1.8, 0, 0]);
+  });
+
+  test("maps right-drag axes independently to height and physical tilt", () => {
+    expect(
+      getElevationTiltGesture({
+        current: [0, 0.5],
+        elevationScale: 0.8,
+        maximumElevation: 1.1,
+        maximumTiltRadians: 0.5,
+        minimumElevation: 0.01,
+        origin: [0, 0],
+        startElevation: 0.01,
+        tiltScale: 0.5,
+      })
+    ).toEqual({ elevation: 0.41000000000000003, tiltRadians: 0 });
+    expect(
+      getElevationTiltGesture({
+        current: [2, -2],
+        elevationScale: 0.8,
+        maximumElevation: 1.1,
+        maximumTiltRadians: 0.5,
+        minimumElevation: 0.01,
+        origin: [0, 0],
+        startElevation: 0.4,
+        tiltScale: 0.5,
+      })
+    ).toEqual({ elevation: 0.01, tiltRadians: 0.5 });
+  });
+
+  test("tilts from the captured physical orientation without changing its norm", () => {
+    const tilted = getTiltedCardQuaternion(
+      { w: 1, x: 0, y: 0, z: 0 },
+      Math.PI / 6
+    );
+
+    expect(tilted).toEqual([
+      0,
+      expect.closeTo(Math.sin(Math.PI / 12)),
+      0,
+      expect.closeTo(Math.cos(Math.PI / 12)),
+    ]);
+    expect(Math.hypot(...tilted)).toBeCloseTo(1);
+  });
+
+  test("restacks sideways before changing height and returns to authored XY", () => {
+    const start = [0, 0, 0.01] as const;
+    const target = [0, 0, 0.03] as const;
+
+    expect(
+      getLayerTransitionPosition({
+        lift: 0.12,
+        offset: [1.5, 0],
+        progress: 0,
+        start,
+        target,
+      })
+    ).toEqual([0, 0, 0.01]);
+    expect(
+      getLayerTransitionPosition({
+        lift: 0.12,
+        offset: [1.5, 0],
+        progress: 0.2,
+        start,
+        target,
+      })[2]
+    ).toBe(0.01);
+    expect(
+      getLayerTransitionPosition({
+        lift: 0.12,
+        offset: [1.5, 0],
+        progress: 0.5,
+        start,
+        target,
+      })
+    ).toEqual([1.5, 0, expect.closeTo(0.08)]);
+    expect(
+      getLayerTransitionPosition({
+        lift: 0.12,
+        offset: [1.5, 0],
+        progress: 1,
+        start,
+        target,
+      })
+    ).toEqual([0, 0, 0.03]);
+  });
+
+  test("turns a layer transition inward when its preferred lane reaches the rail", () => {
+    const bounds = { bottom: -5, left: -5, right: 5, top: 5 };
+
+    expect(
+      getLayerTransitionOffset({
+        bounds,
+        clearance: 4,
+        layerDirection: 1,
+        start: [0, 0],
+      })
+    ).toEqual([4, 0]);
+    expect(
+      getLayerTransitionOffset({
+        bounds,
+        clearance: 4,
+        layerDirection: 1,
+        start: [4.5, 0],
+      })
+    ).toEqual([-4, 0]);
+    expect(
+      getLayerTransitionOffset({
+        bounds,
+        clearance: 4,
+        layerDirection: -1,
+        start: [0, -4.5],
+      })
+    ).toEqual([0, 4]);
+  });
+
+  test("uses a full card diagonal to clear arbitrary layer rotation", () => {
+    expect(
+      getLayerTransitionClearance({
+        cardHeight: 3.5,
+        cardWidth: 2,
+        contactSkin: 0.001,
+      })
+    ).toBeCloseTo(Math.hypot(2, 3.5) + 0.002);
+  });
+
+  test("reconciles when a passive card leaves authored overlap mode", () => {
+    const common = {
+      authorityKey: "face:0:0:0:1",
+      position: [0, 0] as const,
+      restingZ: 0.01,
+      tableSurfaceZ: 0,
+    };
+
+    expect(
+      createPhysicsSceneAuthorityKey({
+        ...common,
+        stabilizeAtRest: true,
+      })
+    ).not.toBe(
+      createPhysicsSceneAuthorityKey({
+        ...common,
+        stabilizeAtRest: false,
+      })
+    );
   });
 
   test("stabilizes every authored overlap layer, including its bottom", () => {

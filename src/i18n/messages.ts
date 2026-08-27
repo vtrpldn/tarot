@@ -111,7 +111,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "EN",
     loadingTable: "Opening the table…",
     tableDescription:
-      "Interactive card table. Pull any exposed card from the deck to draw it and drag table cards to arrange them. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
+      "Interactive card table. Pull any exposed card from the deck to draw it and drag table cards to arrange them. Right-drag a table card: move vertically to lift or lower it, and horizontally to tilt it. Scroll the table background to zoom, hold Space while dragging to pan, use I and K to change the selected card layer, and J and L to rotate it.",
     tableActions: "Table actions",
     deckTrigger: (deckLabel, deck) =>
       `Choose deck. ${deckLabel}, ${deck.count} ${deck.noun} remaining`,
@@ -253,7 +253,7 @@ const messages: Record<AppLocale, Messages> = {
     localeShortLabel: "PT",
     loadingTable: "Abrindo a mesa…",
     tableDescription:
-      "Mesa de cartas interativa. Puxe qualquer carta exposta do monte para tirá-la e arraste as cartas na mesa para organizá-las. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
+      "Mesa de cartas interativa. Puxe qualquer carta exposta do monte para tirá-la e arraste as cartas na mesa para organizá-las. Arraste uma carta na mesa com o botão direito: mova verticalmente para elevá-la ou abaixá-la e horizontalmente para incliná-la. Role sobre o fundo da mesa para dar zoom, mantenha Espaço pressionado enquanto arrasta para mover a visão, use I e K para mudar a camada da carta selecionada e J e L para girá-la.",
     tableActions: "Ações da mesa",
     deckTrigger: (deckLabel, deck) =>
       `Escolher baralho. ${deckLabel}, restam ${deck.count} ${deck.noun}`,

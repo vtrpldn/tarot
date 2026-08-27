@@ -679,7 +679,6 @@ export function tarotSessionReducer(
             ...candidate,
             position: action.position,
             rotation: action.rotation ?? candidate.rotation,
-            zIndex: nextZIndex(session.cards),
           }
         : candidate
     );
