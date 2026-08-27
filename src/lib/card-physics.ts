@@ -470,6 +470,77 @@ export function getFlipVisualState(progress: number): PhysicsFlipVisualState {
   };
 }
 
+/**
+ * Returns the world-up offset that keeps every visible card corner above the
+ * table while a nested visual group turns around its local Y axis.
+ */
+export function getFlipSurfaceClearanceLift({
+  bodyCenterZ,
+  bodyRotation,
+  cardHeight,
+  cardWidth,
+  localRotationY,
+  surfaceClearance,
+  tableSurfaceZ,
+  visibleHalfDepth,
+}: {
+  bodyCenterZ: number;
+  bodyRotation: QuaternionLike;
+  cardHeight: number;
+  cardWidth: number;
+  localRotationY: number;
+  surfaceClearance: number;
+  tableSurfaceZ: number;
+  visibleHalfDepth: number;
+}): number {
+  const quaternionMagnitude = Math.hypot(
+    bodyRotation.x,
+    bodyRotation.y,
+    bodyRotation.z,
+    bodyRotation.w
+  );
+
+  if (
+    !Number.isFinite(quaternionMagnitude) ||
+    quaternionMagnitude === 0 ||
+    ![
+      bodyCenterZ,
+      cardHeight,
+      cardWidth,
+      localRotationY,
+      surfaceClearance,
+      tableSurfaceZ,
+      visibleHalfDepth,
+    ].every(Number.isFinite)
+  ) {
+    return 0;
+  }
+
+  const bodyX = bodyRotation.x / quaternionMagnitude;
+  const bodyY = bodyRotation.y / quaternionMagnitude;
+  const bodyZ = bodyRotation.z / quaternionMagnitude;
+  const bodyW = bodyRotation.w / quaternionMagnitude;
+  const halfAngle = localRotationY / 2;
+  const localY = Math.sin(halfAngle);
+  const localW = Math.cos(halfAngle);
+
+  // Parent-body rotation followed by the nested local-Y presentation turn.
+  const x = bodyX * localW - bodyZ * localY;
+  const y = bodyW * localY + bodyY * localW;
+  const z = bodyX * localY + bodyZ * localW;
+  const w = bodyW * localW - bodyY * localY;
+
+  // World-Z projections of the visible slab's local X, Y, and Z axes.
+  const projectedHalfDepth =
+    Math.abs(2 * (x * z - w * y)) * (Math.abs(cardWidth) / 2) +
+    Math.abs(2 * (y * z + w * x)) * (Math.abs(cardHeight) / 2) +
+    Math.abs(1 - 2 * (x * x + y * y)) * Math.abs(visibleHalfDepth);
+  const minimumCenterZ =
+    tableSurfaceZ + Math.max(0, surfaceClearance) + projectedHalfDepth;
+
+  return Math.max(0, minimumCenterZ - bodyCenterZ);
+}
+
 export function isPhysicsLaunchForTarget(
   launch: PhysicsCardLaunch | undefined,
   target: TablePoint

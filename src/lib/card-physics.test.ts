@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { Quaternion, Vector3 } from "three";
 import {
   advanceFlipElapsed,
   CARD_PHYSICS,
@@ -12,6 +13,7 @@ import {
   flipCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
+  getFlipSurfaceClearanceLift,
   getFlipVisualState,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
@@ -345,6 +347,97 @@ describe("controlled flip presentation", () => {
       scaleX: 1,
       scaleY: 1,
     });
+  });
+
+  test("keeps every visible corner above the table through a horizontal turn", () => {
+    const bodyCenterZ = 0.01;
+    const cardHeight = 3;
+    const cardWidth = 2;
+    const surfaceClearance = 0.0005;
+    const tableSurfaceZ = 0;
+    const visibleHalfDepth = 0.011;
+    const yAxis = new Vector3(0, 1, 0);
+    const authoredRotations = ([
+      [0, true],
+      [37, true],
+      [-121.5, true],
+      [0, false],
+      [37, false],
+      [-121.5, false],
+    ] as const).map(([yaw, faceUp]) => {
+      const [x, y, z, w] = createCardQuaternion(yaw, faceUp);
+      return { x, y, z, w };
+    });
+    const tiltedRotation = new Quaternion(
+      ...createCardQuaternion(37, true)
+    ).multiply(
+      new Quaternion().setFromAxisAngle(
+        new Vector3(1, 0, 0),
+        Math.PI / 5
+      )
+    );
+    const bodyRotations = [
+      ...authoredRotations,
+      {
+        x: tiltedRotation.x,
+        y: tiltedRotation.y,
+        z: tiltedRotation.z,
+        w: tiltedRotation.w,
+      },
+    ];
+
+    for (const bodyRotation of bodyRotations) {
+      let lowestCornerZ = Infinity;
+
+      for (let step = 0; step <= 120; step += 1) {
+        const { rotationY } = getFlipVisualState(step / 120);
+        const lift = getFlipSurfaceClearanceLift({
+          bodyCenterZ,
+          bodyRotation,
+          cardHeight,
+          cardWidth,
+          localRotationY: rotationY,
+          surfaceClearance,
+          tableSurfaceZ,
+          visibleHalfDepth,
+        });
+        const combinedRotation = new Quaternion(
+          bodyRotation.x,
+          bodyRotation.y,
+          bodyRotation.z,
+          bodyRotation.w
+        ).multiply(new Quaternion().setFromAxisAngle(yAxis, rotationY));
+
+        for (const x of [-cardWidth / 2, cardWidth / 2]) {
+          for (const y of [-cardHeight / 2, cardHeight / 2]) {
+            for (const z of [-visibleHalfDepth, visibleHalfDepth]) {
+              const cornerZ =
+                new Vector3(x, y, z).applyQuaternion(combinedRotation).z +
+                bodyCenterZ +
+                lift;
+              lowestCornerZ = Math.min(lowestCornerZ, cornerZ);
+            }
+          }
+        }
+      }
+
+      expect(lowestCornerZ).toBeGreaterThanOrEqual(
+        tableSurfaceZ + surfaceClearance - 1e-10
+      );
+    }
+
+    expect(
+      getFlipSurfaceClearanceLift({
+        bodyCenterZ,
+        bodyRotation: { x: 0, y: 0, z: 0, w: 1 },
+        cardHeight,
+        cardWidth,
+        localRotationY: Math.PI / 2,
+        surfaceClearance,
+        tableSurfaceZ,
+        visibleHalfDepth,
+      })
+    ).toBeCloseTo(0.9905);
   });
 });
 

@@ -48,6 +48,7 @@ import {
   flipCardQuaternion,
   getCardColliderHalfExtents,
   getCardPose,
+  getFlipSurfaceClearanceLift,
   getFlipVisualState,
   getReleaseKinematics,
   getSmoothedPointerVelocity,
@@ -75,6 +76,7 @@ import {
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
+  getLocalOffsetForWorldUp,
   getTiltedCardQuaternion,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
@@ -103,6 +105,7 @@ const RIGHT_DRAG_TILT_SCALE = 0.52;
 const RIGHT_DRAG_MAX_TILT = MathUtils.degToRad(28);
 const LAYER_TRANSITION_DURATION_SECONDS = 0.54;
 const LAYER_TRANSITION_LIFT = 0.12;
+const FLIP_SURFACE_CLEARANCE = 0.0005;
 const POINTER_CONTROLLED_BODY_HANDLES = new Set<number>();
 
 type PointerCaptureTarget = Mesh & {
@@ -1263,9 +1266,26 @@ export function PhysicsCard({
     });
     const progress = flip.elapsed / FLIP_DURATION_SECONDS;
     const flipVisual = getFlipVisualState(progress);
+    const bodyTranslation = body.translation();
+    const bodyRotation = body.rotation();
+    const flipSurfaceLift = getFlipSurfaceClearanceLift({
+      bodyCenterZ: bodyTranslation.z,
+      bodyRotation,
+      cardHeight,
+      cardWidth,
+      localRotationY: flipVisual.rotationY,
+      surfaceClearance: FLIP_SURFACE_CLEARANCE,
+      tableSurfaceZ,
+      visibleHalfDepth: CARD_VISIBLE_HALF_DEPTH,
+    });
 
     if (visual) {
-      visual.position.set(0, 0, 0);
+      visual.position.set(
+        ...getLocalOffsetForWorldUp({
+          distance: flipSurfaceLift,
+          quaternion: bodyRotation,
+        })
+      );
       visual.rotation.y = flipVisual.rotationY;
       visual.scale.set(flipVisual.scaleX, flipVisual.scaleY, 1);
     }
@@ -1281,8 +1301,8 @@ export function PhysicsCard({
     }
 
     const latestAuthority = latestAuthorityRef.current;
-    const currentRotation = body.rotation();
-    const currentPose = getCardPose(body.translation(), currentRotation);
+    const currentRotation = bodyRotation;
+    const currentPose = getCardPose(bodyTranslation, currentRotation);
     const completedFaceUp = !flip.startFaceUp;
     const completedLatestAuthority =
       completedFaceUp === latestAuthority.faceUp &&
