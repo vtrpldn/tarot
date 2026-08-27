@@ -16,6 +16,7 @@ import {
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldStabilizeRestingLayer,
+  shouldSuppressCardContextMenu,
   shouldTakeDragPhysicsOwnership,
 } from "./physics-card-drag";
 
@@ -89,6 +90,30 @@ describe("PhysicsCard move release", () => {
     expect(shouldTakeDragPhysicsOwnership(false, false)).toBe(false);
     expect(shouldTakeDragPhysicsOwnership(false, true)).toBe(true);
     expect(shouldTakeDragPhysicsOwnership(true, true)).toBe(false);
+  });
+
+  test("suppresses the card context menu before right-drag movement begins", () => {
+    expect(
+      shouldSuppressCardContextMenu({
+        hasActiveRightGesture: true,
+        now: 100,
+        suppressionDeadline: 0,
+      })
+    ).toBe(true);
+    expect(
+      shouldSuppressCardContextMenu({
+        hasActiveRightGesture: false,
+        now: 100,
+        suppressionDeadline: 600,
+      })
+    ).toBe(true);
+    expect(
+      shouldSuppressCardContextMenu({
+        hasActiveRightGesture: false,
+        now: 601,
+        suppressionDeadline: 600,
+      })
+    ).toBe(false);
   });
 
   test("limits a coalesced kinematic pointer sweep to a contact-safe step", () => {

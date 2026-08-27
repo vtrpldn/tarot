@@ -155,6 +155,22 @@ export function shouldTakeDragPhysicsOwnership(
 }
 
 /**
+ * Right-click is a card interaction, so its native menu stays suppressed both
+ * while the gesture is active and briefly after pointer release.
+ */
+export function shouldSuppressCardContextMenu({
+  hasActiveRightGesture,
+  now,
+  suppressionDeadline,
+}: {
+  hasActiveRightGesture: boolean;
+  now: number;
+  suppressionDeadline: number;
+}): boolean {
+  return hasActiveRightGesture || now <= suppressionDeadline;
+}
+
+/**
  * Caps one kinematic sweep so a coalesced pointer event cannot tunnel through
  * a card before Rapier has a chance to generate contact impulses.
  */

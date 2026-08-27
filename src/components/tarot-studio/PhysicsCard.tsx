@@ -78,6 +78,7 @@ import {
   getTiltedCardQuaternion,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
+  shouldSuppressCardContextMenu,
   shouldStabilizeRestingLayer,
   shouldTakeDragPhysicsOwnership,
   type DurableCardPose,
@@ -439,12 +440,13 @@ export function PhysicsCard({
 
     const handler = (event: MouseEvent) => {
       const activeRightDrag =
-        dragRef.current?.mode === "elevate-tilt" && dragRef.current.moved;
+        dragRef.current?.mode === "elevate-tilt";
 
-      if (
-        activeRightDrag ||
-        performance.now() <= suppressContextMenuUntilRef.current
-      ) {
+      if (shouldSuppressCardContextMenu({
+        hasActiveRightGesture: activeRightDrag,
+        now: performance.now(),
+        suppressionDeadline: suppressContextMenuUntilRef.current,
+      })) {
         event.preventDefault();
         event.stopPropagation();
         suppressContextMenuUntilRef.current = 0;
@@ -750,8 +752,7 @@ export function PhysicsCard({
       body.resetForces(true);
 
       const hadRightGesture = drag.mode === "elevate-tilt";
-      const suppressReleasedContextMenu = hadRightGesture && drag.moved;
-      if (suppressReleasedContextMenu) {
+      if (hadRightGesture) {
         suppressContextMenuUntilRef.current = performance.now() + 500;
       }
 
@@ -1609,6 +1610,8 @@ export function PhysicsCard({
       moved: false,
     };
     if (rightMouseButton) {
+      event.nativeEvent.preventDefault();
+      suppressContextMenuUntilRef.current = performance.now() + 500;
       beginContextMenuSuppression();
     }
     onSelect(card.id);
@@ -1741,17 +1744,9 @@ export function PhysicsCard({
   };
 
   const handleContextMenu = (event: ThreeEvent<MouseEvent>) => {
-    const activeRightDrag =
-      dragRef.current?.mode === "elevate-tilt" && dragRef.current.moved;
-
-    if (
-      activeRightDrag ||
-      performance.now() <= suppressContextMenuUntilRef.current
-    ) {
-      event.stopPropagation();
-      event.nativeEvent.preventDefault();
-      suppressContextMenuUntilRef.current = 0;
-    }
+    event.stopPropagation();
+    event.nativeEvent.preventDefault();
+    suppressContextMenuUntilRef.current = 0;
   };
 
   return (
