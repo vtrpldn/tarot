@@ -21,6 +21,17 @@ export type ElevationTiltGesture = {
   tiltRadians: number;
 };
 
+type DynamicDragForceOptions = {
+  controlHeight: boolean;
+  current: Point3;
+  mass: number;
+  maximumAcceleration: number;
+  maximumSpeed: number;
+  response: number;
+  target: Point3;
+  velocity: Point3;
+};
+
 export type FlipHandoffAction = "animate" | "commit" | "reset";
 export type FlipHandoffResolution = "flip" | "reconcile" | "settled";
 
@@ -176,38 +187,87 @@ export function getKinematicDragStep({
 }
 
 /**
- * Drives a held dynamic body toward the pointer without teleporting it through
- * contacts. Rapier remains free to reduce this desired velocity when another
- * collider blocks the card.
+ * Pulls a held dynamic body toward the pointer with a damped,
+ * acceleration-limited force. This preserves Rapier's collision response
+ * instead of replacing it with a fresh velocity every physics step.
  */
-export function getDynamicDragVelocity({
+export function getDynamicDragForce({
+  controlHeight,
   current,
+  mass,
+  maximumAcceleration,
   maximumSpeed,
+  response,
   target,
-  timeStepSeconds,
-}: {
-  current: Point3;
-  maximumSpeed: number;
-  target: Point3;
-  timeStepSeconds: number;
-}): [x: number, y: number, z: number] {
+  velocity,
+}: DynamicDragForceOptions): [x: number, y: number, z: number] {
   const deltaX = target[0] - current[0];
   const deltaY = target[1] - current[1];
-  const deltaZ = target[2] - current[2];
+  const deltaZ = controlHeight ? target[2] - current[2] : 0;
   const distance = Math.hypot(deltaX, deltaY, deltaZ);
 
-  if (!Number.isFinite(distance) || distance === 0) {
+  if (!Number.isFinite(distance)) {
     return [0, 0, 0];
   }
 
-  const safeTimeStep = Math.max(0.000001, timeStepSeconds);
-  const speed = Math.min(
+  const safeResponse = Math.max(0, response);
+  const desiredSpeed = Math.min(
     Math.max(0, maximumSpeed),
-    distance / safeTimeStep
+    distance * safeResponse
   );
-  const scale = speed / distance;
+  const directionScale = distance > 0 ? desiredSpeed / distance : 0;
+  const desiredVelocityX = deltaX * directionScale;
+  const desiredVelocityY = deltaY * directionScale;
+  const desiredVelocityZ = controlHeight
+    ? deltaZ * directionScale
+    : velocity[2];
+  const accelerationX = (desiredVelocityX - velocity[0]) * safeResponse;
+  const accelerationY = (desiredVelocityY - velocity[1]) * safeResponse;
+  const accelerationZ = controlHeight
+    ? (desiredVelocityZ - velocity[2]) * safeResponse
+    : 0;
+  const accelerationMagnitude = Math.hypot(
+    accelerationX,
+    accelerationY,
+    accelerationZ
+  );
+  const accelerationScale =
+    accelerationMagnitude > 0
+      ? Math.min(
+          1,
+          Math.max(0, maximumAcceleration) / accelerationMagnitude
+        )
+      : 0;
+  const safeMass = Number.isFinite(mass) ? Math.max(0, mass) : 0;
 
-  return [deltaX * scale, deltaY * scale, deltaZ * scale];
+  return [
+    accelerationX * accelerationScale * safeMass,
+    accelerationY * accelerationScale * safeMass,
+    accelerationZ * accelerationScale * safeMass,
+  ];
+}
+
+/** Gives vertical elevation a small readable lean in a top-down camera. */
+export function getElevationCueLean({
+  elevation,
+  maximumElevationDelta,
+  maximumLeanRadians,
+  startElevation,
+}: {
+  elevation: number;
+  maximumElevationDelta: number;
+  maximumLeanRadians: number;
+  startElevation: number;
+}): number {
+  const safeDelta = Math.max(0.000001, Math.abs(maximumElevationDelta));
+  const normalizedDelta = Number.isFinite(elevation - startElevation)
+    ? (elevation - startElevation) / safeDelta
+    : 0;
+
+  return (
+    Math.min(1, Math.max(-1, normalizedDelta)) *
+    Math.abs(maximumLeanRadians)
+  );
 }
 
 /** Maps a right-drag on the table plane to bounded world height and tilt. */
@@ -254,18 +314,54 @@ export function getElevationTiltGesture({
   };
 }
 
-/** Applies a local-Y tilt to the exact physical orientation captured at pickup. */
+/** Applies elevation lean and local-Y tilt to the captured physical orientation. */
 export function getTiltedCardQuaternion(
   quaternion: QuaternionLike,
-  tiltRadians: number
+  tiltRadians: number,
+  elevationLeanRadians = 0
 ): [x: number, y: number, z: number, w: number] {
+  const multiply = (
+    first: QuaternionLike,
+    second: QuaternionLike
+  ): QuaternionLike => ({
+    w:
+      first.w * second.w -
+      first.x * second.x -
+      first.y * second.y -
+      first.z * second.z,
+    x:
+      first.w * second.x +
+      first.x * second.w +
+      first.y * second.z -
+      first.z * second.y,
+    y:
+      first.w * second.y -
+      first.x * second.z +
+      first.y * second.w +
+      first.z * second.x,
+    z:
+      first.w * second.z +
+      first.x * second.y -
+      first.y * second.x +
+      first.z * second.w,
+  });
+  const halfElevationLean = Number.isFinite(elevationLeanRadians)
+    ? elevationLeanRadians / 2
+    : 0;
   const halfTilt = Number.isFinite(tiltRadians) ? tiltRadians / 2 : 0;
-  const sine = Math.sin(halfTilt);
-  const cosine = Math.cos(halfTilt);
-  const x = quaternion.x * cosine - quaternion.z * sine;
-  const y = quaternion.w * sine + quaternion.y * cosine;
-  const z = quaternion.x * sine + quaternion.z * cosine;
-  const w = quaternion.w * cosine - quaternion.y * sine;
+  const elevated = multiply(quaternion, {
+    w: Math.cos(halfElevationLean),
+    x: Math.sin(halfElevationLean),
+    y: 0,
+    z: 0,
+  });
+  const tilted = multiply(elevated, {
+    w: Math.cos(halfTilt),
+    x: 0,
+    y: Math.sin(halfTilt),
+    z: 0,
+  });
+  const { w, x, y, z } = tilted;
   const magnitude = Math.hypot(x, y, z, w);
 
   if (!Number.isFinite(magnitude) || magnitude === 0) {

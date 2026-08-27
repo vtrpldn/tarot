@@ -10,10 +10,13 @@ import {
   getSmoothedPointerVelocity,
 } from "./card-physics";
 import {
-  getDynamicDragVelocity,
+  getDynamicDragForce,
+  getElevationCueLean,
+  getElevationTiltGesture,
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
+  getTiltedCardQuaternion,
 } from "../components/tarot-studio/physics-card-drag";
 
 const CARD_WIDTH = 2;
@@ -244,7 +247,7 @@ describe("configured Tarot card colliders in Rapier", () => {
     }
   });
 
-  test("keeps a dynamically held card behind the card blocking its pointer target", () => {
+  test("lets a gravity-backed held card push without overruling contact response", () => {
     const world = createWorld();
 
     try {
@@ -256,20 +259,24 @@ describe("configured Tarot card colliders in Rapier", () => {
       const driver = createCard(world, {
         position: [-2.1, 0, tableHeight + 0.006],
       });
-      driver.body.setGravityScale(0, true);
       target.body.sleep();
       let driverPassedTarget = false;
 
       for (let frame = 0; frame < 90; frame += 1) {
         const current = driver.body.translation();
-        const [x, y, z] = getDynamicDragVelocity({
+        const velocity = driver.body.linvel();
+        const [x, y, z] = getDynamicDragForce({
+          controlHeight: false,
           current: [current.x, current.y, current.z],
-          maximumSpeed: 5.4,
+          mass: driver.body.mass(),
+          maximumAcceleration: 28,
+          maximumSpeed: 4.8,
+          response: 12,
           target: [2.2, 0, tableHeight + 0.006],
-          timeStepSeconds: CARD_PHYSICS.timeStep,
+          velocity: [velocity.x, velocity.y, velocity.z],
         });
-        driver.body.setLinvel({ x, y, z }, true);
-        driver.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        driver.body.resetForces(true);
+        driver.body.addForce({ x, y, z }, true);
         world.step();
         driverPassedTarget ||=
           driver.body.translation().x > target.body.translation().x;
@@ -281,6 +288,140 @@ describe("configured Tarot card colliders in Rapier", () => {
       expect(driver.body.translation().x).toBeLessThan(
         target.body.translation().x
       );
+    } finally {
+      world.free();
+    }
+  });
+
+  test("raises the physical card during a right-drag and drops it on release", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const card = createCard(world, {
+        position: [0, 0, tableHeight],
+      });
+      const gesture = getElevationTiltGesture({
+        current: [0, 0.8],
+        elevationScale: 0.82,
+        maximumElevation: tableHeight + 1.1,
+        maximumTiltRadians: Math.PI / 6,
+        minimumElevation: tableHeight,
+        origin: [0, 0],
+        startElevation: tableHeight,
+        tiltScale: 0.52,
+      });
+      const elevationLean = getElevationCueLean({
+        elevation: gesture.elevation,
+        maximumElevationDelta: 1.1,
+        maximumLeanRadians: Math.PI / 18,
+        startElevation: tableHeight,
+      });
+      const [rotationX, rotationY, rotationZ, rotationW] =
+        getTiltedCardQuaternion(
+          { w: 1, x: 0, y: 0, z: 0 },
+          gesture.tiltRadians,
+          elevationLean
+        );
+
+      card.body.setGravityScale(0, true);
+      for (let frame = 0; frame < 75; frame += 1) {
+        const current = card.body.translation();
+        const velocity = card.body.linvel();
+        const [x, y, z] = getDynamicDragForce({
+          controlHeight: true,
+          current: [current.x, current.y, current.z],
+          mass: card.body.mass(),
+          maximumAcceleration: 28,
+          maximumSpeed: 4.8,
+          response: 12,
+          target: [0, 0, gesture.elevation],
+          velocity: [velocity.x, velocity.y, velocity.z],
+        });
+        card.body.resetForces(true);
+        card.body.addForce({ x, y, z }, true);
+        card.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        card.body.setRotation(
+          { x: rotationX, y: rotationY, z: rotationZ, w: rotationW },
+          true
+        );
+        world.step();
+      }
+
+      const heldHeight = card.body.translation().z;
+      expect(heldHeight).toBeGreaterThan(tableHeight + 0.45);
+      expect(Math.abs(card.body.rotation().x)).toBeGreaterThan(0.03);
+
+      card.body.resetForces(true);
+      card.body.setGravityScale(1, true);
+      card.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      world.step();
+      expect(card.body.translation().z).toBeLessThan(heldHeight);
+
+      step(world, 240);
+      expect(card.body.translation().z).toBeGreaterThanOrEqual(
+        CARD_HALF_DEPTH - 0.0006
+      );
+      expect(card.body.translation().z).toBeLessThan(CARD_HALF_DEPTH + 0.03);
+      const settledRotation = card.body.rotation();
+      const settledNormalZ =
+        1 -
+        2 *
+          (settledRotation.x * settledRotation.x +
+            settledRotation.y * settledRotation.y);
+      expect(Math.abs(settledNormalZ)).toBeGreaterThan(0.98);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("consumes a quick right-drag target even before a held physics step", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const card = createCard(world, {
+        position: [0, 0, tableHeight],
+      });
+      const targetHeight = tableHeight + 0.55;
+      const elevationLean = getElevationCueLean({
+        elevation: targetHeight,
+        maximumElevationDelta: 1.1,
+        maximumLeanRadians: Math.PI / 18,
+        startElevation: tableHeight,
+      });
+      const [rotationX, rotationY, rotationZ, rotationW] =
+        getTiltedCardQuaternion(
+          { w: 1, x: 0, y: 0, z: 0 },
+          0,
+          elevationLean
+        );
+      const [, , forceZ] = getDynamicDragForce({
+        controlHeight: true,
+        current: [0, 0, tableHeight],
+        mass: card.body.mass(),
+        maximumAcceleration: 28,
+        maximumSpeed: 4.8,
+        response: 12,
+        target: [0, 0, targetHeight],
+        velocity: [0, 0, 0],
+      });
+
+      card.body.setRotation(
+        { x: rotationX, y: rotationY, z: rotationZ, w: rotationW },
+        true
+      );
+      card.body.applyImpulse(
+        { x: 0, y: 0, z: forceZ * CARD_PHYSICS.timeStep * 2 },
+        true
+      );
+      world.step();
+
+      expect(card.body.translation().z).toBeGreaterThan(tableHeight);
+      expect(Math.abs(card.body.rotation().x)).toBeGreaterThan(0.03);
+
+      step(world, 240);
+      expect(card.body.translation().z).toBeLessThan(CARD_HALF_DEPTH + 0.03);
     } finally {
       world.free();
     }
@@ -466,7 +607,7 @@ describe("configured Tarot card colliders in Rapier", () => {
     }
   });
 
-  test("activates an authored layer when a contact-height kinematic drag reaches it", () => {
+  test("promotes an authored layer without injecting a held-card velocity burst", () => {
     const world = createWorld();
     const events = new RAPIER.EventQueue(true);
 
@@ -475,23 +616,31 @@ describe("configured Tarot card colliders in Rapier", () => {
       const target = createCard(world, {
         bodyType: "kinematic",
         collisionEvents: true,
-        kinematicCollisions: true,
         position: [0, 0, tableHeight],
       });
       const driver = createCard(world, {
-        bodyType: "kinematic",
         collisionEvents: true,
-        kinematicCollisions: true,
-        position: [-2.1, 0, tableHeight + 0.006],
+        position: [-2.1, 0, tableHeight],
       });
       let promoted = false;
+      let speedAtPromotion = Infinity;
+      let driverPassedTarget = false;
 
-      for (let frame = 1; frame <= 90; frame += 1) {
-        driver.body.setNextKinematicTranslation({
-          x: -2.1 + Math.min(frame, 32) * 0.01,
-          y: 0,
-          z: tableHeight + 0.006,
+      for (let frame = 0; frame < 120; frame += 1) {
+        const current = driver.body.translation();
+        const velocity = driver.body.linvel();
+        const [x, y, z] = getDynamicDragForce({
+          controlHeight: false,
+          current: [current.x, current.y, current.z],
+          mass: driver.body.mass(),
+          maximumAcceleration: 28,
+          maximumSpeed: 4.8,
+          response: 12,
+          target: [2.2, 0, tableHeight],
+          velocity: [velocity.x, velocity.y, velocity.z],
         });
+        driver.body.resetForces(true);
+        driver.body.addForce({ x, y, z }, true);
         world.step(events);
         events.drainCollisionEvents((first, second, started) => {
           if (
@@ -502,28 +651,25 @@ describe("configured Tarot card colliders in Rapier", () => {
             return;
           }
 
-          const incoming = driver.body.linvel();
-          const planarSpeed = Math.hypot(incoming.x, incoming.y);
-          const transferScale = Math.min(
-            0.55,
-            CARD_PHYSICS.maxPlanarSpeed / planarSpeed
-          );
           target.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
-          target.body.setLinvel(
-            {
-              x: incoming.x * transferScale,
-              y: incoming.y * transferScale,
-              z: 0,
-            },
-            true
+          target.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          target.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          speedAtPromotion = Math.hypot(
+            target.body.linvel().x,
+            target.body.linvel().y,
+            target.body.linvel().z
           );
           promoted = true;
         });
+        driverPassedTarget ||=
+          driver.body.translation().x > target.body.translation().x;
       }
 
       expect(promoted).toBe(true);
+      expect(speedAtPromotion).toBe(0);
       expect(target.body.bodyType()).toBe(RAPIER.RigidBodyType.Dynamic);
       expect(target.body.translation().x).toBeGreaterThan(0.1);
+      expect(driverPassedTarget).toBe(false);
     } finally {
       events.free();
       world.free();

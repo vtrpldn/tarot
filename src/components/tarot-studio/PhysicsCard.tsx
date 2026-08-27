@@ -67,14 +67,14 @@ import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import {
   canPersistSettledPhysicsPose,
   createPhysicsSceneAuthorityKey,
-  getDynamicDragVelocity,
+  getDynamicDragForce,
+  getElevationCueLean,
   getElevationTiltGesture,
   getFlipHandoffAction,
   getFlipHandoffResolution,
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
-  getLocalOffsetForWorldUp,
   getTiltedCardQuaternion,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
@@ -89,19 +89,20 @@ const CARD_VISIBLE_HALF_DEPTH = CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET;
 const DRAG_THRESHOLD = 0.035;
 const ROTATION_EDGE_THRESHOLD = 0.14;
 const MAX_POINTER_SPEED = 8;
-// Keep the actual collider within the vertical contact band of resting cards.
-// The visible pickup lift is applied only to the nested presentation group.
-const PHYSICAL_DRAG_LIFT = 0.006;
-const VISUAL_DRAG_LIFT = CARD_PHYSICS.dragLift - PHYSICAL_DRAG_LIFT;
 const COLLISION_ACTIVATION_TRANSFER = 0.55;
 const COLLISION_ACTIVATION_MIN_SPEED = 0.08;
-const DYNAMIC_DRAG_MAX_SPEED = 5.4;
+const DYNAMIC_DRAG_MAX_ACCELERATION = 28;
+const DYNAMIC_DRAG_MAX_SPEED = 4.8;
+const DYNAMIC_DRAG_RESPONSE = 12;
 const RIGHT_DRAG_ELEVATION_SCALE = 0.82;
 const RIGHT_DRAG_MAX_ELEVATION = 1.1;
+const RIGHT_DRAG_MAX_ELEVATION_LEAN = MathUtils.degToRad(10);
+const RIGHT_DRAG_RELEASE_FORCE_STEPS = 2;
 const RIGHT_DRAG_TILT_SCALE = 0.52;
 const RIGHT_DRAG_MAX_TILT = MathUtils.degToRad(28);
 const LAYER_TRANSITION_DURATION_SECONDS = 0.54;
 const LAYER_TRANSITION_LIFT = 0.12;
+const POINTER_CONTROLLED_BODY_HANDLES = new Set<number>();
 
 type PointerCaptureTarget = Mesh & {
   releasePointerCapture?: (pointerId: number) => void;
@@ -124,6 +125,7 @@ type DragState = {
   startAngle: number;
   startRotation: number;
   previewRotation: number;
+  previewElevationLeanRadians: number;
   previewTiltRadians: number;
   startQuaternion: { w: number; x: number; y: number; z: number };
   startBodyType: number;
@@ -467,29 +469,6 @@ export function PhysicsCard({
     binding.timeoutId = window.setTimeout(clearContextMenuSuppression, 500);
   }, [clearContextMenuSuppression]);
 
-  const setVisualDragLift = useCallback((active: boolean) => {
-    const visual = visualRef.current;
-
-    if (!visual || flipRef.current) {
-      return;
-    }
-
-    if (!active) {
-      visual.position.set(0, 0, 0);
-      return;
-    }
-
-    const rotation = bodyRef.current?.rotation();
-    const localOffset: [number, number, number] = rotation
-      ? getLocalOffsetForWorldUp({
-          distance: VISUAL_DRAG_LIFT,
-          quaternion: rotation,
-        })
-      : [0, 0, VISUAL_DRAG_LIFT];
-
-    visual.position.set(...localOffset);
-  }, []);
-
   const keepFlipFramesRunning = useCallback(() => {
     if (flipAnimationFrameRef.current !== null) {
       return;
@@ -539,6 +518,9 @@ export function PhysicsCard({
         return;
       }
 
+      const pointerControlledImpact = POINTER_CONTROLLED_BODY_HANDLES.has(
+        otherBody.handle
+      );
       const transferScale = Math.min(
         COLLISION_ACTIVATION_TRANSFER,
         CARD_PHYSICS.maxPlanarSpeed / planarSpeed
@@ -547,12 +529,18 @@ export function PhysicsCard({
       body.setBodyType(rapier.RigidBodyType.Dynamic, true);
       body.setLinvel(
         {
-          x: incoming.x * transferScale,
-          y: incoming.y * transferScale,
-          z: Math.max(0, Math.min(0.45, incoming.z * transferScale)),
+          // A held card keeps applying a physical force on following steps.
+          // Start the promoted layer at rest so one touch cannot inject the
+          // same velocity through an authored pile before Rapier resolves it.
+          x: pointerControlledImpact ? 0 : incoming.x * transferScale,
+          y: pointerControlledImpact ? 0 : incoming.y * transferScale,
+          z: pointerControlledImpact
+            ? 0
+            : Math.max(0, Math.min(0.45, incoming.z * transferScale)),
         },
         true
       );
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
       invalidate();
     },
     [
@@ -647,9 +635,11 @@ export function PhysicsCard({
         const gesture = getElevationTiltGesture({
           current: [point.x, point.y],
           elevationScale: RIGHT_DRAG_ELEVATION_SCALE,
-          maximumElevation: restingZ + RIGHT_DRAG_MAX_ELEVATION,
+          maximumElevation:
+            Math.max(minimumRestingZ, drag.startTranslation.z) +
+            RIGHT_DRAG_MAX_ELEVATION,
           maximumTiltRadians: RIGHT_DRAG_MAX_TILT,
-          minimumElevation: restingZ + PHYSICAL_DRAG_LIFT,
+          minimumElevation: minimumRestingZ,
           origin: [drag.origin.x, drag.origin.y],
           startElevation: drag.startTranslation.z,
           tiltScale: RIGHT_DRAG_TILT_SCALE,
@@ -659,6 +649,12 @@ export function PhysicsCard({
           drag.startTranslation.y,
           gesture.elevation
         );
+        drag.previewElevationLeanRadians = getElevationCueLean({
+          elevation: gesture.elevation,
+          maximumElevationDelta: RIGHT_DRAG_MAX_ELEVATION,
+          maximumLeanRadians: RIGHT_DRAG_MAX_ELEVATION_LEAN,
+          startElevation: drag.startTranslation.z,
+        });
         drag.previewTiltRadians = gesture.tiltRadians;
         drag.moved ||=
           point.distanceToSquared(drag.origin) >
@@ -671,7 +667,7 @@ export function PhysicsCard({
         drag.target.set(
           targetX,
           targetY,
-          restingZ + PHYSICAL_DRAG_LIFT
+          drag.target.z
         );
         drag.moved ||= point.distanceToSquared(drag.origin) > DRAG_THRESHOLD * DRAG_THRESHOLD;
       }
@@ -686,13 +682,13 @@ export function PhysicsCard({
             : rapier.RigidBodyType.KinematicPositionBased,
           true
         );
-        body.setGravityScale(usesDynamicContact ? 0 : 1, true);
+        body.setGravityScale(drag.mode === "elevate-tilt" ? 0 : 1, true);
         body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         body.setAngvel({ x: 0, y: 0, z: 0 }, true);
         if (usesDynamicContact) {
           collisionActivatedRef.current = true;
+          POINTER_CONTROLLED_BODY_HANDLES.add(body.handle);
         }
-        setVisualDragLift(drag.mode === "move");
       }
 
       invalidate();
@@ -704,8 +700,7 @@ export function PhysicsCard({
       invalidate,
       rapier.RigidBodyType.Dynamic,
       rapier.RigidBodyType.KinematicPositionBased,
-      restingZ,
-      setVisualDragLift,
+      minimumRestingZ,
     ]
   );
 
@@ -750,6 +745,9 @@ export function PhysicsCard({
       if (!cancelled) {
         updateDrag(pointerId, point, timestamp);
       }
+
+      POINTER_CONTROLLED_BODY_HANDLES.delete(body.handle);
+      body.resetForces(true);
 
       const hadRightGesture = drag.mode === "elevate-tilt";
       const suppressReleasedContextMenu = hadRightGesture && drag.moved;
@@ -897,8 +895,53 @@ export function PhysicsCard({
         } else {
           // Height and tilt are a physical hold, not a floating durable pose.
           // Releasing gives gravity ownership so the card falls and settles.
+          // Apply the final target once so a quick down-move-up gesture cannot
+          // end before a fixed physics step ever consumes its elevation.
+          const [rotationX, rotationY, rotationZ, rotationW] =
+            getTiltedCardQuaternion(
+              drag.startQuaternion,
+              drag.previewTiltRadians,
+              drag.previewElevationLeanRadians
+            );
+          body.setRotation(
+            {
+              x: rotationX,
+              y: rotationY,
+              z: rotationZ,
+              w: rotationW,
+            },
+            true
+          );
           body.setLinvel({ x: 0, y: 0, z: 0 }, true);
           body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          const releasePosition = body.translation();
+          if (drag.target.z > releasePosition.z) {
+            const [, , forceZ] = getDynamicDragForce({
+              controlHeight: true,
+              current: [
+                releasePosition.x,
+                releasePosition.y,
+                releasePosition.z,
+              ],
+              mass: body.mass(),
+              maximumAcceleration: DYNAMIC_DRAG_MAX_ACCELERATION,
+              maximumSpeed: DYNAMIC_DRAG_MAX_SPEED,
+              response: DYNAMIC_DRAG_RESPONSE,
+              target: [releasePosition.x, releasePosition.y, drag.target.z],
+              velocity: [0, 0, 0],
+            });
+            body.applyImpulse(
+              {
+                x: 0,
+                y: 0,
+                z:
+                  Math.max(0, forceZ) *
+                  CARD_PHYSICS.timeStep *
+                  RIGHT_DRAG_RELEASE_FORCE_STEPS,
+              },
+              true
+            );
+          }
         }
       } else {
         body.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -909,7 +952,7 @@ export function PhysicsCard({
       if (hadRightGesture) {
         scheduleContextMenuSuppressionCleanup();
       }
-      setVisualDragLift(false);
+      visualRef.current?.position.set(0, 0, 0);
       canvas.style.cursor = "grab";
       if (cancelled && faceUp !== latestAuthority.faceUp) {
         beginVisualFlip();
@@ -931,7 +974,6 @@ export function PhysicsCard({
       reducedMotion,
       restingZ,
       scheduleContextMenuSuppressionCleanup,
-      setVisualDragLift,
       updateDrag,
     ]
   );
@@ -1150,6 +1192,11 @@ export function PhysicsCard({
       clearLostPointerCapture();
       clearFallback();
       clearContextMenuSuppression();
+      const body = bodyRef.current;
+      if (body) {
+        POINTER_CONTROLLED_BODY_HANDLES.delete(body.handle);
+        body.resetForces(false);
+      }
       canvas.style.cursor = "default";
     },
     [
@@ -1432,25 +1479,33 @@ export function PhysicsCard({
       body.setNextKinematicRotation({ x, y, z, w });
     } else {
       const currentTranslation = body.translation();
-      const [x, y, z] = getDynamicDragVelocity({
+      const currentVelocity = body.linvel();
+      const controlHeight = drag.mode === "elevate-tilt";
+      const [forceX, forceY, forceZ] = getDynamicDragForce({
+        controlHeight,
         current: [
           currentTranslation.x,
           currentTranslation.y,
           currentTranslation.z,
         ],
+        mass: body.mass(),
+        maximumAcceleration: DYNAMIC_DRAG_MAX_ACCELERATION,
         maximumSpeed: DYNAMIC_DRAG_MAX_SPEED,
+        response: DYNAMIC_DRAG_RESPONSE,
         target: [drag.target.x, drag.target.y, drag.target.z],
-        timeStepSeconds: CARD_PHYSICS.timeStep,
+        velocity: [currentVelocity.x, currentVelocity.y, currentVelocity.z],
       });
-      body.setLinvel({ x, y, z }, true);
-      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      body.resetForces(true);
+      body.addForce({ x: forceX, y: forceY, z: forceZ }, true);
 
-      if (drag.mode === "elevate-tilt") {
+      if (controlHeight) {
         const [rotationX, rotationY, rotationZ, rotationW] =
           getTiltedCardQuaternion(
             drag.startQuaternion,
-            drag.previewTiltRadians
+            drag.previewTiltRadians,
+            drag.previewElevationLeanRadians
           );
+        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
         body.setRotation(
           {
             x: rotationX,
@@ -1511,6 +1566,7 @@ export function PhysicsCard({
     const target = event.target as unknown as PointerCaptureTarget;
 
     clearLostPointerCapture();
+    visualRef.current?.position.set(0, 0, 0);
     target.setPointerCapture?.(event.pointerId);
     canvas.setPointerCapture?.(event.pointerId);
     clearFallback();
@@ -1531,9 +1587,7 @@ export function PhysicsCard({
       target: new Vector3(
         translation.x,
         translation.y,
-        mode === "elevate-tilt"
-          ? translation.z
-          : restingZ + PHYSICAL_DRAG_LIFT
+        translation.z
       ),
       startAngle: Math.atan2(point.y - translation.y, point.x - translation.x),
       startQuaternion: {
@@ -1550,6 +1604,7 @@ export function PhysicsCard({
         translation.z
       ),
       previewRotation: currentPose.rotation,
+      previewElevationLeanRadians: 0,
       previewTiltRadians: 0,
       moved: false,
     };

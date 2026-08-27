@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   canPersistSettledPhysicsPose,
   createPhysicsSceneAuthorityKey,
-  getDynamicDragVelocity,
+  getDynamicDragForce,
+  getElevationCueLean,
   getElevationTiltGesture,
   getFlipHandoffAction,
   getFlipHandoffResolution,
@@ -100,27 +101,31 @@ describe("PhysicsCard move release", () => {
     ).toEqual([expect.closeTo(-2 + 8 / 60), 0, expect.closeTo(0.0102)]);
   });
 
-  test("drives a held dynamic card toward the pointer at a bounded speed", () => {
+  test("pulls a held card with bounded force without cancelling vertical motion", () => {
     expect(
-      getDynamicDragVelocity({
+      getDynamicDragForce({
+        controlHeight: false,
         current: [0, 0, 0.01],
-        maximumSpeed: 5.4,
+        mass: 0.0018,
+        maximumAcceleration: 28,
+        maximumSpeed: 4.8,
+        response: 12,
         target: [2, 0, 0.016],
-        timeStepSeconds: 1 / 60,
+        velocity: [0, 0, -1.5],
       })
-    ).toEqual([
-      expect.closeTo(5.3999757),
-      0,
-      expect.closeTo(0.0161999),
-    ]);
+    ).toEqual([expect.closeTo(0.0504), 0, 0]);
     expect(
-      getDynamicDragVelocity({
+      getDynamicDragForce({
+        controlHeight: true,
         current: [0, 0, 0],
-        maximumSpeed: 5.4,
-        target: [0.03, 0, 0],
-        timeStepSeconds: 1 / 60,
+        mass: 0.0018,
+        maximumAcceleration: 28,
+        maximumSpeed: 4.8,
+        response: 12,
+        target: [0, 0, 0.25],
+        velocity: [0, 0, 0],
       })
-    ).toEqual([1.8, 0, 0]);
+    ).toEqual([0, 0, expect.closeTo(0.0504)]);
   });
 
   test("maps right-drag axes independently to height and physical tilt", () => {
@@ -148,6 +153,25 @@ describe("PhysicsCard move release", () => {
         tiltScale: 0.5,
       })
     ).toEqual({ elevation: 0.01, tiltRadians: 0.5 });
+  });
+
+  test("turns vertical elevation into a readable physical lean", () => {
+    const lean = getElevationCueLean({
+      elevation: 0.56,
+      maximumElevationDelta: 1.1,
+      maximumLeanRadians: Math.PI / 18,
+      startElevation: 0.01,
+    });
+    const tilted = getTiltedCardQuaternion(
+      { w: 1, x: 0, y: 0, z: 0 },
+      0,
+      lean
+    );
+
+    expect(lean).toBeCloseTo(Math.PI / 36);
+    expect(Math.abs(tilted[0])).toBeGreaterThan(0.04);
+    expect(tilted[1]).toBeCloseTo(0);
+    expect(Math.hypot(...tilted)).toBeCloseTo(1);
   });
 
   test("tilts from the captured physical orientation without changing its norm", () => {
