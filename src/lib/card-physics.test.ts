@@ -339,7 +339,7 @@ describe("controlled flip presentation", () => {
     });
     expect(getFlipVisualState(0.5)).toEqual({
       rotationY: Math.PI,
-      scaleX: 0.02,
+      scaleX: 0,
       scaleY: 1,
     });
     expect(getFlipVisualState(1)).toEqual({
@@ -354,9 +354,15 @@ describe("controlled flip presentation", () => {
       const state = getFlipVisualState(step / 120);
 
       expect([0, Math.PI]).toContain(state.rotationY);
-      expect(state.scaleX).toBeGreaterThanOrEqual(0.02);
+      expect(state.scaleX).toBeGreaterThanOrEqual(0);
       expect(state.scaleX).toBeLessThanOrEqual(1);
       expect(state.scaleY).toBe(1);
+    }
+  });
+
+  test("keeps the face swap hidden across more than one maximum demand frame", () => {
+    for (const progress of [0.46, 0.5, 0.54]) {
+      expect(getFlipVisualState(progress).scaleX).toBe(0);
     }
   });
 });

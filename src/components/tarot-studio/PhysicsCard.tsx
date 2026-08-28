@@ -72,12 +72,11 @@ import {
   getDynamicDragForce,
   getElevationCueLean,
   getElevationTiltGesture,
-  getFlipHandoffAction,
-  getFlipHandoffResolution,
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
   getTiltedCardQuaternion,
+  isFlipTargetCurrent,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldSuppressCardContextMenu,
@@ -94,9 +93,9 @@ const ROTATION_EDGE_THRESHOLD = 0.14;
 const MAX_POINTER_SPEED = 8;
 const COLLISION_ACTIVATION_TRANSFER = 0.55;
 const COLLISION_ACTIVATION_MIN_SPEED = 0.08;
-const DYNAMIC_DRAG_MAX_ACCELERATION = 28;
-const DYNAMIC_DRAG_MAX_SPEED = 4.8;
-const DYNAMIC_DRAG_RESPONSE = 12;
+const DYNAMIC_DRAG_MAX_ACCELERATION = 46;
+const DYNAMIC_DRAG_MAX_SPEED = 5.8;
+const DYNAMIC_DRAG_RESPONSE = 16;
 const RIGHT_DRAG_ELEVATION_SCALE = 0.82;
 const RIGHT_DRAG_MAX_ELEVATION = 1.1;
 const RIGHT_DRAG_MAX_ELEVATION_LEAN = MathUtils.degToRad(10);
@@ -168,7 +167,9 @@ type ContextMenuSuppressionBinding = {
 
 type FlipState = {
   elapsed: number;
-  startFaceUp: boolean;
+  physicalFaceApplied: boolean;
+  targetFaceUp: boolean;
+  targetSceneAuthorityKey: string;
 };
 
 const FLIP_DURATION_SECONDS = 0.42;
@@ -303,7 +304,6 @@ export function PhysicsCard({
   const bodyRef = useRef<RapierRigidBody>(null);
   const dragRef = useRef<DragState | null>(null);
   const flipRef = useRef<FlipState | null>(null);
-  const flipHandoffPendingRef = useRef(false);
   const layerTransitionRef = useRef<LayerTransitionState | null>(null);
   const flipAnimationFrameRef = useRef<number | null>(null);
   const suppressContextMenuUntilRef = useRef(0);
@@ -648,7 +648,6 @@ export function PhysicsCard({
 
         if (
           flipRef.current ||
-          flipHandoffPendingRef.current ||
           layerTransitionRef.current
         ) {
           requestNextFrame();
@@ -878,7 +877,6 @@ export function PhysicsCard({
     if (
       !body ||
       flipRef.current ||
-      flipHandoffPendingRef.current ||
       layerTransitionRef.current
     ) {
       return;
@@ -889,7 +887,9 @@ export function PhysicsCard({
     visual?.scale.set(1, 1, 1);
     flipRef.current = {
       elapsed: 0,
-      startFaceUp: getCardPose(body.translation(), body.rotation()).faceUp,
+      physicalFaceApplied: false,
+      targetFaceUp: latestAuthorityRef.current.faceUp,
+      targetSceneAuthorityKey: latestAuthorityRef.current.sceneAuthorityKey,
     };
     keepFlipFramesRunning();
     invalidate();
@@ -1170,7 +1170,6 @@ export function PhysicsCard({
       !body ||
       dragRef.current ||
       flipRef.current ||
-      flipHandoffPendingRef.current ||
       layerTransitionRef.current ||
       externalDragActiveRef.current
     ) {
@@ -1403,47 +1402,11 @@ export function PhysicsCard({
     const body = bodyRef.current;
     const flip = flipRef.current;
 
-    if (!body) {
+    if (!body || !flip) {
       return;
     }
 
     const visual = visualRef.current;
-    if (
-      getFlipHandoffAction({
-        handoffPending: flipHandoffPendingRef.current,
-        visualComplete: false,
-      }) === "reset"
-    ) {
-      // This frame runs after @react-three/rapier has copied the physical
-      // half-turn into Three.js. It is now safe to remove the visual turn.
-      visual?.position.set(0, 0, 0);
-      visual?.rotation.set(0, 0, 0);
-      visual?.scale.set(1, 1, 1);
-      flipHandoffPendingRef.current = false;
-      const latestAuthority = latestAuthorityRef.current;
-      const currentPose = getCardPose(body.translation(), body.rotation());
-      const handoffResolution = getFlipHandoffResolution({
-        currentFaceUp: currentPose.faceUp,
-        currentSceneAuthorityKey: reconciledSceneAuthorityKeyRef.current,
-        targetFaceUp: latestAuthority.faceUp,
-        targetSceneAuthorityKey: latestAuthority.sceneAuthorityKey,
-      });
-
-      // Keyboard and inspector commands live outside this mesh, so another
-      // face, rotation, layer, or move command can land during the one-frame
-      // physical handoff. Replay the complete authority after synchronization.
-      if (handoffResolution === "flip") {
-        beginVisualFlip();
-      } else if (handoffResolution === "reconcile") {
-        requestAuthorityReconciliation();
-      }
-      return;
-    }
-
-    if (!flip) {
-      return;
-    }
-
     // A demand-rendered scene can sit idle for seconds before this frame.
     // Clamp that stale delta so a flip still paints its intermediate poses.
     flip.elapsed = advanceFlipElapsed({
@@ -1457,44 +1420,45 @@ export function PhysicsCard({
 
     if (visual) {
       visual.position.set(0, 0, 0);
-      visual.rotation.y = flipVisual.rotationY;
+      // The physical body receives the half-turn while the card is hidden.
+      // Keeping the nested visual unrotated avoids two transform owners and
+      // the one-frame old-face flash their end-of-animation handoff caused.
+      visual.rotation.set(0, 0, 0);
       visual.scale.set(flipVisual.scaleX, flipVisual.scaleY, 1);
     }
 
-    if (
-      getFlipHandoffAction({
-        handoffPending: false,
-        visualComplete: progress >= 1,
-      }) === "animate"
-    ) {
+    if (!flip.physicalFaceApplied && progress >= 0.5) {
+      const currentRotation = body.rotation();
+      const currentPose = getCardPose(body.translation(), currentRotation);
+
+      if (currentPose.faceUp !== flip.targetFaceUp) {
+        const [x, y, z, w] = flipCardQuaternion(currentRotation);
+        body.setRotation({ x, y, z, w }, true);
+      }
+      flip.physicalFaceApplied = true;
+      // Even if this demand frame jumped across the midpoint, never render the
+      // face change until Rapier has had a complete synchronization frame.
+      visual?.scale.set(0, flipVisual.scaleY, 1);
+      invalidate();
+      return;
+    }
+
+    if (progress < 1) {
       invalidate();
       return;
     }
 
     const latestAuthority = latestAuthorityRef.current;
-    const bodyTranslation = body.translation();
-    const bodyRotation = body.rotation();
-    const currentRotation = bodyRotation;
-    const currentPose = getCardPose(bodyTranslation, currentRotation);
-    const completedFaceUp = !flip.startFaceUp;
-    const completedLatestAuthority =
-      completedFaceUp === latestAuthority.faceUp &&
-      !hasMeaningfulPoseChange(
-        {
-          faceUp: completedFaceUp,
-          position: currentPose.position,
-          rotation: currentPose.rotation,
-        },
-        {
-          faceUp: latestAuthority.faceUp,
-          position: latestAuthority.position,
-          rotation: latestAuthority.rotation,
-        }
-      ) &&
-      lastLayerKeyRef.current === layerKey &&
-      lastRestingZRef.current === restingZ;
+    const currentRotation = body.rotation();
+    const currentPose = getCardPose(body.translation(), currentRotation);
+    const completedLatestAuthority = isFlipTargetCurrent({
+      latestFaceUp: latestAuthority.faceUp,
+      latestSceneAuthorityKey: latestAuthority.sceneAuthorityKey,
+      targetFaceUp: flip.targetFaceUp,
+      targetSceneAuthorityKey: flip.targetSceneAuthorityKey,
+    });
 
-    if (currentPose.faceUp !== completedFaceUp) {
+    if (currentPose.faceUp !== flip.targetFaceUp) {
       const [x, y, z, w] = flipCardQuaternion(currentRotation);
       body.setRotation({ x, y, z, w }, !body.isSleeping());
     }
@@ -1512,9 +1476,9 @@ export function PhysicsCard({
       };
     }
     flipRef.current = null;
-    // Keep the target face visible in this render. The next demand frame will
-    // receive Rapier's physical half-turn before resetting the visual group.
-    flipHandoffPendingRef.current = true;
+    visual?.position.set(0, 0, 0);
+    visual?.rotation.set(0, 0, 0);
+    visual?.scale.set(1, 1, 1);
     invalidate();
     const reconciledAuthorityKey = completedLatestAuthority
       ? reconciledAuthorityKeyRef.current
@@ -1541,6 +1505,17 @@ export function PhysicsCard({
         getCardPose(body.translation(), body.rotation()),
         reconciledAuthorityKey
       );
+    }
+
+    if (!completedLatestAuthority) {
+      const nextAuthority = latestAuthorityRef.current;
+      const nextPose = getCardPose(body.translation(), body.rotation());
+
+      if (nextPose.faceUp !== nextAuthority.faceUp) {
+        beginVisualFlip();
+      } else {
+        requestAuthorityReconciliation();
+      }
     }
   });
 
@@ -1770,7 +1745,6 @@ export function PhysicsCard({
     if (
       (event.nativeEvent.button !== 0 && !rightMouseButton) ||
       flipRef.current ||
-      flipHandoffPendingRef.current ||
       layerTransitionRef.current ||
       externalDragRef?.current?.cardId === card.id
     ) {
@@ -1972,13 +1946,11 @@ export function PhysicsCard({
       !body ||
       dragRef.current ||
       flipRef.current ||
-      flipHandoffPendingRef.current ||
       layerTransitionRef.current
     ) {
       return;
     }
 
-    beginVisualFlip();
     onFlip(card.id);
   };
 

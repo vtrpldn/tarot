@@ -5,14 +5,13 @@ import {
   getDynamicDragForce,
   getElevationCueLean,
   getElevationTiltGesture,
-  getFlipHandoffAction,
-  getFlipHandoffResolution,
   getKinematicDragStep,
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
   getLocalOffsetForWorldUp,
   getTiltedCardQuaternion,
+  isFlipTargetCurrent,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
   shouldStabilizeRestingLayer,
@@ -22,43 +21,31 @@ import {
 } from "./physics-card-drag";
 
 describe("PhysicsCard move release", () => {
-  test("keeps the completed visual turn through the physical flip handoff frame", () => {
+  test("accepts a moving body's flip while the user authority stays current", () => {
     expect(
-      getFlipHandoffAction({ handoffPending: false, visualComplete: false })
-    ).toBe("animate");
-    expect(
-      getFlipHandoffAction({ handoffPending: false, visualComplete: true })
-    ).toBe("commit");
-    expect(
-      getFlipHandoffAction({ handoffPending: true, visualComplete: true })
-    ).toBe("reset");
-  });
-
-  test("replays face and full-pose commands that arrive during handoff", () => {
-    expect(
-      getFlipHandoffResolution({
-        currentFaceUp: true,
-        currentSceneAuthorityKey: "face-down",
+      isFlipTargetCurrent({
+        latestFaceUp: false,
+        latestSceneAuthorityKey: "face-down-at-release",
         targetFaceUp: false,
-        targetSceneAuthorityKey: "face-up-again",
+        targetSceneAuthorityKey: "face-down-at-release",
       })
-    ).toBe("flip");
+    ).toBe(true);
     expect(
-      getFlipHandoffResolution({
-        currentFaceUp: true,
-        currentSceneAuthorityKey: "rotation-0",
-        targetFaceUp: true,
-        targetSceneAuthorityKey: "rotation-15",
+      isFlipTargetCurrent({
+        latestFaceUp: false,
+        latestSceneAuthorityKey: "moved-during-flip",
+        targetFaceUp: false,
+        targetSceneAuthorityKey: "face-down-at-release",
       })
-    ).toBe("reconcile");
+    ).toBe(false);
     expect(
-      getFlipHandoffResolution({
-        currentFaceUp: true,
-        currentSceneAuthorityKey: "settled",
-        targetFaceUp: true,
-        targetSceneAuthorityKey: "settled",
+      isFlipTargetCurrent({
+        latestFaceUp: true,
+        latestSceneAuthorityKey: "face-up-again",
+        targetFaceUp: false,
+        targetSceneAuthorityKey: "face-down-at-release",
       })
-    ).toBe("settled");
+    ).toBe(false);
   });
 
   test("converts the visible drag lift to world-up for either face and a tilt", () => {

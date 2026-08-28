@@ -153,7 +153,8 @@ export function getRemainingDeckCount(session: TarotSession): number {
 export function createLayout(
   cards: TableCard[],
   cardSet: CardSetDefinition,
-  layout: TableLayout
+  layout: TableLayout,
+  gridStep?: TablePoint
 ): Map<
   string,
   Pick<TableCard, "position" | "rotation" | "zIndex">
@@ -162,17 +163,20 @@ export function createLayout(
     string,
     Pick<TableCard, "position" | "rotation" | "zIndex">
   >();
+  const deckOrderByCardId = new Map(
+    cardSet.cards.map((definition) => [definition.id, definition.order])
+  );
   const orderedCards =
     layout === "sort"
       ? [...cards].sort((first, second) => {
-          const firstOrder = cardSet.cards.find(
-            (card) => card.id === first.cardId
-          )?.order;
-          const secondOrder = cardSet.cards.find(
-            (card) => card.id === second.cardId
-          )?.order;
+          const firstOrder = deckOrderByCardId.get(first.cardId);
+          const secondOrder = deckOrderByCardId.get(second.cardId);
 
-          return (firstOrder ?? 0) - (secondOrder ?? 0);
+          return (
+            (firstOrder ?? Number.MAX_SAFE_INTEGER) -
+              (secondOrder ?? Number.MAX_SAFE_INTEGER) ||
+            first.id.localeCompare(second.id)
+          );
         })
       : cards;
 
@@ -209,12 +213,14 @@ export function createLayout(
   }
 
   const columns = Math.min(
-    5,
-    Math.max(2, Math.ceil(Math.sqrt(orderedCards.length)))
+    10,
+    Math.max(2, Math.ceil(Math.sqrt(orderedCards.length * 1.35)))
   );
   const rows = Math.max(1, Math.ceil(orderedCards.length / columns));
-  const horizontalGap = Math.min(0.44, 1.65 / Math.max(columns - 1, 1));
-  const verticalGap = Math.min(0.54, 1.45 / Math.max(rows - 1, 1));
+  const horizontalGap =
+    gridStep?.[0] ?? Math.min(0.44, 1.65 / Math.max(columns - 1, 1));
+  const verticalGap =
+    gridStep?.[1] ?? Math.min(0.54, 1.45 / Math.max(rows - 1, 1));
   orderedCards.forEach((card, index) => {
     const column = index % columns;
     const row = Math.floor(index / columns);
@@ -224,7 +230,9 @@ export function createLayout(
         ((rows - 1) / 2 - row) * verticalGap,
       ],
       rotation: alignedRotation(card),
-      zIndex: index + 1,
+      // Sorting changes reading order on the table, not the physical layer a
+      // user deliberately assigned with the layer controls.
+      zIndex: layout === "sort" ? card.zIndex : index + 1,
     });
   });
 

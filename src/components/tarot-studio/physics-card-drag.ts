@@ -34,9 +34,6 @@ type DynamicDragForceOptions = {
   velocity: Point3;
 };
 
-export type FlipHandoffAction = "animate" | "commit" | "reset";
-export type FlipHandoffResolution = "flip" | "reconcile" | "settled";
-
 /** Includes body-mode policy so leaving an authored overlap wakes the card. */
 export function createPhysicsSceneAuthorityKey({
   authorityKey,
@@ -62,43 +59,25 @@ export function createPhysicsSceneAuthorityKey({
 }
 
 /**
- * Separates the last visual flip frame from the next frame that receives
- * Rapier's physical half-turn. Resetting the nested visual group only after
- * that sync prevents a one-frame flash of the old physical face.
+ * A flip may finish while the dynamic body is still gliding. The session
+ * authority, not a transient physics pose, tells us whether another user
+ * command arrived during the animation.
  */
-export function getFlipHandoffAction({
-  handoffPending,
-  visualComplete,
-}: {
-  handoffPending: boolean;
-  visualComplete: boolean;
-}): FlipHandoffAction {
-  if (handoffPending) {
-    return "reset";
-  }
-
-  return visualComplete ? "commit" : "animate";
-}
-
-/** Replays every authority change that can arrive during the handoff frame. */
-export function getFlipHandoffResolution({
-  currentFaceUp,
-  currentSceneAuthorityKey,
+export function isFlipTargetCurrent({
+  latestFaceUp,
+  latestSceneAuthorityKey,
   targetFaceUp,
   targetSceneAuthorityKey,
 }: {
-  currentFaceUp: boolean;
-  currentSceneAuthorityKey: string | null;
+  latestFaceUp: boolean;
+  latestSceneAuthorityKey: string;
   targetFaceUp: boolean;
   targetSceneAuthorityKey: string;
-}): FlipHandoffResolution {
-  if (currentFaceUp !== targetFaceUp) {
-    return "flip";
-  }
-
-  return currentSceneAuthorityKey === targetSceneAuthorityKey
-    ? "settled"
-    : "reconcile";
+}): boolean {
+  return (
+    latestFaceUp === targetFaceUp &&
+    latestSceneAuthorityKey === targetSceneAuthorityKey
+  );
 }
 
 /**

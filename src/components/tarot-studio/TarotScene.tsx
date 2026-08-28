@@ -2323,7 +2323,15 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         near: 0.1,
         far: 100,
       }}
-      gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
+      gl={{
+        alpha: true,
+        antialias: true,
+        powerPreference: "high-performance",
+        // The in-app browser can composite between demand-rendered frames.
+        // Preserve the last complete table frame so cards never flash out
+        // while a drag, collision, or flip schedules the next one.
+        preserveDrawingBuffer: true,
+      }}
       onCreated={({ gl }) => {
         gl.outputColorSpace = SRGBColorSpace;
         gl.setClearAlpha(0);

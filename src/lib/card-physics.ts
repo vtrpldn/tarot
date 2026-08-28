@@ -22,7 +22,7 @@ export const CARD_PHYSICS = {
   contactSkin: 0.001,
   dragLift: 0.18,
   gravity: [0, 0, -9.81] as const,
-  linearDamping: 0.85,
+  linearDamping: 0.65,
   maxAngularSpeed: 6,
   maxPlanarSpeed: 4.2,
   throwArcMinimumPlanarSpeed: 1.4,
@@ -468,14 +468,26 @@ export function getFlipVisualState(progress: number): PhysicsFlipVisualState {
   const boundedProgress = Math.max(0, Math.min(1, progress));
   const eased =
     boundedProgress * boundedProgress * (3 - 2 * boundedProgress);
-  const horizontalFold = Math.abs(Math.cos(Math.PI * eased));
+  // Hold the card fully edge-on around the face swap. Demand-rendered frames
+  // can advance by almost eight percent of a flip, so a single zero-width
+  // instant is easy to skip and exposes the face change at a visible width.
+  const collapseEnd = 0.42;
+  const expandStart = 0.58;
+  const horizontalFold =
+    eased < collapseEnd
+      ? Math.cos((eased / collapseEnd) * (Math.PI / 2))
+      : eased <= expandStart
+        ? 0
+        : Math.sin(
+            ((eased - expandStart) / (1 - expandStart)) * (Math.PI / 2)
+          );
 
   return {
     // Stay in the card's physical plane: squeeze horizontally, swap the
     // already-opposed face planes while edge-on, then reopen. A real nested
     // quarter-turn would leave the collider hull and intersect nearby cards.
     rotationY: eased < 0.5 ? 0 : Math.PI,
-    scaleX: Math.max(0.02, horizontalFold),
+    scaleX: horizontalFold,
     scaleY: 1,
   };
 }

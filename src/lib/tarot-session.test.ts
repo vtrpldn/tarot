@@ -1,11 +1,12 @@
 import { describe, expect, test } from "vitest";
 import { TABLE_POINT_LIMIT, type TarotSession } from "@/types";
+import { riderWaiteSmith } from "@/data/card-sets";
 import {
   createPhysicsAuthorityKey,
   type PhysicsCardPose,
   type PhysicsCardPoseUpdate,
 } from "./card-physics";
-import { tarotSessionReducer } from "./tarot-session";
+import { createLayout, tarotSessionReducer } from "./tarot-session";
 
 function createSession(): TarotSession {
   const activeSpread = {
@@ -96,6 +97,58 @@ describe("move", () => {
       zIndex: 1,
     });
     expect(result.cards.find((card) => card.id === "table-first")?.zIndex).toBe(2);
+  });
+});
+
+describe("sort layout", () => {
+  test("uses deck order for positions without rewriting physical layers", () => {
+    const firstDefinition = riderWaiteSmith.cards[0];
+    const secondDefinition = riderWaiteSmith.cards[1];
+    const cards = [
+      {
+        ...createSession().cards[0],
+        id: "later-card",
+        cardId: secondDefinition.id,
+        zIndex: 17,
+      },
+      {
+        ...createSession().cards[1],
+        id: "earlier-card",
+        cardId: firstDefinition.id,
+        zIndex: 3,
+      },
+    ];
+
+    const placements = createLayout(cards, riderWaiteSmith, "sort", [0.8, 1.1]);
+    const earlier = placements.get("earlier-card");
+    const later = placements.get("later-card");
+
+    expect(earlier?.zIndex).toBe(3);
+    expect(later?.zIndex).toBe(17);
+    expect(earlier?.position[1]).toBeGreaterThanOrEqual(later?.position[1] ?? 0);
+    expect(earlier?.position[0]).toBeLessThan(later?.position[0] ?? 0);
+    expect((later?.position[0] ?? 0) - (earlier?.position[0] ?? 0)).toBe(0.8);
+  });
+
+  test("uses wider rows so a full deck does not become one tall strip", () => {
+    const cards = riderWaiteSmith.cards.map((definition, index) => ({
+      ...createSession().cards[0],
+      id: `table-${definition.id}`,
+      cardId: definition.id,
+      zIndex: index + 1,
+    }));
+    const placements = createLayout(
+      cards,
+      riderWaiteSmith,
+      "sort",
+      [0.52, 0.74]
+    );
+    const uniqueRows = new Set(
+      Array.from(placements.values()).map(({ position }) => position[1])
+    );
+
+    expect(uniqueRows.size).toBeLessThanOrEqual(8);
+    expect(uniqueRows.size).toBeGreaterThan(1);
   });
 });
 
