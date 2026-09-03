@@ -69,12 +69,14 @@ import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import {
   canPersistSettledPhysicsPose,
   createPhysicsSceneAuthorityKey,
+  getCardPickupHeight,
   getDynamicDragForce,
   getElevationCueLean,
   getElevationTiltGesture,
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
+  getMoveDragForce,
   getTiltedCardQuaternion,
   isFlipTargetCurrent,
   isFaceOnlyAuthorityChange,
@@ -83,6 +85,7 @@ import {
   shouldApplyLayerTransitionTargetRotation,
   shouldStabilizeRestingLayer,
   shouldTakeDragPhysicsOwnership,
+  type CardDragMode,
   type DurableCardPose,
 } from "./physics-card-drag";
 import { TAROT_SCENE_PALETTE } from "./theme";
@@ -111,10 +114,9 @@ type PointerCaptureTarget = Mesh & {
   setPointerCapture?: (pointerId: number) => void;
 };
 
-type DragMode = "move" | "rotate" | "elevate-tilt";
-
 type DragState = {
-  mode: DragMode;
+  mode: CardDragMode;
+  hasPhysicsOwnership: boolean;
   pointerId: number;
   grabOffset: Vector3;
   origin: Vector3;
@@ -746,6 +748,29 @@ export function PhysicsCard({
     [canvas]
   );
 
+  const takeDragPhysicsOwnership = useCallback((drag: DragState) => {
+    const body = bodyRef.current;
+    if (!body || !shouldTakeDragPhysicsOwnership(drag)) {
+      return;
+    }
+
+    const usesDynamicContact = drag.mode !== "rotate";
+    body.setBodyType(
+      usesDynamicContact
+        ? rapier.RigidBodyType.Dynamic
+        : rapier.RigidBodyType.KinematicPositionBased,
+      true
+    );
+    body.setGravityScale(drag.mode === "elevate-tilt" ? 0 : 1, true);
+    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    drag.hasPhysicsOwnership = true;
+    if (usesDynamicContact) {
+      collisionActivatedRef.current = true;
+      POINTER_CONTROLLED_BODY_HANDLES.add(body.handle);
+    }
+  }, [rapier.RigidBodyType.Dynamic, rapier.RigidBodyType.KinematicPositionBased]);
+
   const updateDrag = useCallback(
     (pointerId: number, point: Vector3, timestamp: number) => {
       const drag = dragRef.current;
@@ -788,7 +813,6 @@ export function PhysicsCard({
       }
       drag.lastPoint.copy(point);
 
-      const wasMoved = drag.moved;
       if (drag.mode === "rotate") {
         const translation = body.translation();
         const pointerAngle = Math.atan2(point.y - translation.y, point.x - translation.x);
@@ -838,24 +862,7 @@ export function PhysicsCard({
         drag.moved ||= point.distanceToSquared(drag.origin) > DRAG_THRESHOLD * DRAG_THRESHOLD;
       }
 
-      // A press must leave an undisturbed collider alone. Physics ownership
-      // starts only once the pointer has crossed the drag threshold.
-      if (shouldTakeDragPhysicsOwnership(wasMoved, drag.moved)) {
-        const usesDynamicContact = drag.mode !== "rotate";
-        body.setBodyType(
-          usesDynamicContact
-            ? rapier.RigidBodyType.Dynamic
-            : rapier.RigidBodyType.KinematicPositionBased,
-          true
-        );
-        body.setGravityScale(drag.mode === "elevate-tilt" ? 0 : 1, true);
-        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        if (usesDynamicContact) {
-          collisionActivatedRef.current = true;
-          POINTER_CONTROLLED_BODY_HANDLES.add(body.handle);
-        }
-      }
+      takeDragPhysicsOwnership(drag);
 
       invalidate();
 
@@ -864,9 +871,8 @@ export function PhysicsCard({
     [
       dragBounds,
       invalidate,
-      rapier.RigidBodyType.Dynamic,
-      rapier.RigidBodyType.KinematicPositionBased,
       minimumRestingZ,
+      takeDragPhysicsOwnership,
     ]
   );
 
@@ -963,6 +969,20 @@ export function PhysicsCard({
       const latestAuthority = latestAuthorityRef.current;
 
       if (!drag.moved) {
+        if (drag.hasPhysicsOwnership) {
+          // A stationary click is still a physical pickup. Release the hold
+          // without persisting a move or throwing its upward pickup velocity.
+          if (cancelled || drag.mode === "rotate") {
+            body.setBodyType(drag.startBodyType, true);
+          }
+          if (cancelled) {
+            body.setTranslation(drag.startTranslation, true);
+            body.setRotation(drag.startQuaternion, true);
+          }
+          body.setGravityScale(1, true);
+          body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        }
         dragRef.current = null;
         canvas.style.cursor = "grab";
         if (hadRightGesture) {
@@ -1668,7 +1688,7 @@ export function PhysicsCard({
       return;
     }
 
-    if (!drag.moved) {
+    if (!drag.hasPhysicsOwnership) {
       return;
     }
 
@@ -1688,25 +1708,29 @@ export function PhysicsCard({
     } else {
       const currentTranslation = body.translation();
       const currentVelocity = body.linvel();
-      const controlHeight = drag.mode === "elevate-tilt";
-      const [forceX, forceY, forceZ] = getDynamicDragForce({
-        controlHeight,
+      const forceOptions = {
         current: [
           currentTranslation.x,
           currentTranslation.y,
           currentTranslation.z,
-        ],
+        ] as const,
         mass: body.mass(),
-        maximumAcceleration: DYNAMIC_DRAG_MAX_ACCELERATION,
-        maximumSpeed: DYNAMIC_DRAG_MAX_SPEED,
-        response: DYNAMIC_DRAG_RESPONSE,
-        target: [drag.target.x, drag.target.y, drag.target.z],
-        velocity: [currentVelocity.x, currentVelocity.y, currentVelocity.z],
-      });
+        target: [drag.target.x, drag.target.y, drag.target.z] as const,
+        velocity: [currentVelocity.x, currentVelocity.y, currentVelocity.z] as const,
+      };
+      const [forceX, forceY, forceZ] = drag.mode === "move"
+        ? getMoveDragForce(forceOptions)
+        : getDynamicDragForce({
+            ...forceOptions,
+            controlHeight: true,
+            maximumAcceleration: DYNAMIC_DRAG_MAX_ACCELERATION,
+            maximumSpeed: DYNAMIC_DRAG_MAX_SPEED,
+            response: DYNAMIC_DRAG_RESPONSE,
+          });
       body.resetForces(true);
       body.addForce({ x: forceX, y: forceY, z: forceZ }, true);
 
-      if (controlHeight) {
+      if (drag.mode === "elevate-tilt") {
         const safeTilt = getCollisionSafeTilt({
           baseQuaternion: drag.startQuaternion,
           position: currentTranslation,
@@ -1744,6 +1768,7 @@ export function PhysicsCard({
       event.nativeEvent.pointerType !== "touch";
     if (
       (event.nativeEvent.button !== 0 && !rightMouseButton) ||
+      dragRef.current ||
       flipRef.current ||
       layerTransitionRef.current ||
       externalDragRef?.current?.cardId === card.id
@@ -1761,7 +1786,7 @@ export function PhysicsCard({
     const translation = body.translation();
     const rotation = body.rotation();
     const currentPose = getCardPose(translation, rotation);
-    const mode: DragMode = rightMouseButton
+    const mode: CardDragMode = rightMouseButton
       ? "elevate-tilt"
       : selected &&
           event.nativeEvent.pointerType !== "touch" &&
@@ -1777,6 +1802,7 @@ export function PhysicsCard({
     clearFallback();
     dragRef.current = {
       mode,
+      hasPhysicsOwnership: false,
       pointerId: event.pointerId,
       grabOffset: new Vector3(
         point.x - translation.x,
@@ -1792,7 +1818,9 @@ export function PhysicsCard({
       target: new Vector3(
         translation.x,
         translation.y,
-        translation.z
+        mode === "move"
+          ? getCardPickupHeight(translation.z, restingZ)
+          : translation.z
       ),
       appliedElevationLeanRadians: 0,
       appliedQuaternion: {
@@ -1822,6 +1850,7 @@ export function PhysicsCard({
       previewTiltRadians: 0,
       moved: false,
     };
+    takeDragPhysicsOwnership(dragRef.current);
     if (rightMouseButton) {
       event.nativeEvent.preventDefault();
       suppressContextMenuUntilRef.current = performance.now() + 500;

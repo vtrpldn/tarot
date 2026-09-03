@@ -1,4 +1,6 @@
-import { CARD_GEOMETRY } from "@/lib/card-physics";
+import { CARD_GEOMETRY, CARD_PHYSICS } from "@/lib/card-physics";
+
+export type CardDragMode = "move" | "rotate" | "elevate-tilt";
 
 type CardUvPoint = { x: number; y: number };
 
@@ -127,12 +129,48 @@ export function isNearCardRotationCorner(
   );
 }
 
-/** A pointer press becomes a physics drag only when it first crosses its threshold. */
-export function shouldTakeDragPhysicsOwnership(
-  wasMoved: boolean,
-  moved: boolean
-): boolean {
-  return !wasMoved && moved;
+/** A move press picks up immediately; rotation and right-drag keep their threshold. */
+export function shouldTakeDragPhysicsOwnership({
+  hasPhysicsOwnership,
+  mode,
+  moved,
+}: {
+  hasPhysicsOwnership: boolean;
+  mode: CardDragMode;
+  moved: boolean;
+}): boolean {
+  return !hasPhysicsOwnership && (mode === "move" || moved);
+}
+
+/** Lift relative to the physical surface under this card, including a stack. */
+export function getCardPickupHeight(currentZ: number, restingZ: number): number {
+  return Math.max(currentZ, restingZ) + CARD_PHYSICS.dragLift;
+}
+
+/** Ordinary pickup holds the collider above the cloth, with gravity still active. */
+export function getMoveDragForce(
+  options: Pick<DynamicDragForceOptions, "current" | "mass" | "target" | "velocity">
+): [x: number, y: number, z: number] {
+  const [x, y] = getDynamicDragForce({
+    ...options,
+    controlHeight: false,
+    maximumAcceleration: 46,
+    maximumSpeed: 5.8,
+    response: 24,
+  });
+  // A large pointer jump must not consume the acceleration needed to lift
+  // against gravity. Both forces still go through the dynamic contact solver.
+  const [, , z] = getDynamicDragForce({
+    controlHeight: true,
+    current: [0, 0, options.current[2]],
+    mass: options.mass,
+    maximumAcceleration: 30,
+    maximumSpeed: 1.8,
+    response: 24,
+    target: [0, 0, options.target[2]],
+    velocity: [0, 0, options.velocity[2]],
+  });
+  return [x, y, z];
 }
 
 /**

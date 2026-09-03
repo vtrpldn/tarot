@@ -12,11 +12,13 @@ import {
 } from "./card-physics";
 import {
   getDynamicDragForce,
+  getCardPickupHeight,
   getElevationCueLean,
   getElevationTiltGesture,
   getLayerTransitionClearance,
   getLayerTransitionOffset,
   getLayerTransitionPosition,
+  getMoveDragForce,
   getTiltedCardQuaternion,
 } from "../components/tarot-studio/physics-card-drag";
 
@@ -129,6 +131,35 @@ function createDeck(world: RAPIER.World) {
 
 function step(world: RAPIER.World, frames: number) {
   for (let frame = 0; frame < frames; frame += 1) {
+    world.step();
+  }
+}
+
+function applyMoveDragForce(
+  body: RAPIER.RigidBody,
+  target: [number, number, number]
+) {
+  const current = body.translation();
+  const velocity = body.linvel();
+  const [x, y, z] = getMoveDragForce({
+    current: [current.x, current.y, current.z],
+    mass: body.mass(),
+    target,
+    velocity: [velocity.x, velocity.y, velocity.z],
+  });
+
+  body.resetForces(true);
+  body.addForce({ x, y, z }, true);
+}
+
+function holdMoveDrag(
+  world: RAPIER.World,
+  body: RAPIER.RigidBody,
+  target: [number, number, number],
+  frames: number
+) {
+  for (let frame = 0; frame < frames; frame += 1) {
+    applyMoveDragForce(body, target);
     world.step();
   }
 }
@@ -314,6 +345,229 @@ describe("configured Tarot card colliders in Rapier", () => {
       expect(driver.body.translation().x).toBeLessThan(
         target.body.translation().x
       );
+    } finally {
+      world.free();
+    }
+  });
+
+  test("lifts stationary face-up and face-down cards without teleporting either collider", () => {
+    for (const faceUp of [true, false]) {
+      const world = createWorld();
+
+      try {
+        const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+        const card = createCard(world, {
+          position: [0, 0, tableHeight],
+        });
+        if (!faceUp) {
+          const [x, y, z, w] = flipCardQuaternion(card.body.rotation());
+          card.body.setRotation({ x, y, z, w }, true);
+        }
+        const pickupHeight = getCardPickupHeight(
+          card.body.translation().z,
+          tableHeight
+        );
+        const initialHeight = card.body.translation().z;
+
+        expect(getCardPose(card.body.translation(), card.body.rotation()).faceUp).toBe(
+          faceUp
+        );
+        applyMoveDragForce(card.body, [0, 0, pickupHeight]);
+        expect(card.body.translation().z).toBeCloseTo(initialHeight, 8);
+
+        world.step();
+        expect(card.body.translation().z).toBeGreaterThan(initialHeight);
+        expect(card.body.translation().z).toBeLessThan(pickupHeight);
+
+        holdMoveDrag(world, card.body, [0, 0, pickupHeight], 24);
+        expect(card.body.translation().z).toBeGreaterThan(
+          initialHeight + CARD_PHYSICS.dragLift * 0.6
+        );
+      } finally {
+        world.free();
+      }
+    }
+  });
+
+  test("lifts the top stack card incrementally from its physical layer", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const layerStep =
+        CARD_HALF_DEPTH * 2 + CARD_PHYSICS.contactSkin * 2;
+      const lower = createCard(world, {
+        bodyType: "kinematic",
+        position: [0, 0, tableHeight],
+      });
+      const upper = createCard(world, {
+        position: [0, 0, tableHeight + layerStep],
+      });
+      const initialHeight = upper.body.translation().z;
+      const pickupHeight = getCardPickupHeight(initialHeight, tableHeight);
+
+      applyMoveDragForce(upper.body, [0, 0, pickupHeight]);
+      expect(upper.body.translation().z).toBeCloseTo(initialHeight, 8);
+
+      world.step();
+      expect(upper.body.translation().z).toBeGreaterThan(initialHeight);
+      expect(upper.body.translation().z).toBeLessThan(pickupHeight);
+
+      holdMoveDrag(world, upper.body, [0, 0, pickupHeight], 24);
+      expect(upper.body.translation().z).toBeGreaterThan(
+        initialHeight + CARD_PHYSICS.dragLift * 0.6
+      );
+      expect(lower.body.translation().z).toBeCloseTo(tableHeight, 8);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("tracks a moving pickup target with a small lag and settles when it stops", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const card = createCard(world, {
+        position: [0, 0, tableHeight],
+      });
+      const pickupHeight = getCardPickupHeight(tableHeight, tableHeight);
+      const pointerSpeed = 2.4;
+      const trackingFrames = 30;
+      let target: [number, number, number] = [0, 0, pickupHeight];
+
+      for (let frame = 1; frame <= trackingFrames; frame += 1) {
+        target = [
+          pointerSpeed * CARD_PHYSICS.timeStep * frame,
+          0,
+          pickupHeight,
+        ];
+        applyMoveDragForce(card.body, target);
+        world.step();
+      }
+
+      const trackingLag = target[0] - card.body.translation().x;
+      expect(trackingLag).toBeGreaterThanOrEqual(0);
+      expect(trackingLag).toBeLessThan(0.13);
+
+      holdMoveDrag(world, card.body, target, 90);
+      expect(Math.abs(target[0] - card.body.translation().x)).toBeLessThan(0.03);
+      expect(Math.abs(target[2] - card.body.translation().z)).toBeLessThan(0.04);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("clears the table promptly when a pickup starts with a large planar target", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const card = createCard(world, {
+        position: [0, 0, tableHeight],
+      });
+      const pickupHeight = getCardPickupHeight(tableHeight, tableHeight);
+
+      holdMoveDrag(world, card.body, [1.5, 0, pickupHeight], 7);
+
+      const pickupHeightAfterFastStart = card.body.translation().z;
+      expect(pickupHeightAfterFastStart).toBeGreaterThan(tableHeight + 0.06);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("keeps a held card from passing through a similarly elevated dynamic blocker", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const pickupHeight = getCardPickupHeight(tableHeight, tableHeight);
+      const blocker = createCard(world, {
+        position: [0, 0, pickupHeight - CARD_PHYSICS.dragLift * 0.06],
+      });
+      const driver = createCard(world, {
+        position: [-2.6, 0, tableHeight],
+      });
+      blocker.body.setGravityScale(0, true);
+      let driverPassedBlocker = false;
+      let hadContact = false;
+      let deepestPenetration = 0;
+
+      for (let frame = 0; frame < 120; frame += 1) {
+        applyMoveDragForce(driver.body, [2.4, 0, pickupHeight]);
+        world.step();
+        driverPassedBlocker ||=
+          driver.body.translation().x > blocker.body.translation().x;
+        const contact = driver.collider.contactCollider(
+          blocker.collider,
+          CARD_PHYSICS.contactSkin * 2
+        );
+        hadContact ||= contact !== null;
+        deepestPenetration = Math.min(
+          deepestPenetration,
+          contact?.distance ?? 0
+        );
+      }
+
+      expect(blocker.body.translation().x).toBeGreaterThan(0.1);
+      expect(driverPassedBlocker).toBe(false);
+      expect(hadContact).toBe(true);
+      expect(deepestPenetration).toBeGreaterThanOrEqual(-0.00005);
+    } finally {
+      world.free();
+    }
+  });
+
+  test("drops a released pickup onto another card without overlap", () => {
+    const world = createWorld();
+
+    try {
+      const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+      const layerStep =
+        CARD_HALF_DEPTH * 2 + CARD_PHYSICS.contactSkin * 2;
+      const lower = createCard(world, {
+        canSleep: true,
+        position: [0, 0, tableHeight],
+      });
+      const upper = createCard(world, {
+        position: [0, 0, tableHeight + layerStep],
+      });
+      const pickupHeight = getCardPickupHeight(
+        upper.body.translation().z,
+        tableHeight
+      );
+
+      holdMoveDrag(world, upper.body, [0, 0, pickupHeight], 40);
+      const heldHeight = upper.body.translation().z;
+      expect(heldHeight).toBeGreaterThan(tableHeight + layerStep + 0.1);
+
+      upper.body.resetForces(true);
+      upper.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      upper.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      world.step();
+      expect(upper.body.translation().z).toBeLessThan(heldHeight);
+
+      let deepestPenetration = 0;
+      for (let frame = 0; frame < 300; frame += 1) {
+        world.step();
+        const contact = upper.collider.contactCollider(
+          lower.collider,
+          CARD_PHYSICS.contactSkin * 2
+        );
+        deepestPenetration = Math.min(
+          deepestPenetration,
+          contact?.distance ?? 0
+        );
+      }
+
+      expect(deepestPenetration).toBeGreaterThanOrEqual(-0.00005);
+      expect(
+        upper.body.translation().z - lower.body.translation().z
+      ).toBeGreaterThanOrEqual(CARD_HALF_DEPTH * 2 - 0.001);
+      expect(
+        upper.body.translation().z - lower.body.translation().z
+      ).toBeLessThan(layerStep + 0.03);
     } finally {
       world.free();
     }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   canPersistSettledPhysicsPose,
   createPhysicsSceneAuthorityKey,
+  getCardPickupHeight,
   getDynamicDragForce,
   getElevationCueLean,
   getElevationTiltGesture,
@@ -10,6 +11,7 @@ import {
   getLayerTransitionOffset,
   getLayerTransitionPosition,
   getLocalOffsetForWorldUp,
+  getMoveDragForce,
   getTiltedCardQuaternion,
   isFlipTargetCurrent,
   isFaceOnlyAuthorityChange,
@@ -74,10 +76,47 @@ describe("PhysicsCard move release", () => {
     ).toEqual([0, expect.closeTo(0.174), expect.closeTo(0)]);
   });
 
-  test("takes Rapier ownership only when a press becomes a drag", () => {
-    expect(shouldTakeDragPhysicsOwnership(false, false)).toBe(false);
-    expect(shouldTakeDragPhysicsOwnership(false, true)).toBe(true);
-    expect(shouldTakeDragPhysicsOwnership(true, true)).toBe(false);
+  test.each(["move", "rotate", "elevate-tilt"] as const)(
+    "%s takes physics ownership once, with immediate pickup only for a move press",
+    (mode) => {
+      expect(shouldTakeDragPhysicsOwnership({
+        hasPhysicsOwnership: false,
+        mode,
+        moved: false,
+      })).toBe(mode === "move");
+      expect(shouldTakeDragPhysicsOwnership({
+        hasPhysicsOwnership: false,
+        mode,
+        moved: true,
+      })).toBe(true);
+      for (const moved of [false, true]) {
+        expect(shouldTakeDragPhysicsOwnership({
+          hasPhysicsOwnership: true,
+          mode,
+          moved,
+        })).toBe(false);
+      }
+    }
+  );
+
+  test("picks up above the current physical or authored layer, whichever is higher", () => {
+    expect(getCardPickupHeight(0.02, 0.02)).toBeCloseTo(0.2);
+    expect(getCardPickupHeight(0.3, 0.1)).toBeCloseTo(0.48);
+    expect(getCardPickupHeight(0.1, 0.3)).toBeCloseTo(0.48);
+  });
+
+  test("still lifts against gravity when a fast pointer move pulls sideways", () => {
+    const mass = 0.0018;
+    const [forceX, , forceZ] = getMoveDragForce({
+      current: [0, 0, 0.02],
+      mass,
+      target: [3, 0, getCardPickupHeight(0.02, 0.02)],
+      velocity: [0, 0, 0],
+    });
+
+    expect(forceX).toBeGreaterThan(0);
+    expect(forceX / mass).toBeLessThanOrEqual(46);
+    expect(forceZ / mass).toBeGreaterThan(9.81);
   });
 
   test("suppresses the card context menu before right-drag movement begins", () => {
