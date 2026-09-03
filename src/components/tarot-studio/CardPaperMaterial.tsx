@@ -41,6 +41,25 @@ type PaperShader = {
 
 const DEFAULT_CARD_SIZE = [1, 1] as const;
 
+const CardPaperCurlUpdater = memo(function CardPaperCurlUpdater({
+  material,
+  motionRef,
+}: {
+  material: MeshStandardMaterial;
+  motionRef: MutableRefObject<CardPaperMotion>;
+}) {
+  useFrame(() => {
+    const shader = material.userData.paperShader as PaperShader | undefined;
+    const curl = shader?.uniforms.uPaperCurl?.value;
+
+    if (curl instanceof Vector2) {
+      curl.set(motionRef.current.curlX, motionRef.current.curlY);
+    }
+  });
+
+  return null;
+});
+
 const PAPER_VERTEX_DECLARATION = /* glsl */ `
 #include <common>
 varying vec3 vPaperPosition;
@@ -96,6 +115,16 @@ float paperNoise(vec2 point) {
     blend.y
   );
 }
+
+// Fade procedural detail before one noise cell becomes smaller than a pixel.
+// Unlike texture mipmaps, this shader-generated grain has no automatic
+// minification, so without this it can alias into visible stripes at low DPR.
+float paperDetailFade(vec2 point) {
+  vec2 footprint = fwidth(point);
+  float largestFootprint = max(footprint.x, footprint.y);
+
+  return 1.0 - smoothstep(0.28, 0.85, largestFootprint);
+}
 `;
 
 const PAPER_FRAGMENT_COLOR = /* glsl */ `
@@ -104,11 +133,13 @@ vec2 paperPoint = vPaperPosition.xy + vec2(
   uPaperSeed * 0.071,
   uPaperSeed * 0.113
 );
-float paperCloud = paperNoise(paperPoint * vec2(15.0, 11.0));
-float paperFiber = paperNoise(paperPoint * vec2(8.0, 92.0));
+vec2 paperCloudPoint = paperPoint * vec2(15.0, 11.0);
+vec2 paperFiberPoint = paperPoint * vec2(6.0, 32.0);
+float paperCloud = paperNoise(paperCloudPoint);
+float paperFiber = paperNoise(paperFiberPoint);
 float paperGrain =
-  (paperCloud - 0.5) * 0.62 +
-  (paperFiber - 0.5) * 0.38;
+  (paperCloud - 0.5) * 0.74 * paperDetailFade(paperCloudPoint) +
+  (paperFiber - 0.5) * 0.26 * paperDetailFade(paperFiberPoint);
 diffuseColor.rgb *= 1.0 + paperGrain * uPaperAlbedoVariation;
 float paperEdgeWear = smoothstep(0.78, 1.0, vPaperEdge);
 vec3 agedPaperEdge = vec3(0.76, 0.67, 0.52);
@@ -149,8 +180,8 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
   map,
   roughness = 0.92,
   paperSeed = 0,
-  albedoVariation = 0.035,
-  roughnessVariation = 0.12,
+  albedoVariation = 0.028,
+  roughnessVariation = 0.08,
   toneMapped = true,
   depthTest = true,
   depthWrite = true,
@@ -173,6 +204,11 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
     });
 
     nextMaterial.name = "tarot-card-paper";
+    (
+      nextMaterial as MeshStandardMaterial & {
+        extensions: { derivatives: boolean };
+      }
+    ).extensions = { derivatives: true };
     nextMaterial.onBeforeCompile = (shader) => {
       shader.uniforms.uPaperSeed = { value: paperSeed };
       shader.uniforms.uPaperAlbedoVariation = {
@@ -198,7 +234,7 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
         );
       nextMaterial.userData.paperShader = shader;
     };
-    nextMaterial.customProgramCacheKey = () => "tarot-card-paper-v2";
+    nextMaterial.customProgramCacheKey = () => "tarot-card-paper-v4";
 
     return nextMaterial;
   }, [
@@ -216,19 +252,14 @@ export const CardPaperMaterial = memo(function CardPaperMaterial({
     toneMapped,
   ]);
 
-  useFrame(() => {
-    const shader = material.userData.paperShader as PaperShader | undefined;
-    const curl = shader?.uniforms.uPaperCurl?.value;
-
-    if (curl instanceof Vector2) {
-      curl.set(
-        motionRef?.current.curlX ?? 0,
-        motionRef?.current.curlY ?? 0
-      );
-    }
-  });
-
   useEffect(() => () => material.dispose(), [material]);
 
-  return <primitive object={material} attach={attach} />;
+  return (
+    <>
+      <primitive object={material} attach={attach} />
+      {motionRef ? (
+        <CardPaperCurlUpdater material={material} motionRef={motionRef} />
+      ) : null}
+    </>
+  );
 });

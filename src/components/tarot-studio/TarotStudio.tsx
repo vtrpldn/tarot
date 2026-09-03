@@ -34,6 +34,10 @@ import {
   type CardSoundEvent,
   type CardSoundPlayOptions,
 } from "@/lib/card-sounds";
+import type {
+  PhysicsCardPose,
+  PhysicsCardPoseUpdate,
+} from "@/lib/card-physics";
 import {
   getArrangementPresentation,
   type AutomaticCardPlacement,
@@ -71,8 +75,6 @@ import {
 } from "./theme";
 import { DeckChooser } from "./DeckChooser";
 
-const WHEEL_LAYER_COOLDOWN = 110;
-const WHEEL_LAYER_THRESHOLD = 36;
 const DOCK_EDGE_REVEAL_DISTANCE = 52;
 const DOCK_HIDE_DELAY = 850;
 const DOCK_INITIAL_HIDE_DELAY = 1800;
@@ -505,6 +507,11 @@ export function TarotStudio() {
   const sceneLayoutRef = useRef<SceneTableLayout | null>(null);
   const viewZoomRef = useRef(1);
   const activeArrangementRef = useRef<ActiveAutomaticArrangement | null>(null);
+  const pendingPhysicsPosesRef = useRef(
+    new Map<string, PhysicsCardPoseUpdate>()
+  );
+  const physicsSyncScheduledRef = useRef(false);
+  const physicsSyncMountedRef = useRef(true);
   const spacePressedRef = useRef(false);
   const panGestureRef = useRef<{
     pointerId: number;
@@ -534,11 +541,6 @@ export function TarotStudio() {
   const inspectorCollapseRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorPopoverRef = useRef<HTMLElement>(null);
-  const layerWheelRef = useRef({
-    accumulatedDelta: 0,
-    direction: 0,
-    lastChangeAt: 0,
-  });
   const [activeCardSetId, setActiveCardSetId] = useState(cardSets[0].id);
   const [viewZoom, setViewZoom] = useState(1);
   const [viewPan, setViewPan] = useState<TablePoint>([0, 0]);
@@ -640,6 +642,16 @@ export function TarotStudio() {
     activeCardSet,
     createTarotSession
   );
+  useEffect(() => {
+    const pendingPhysicsPoses = pendingPhysicsPosesRef.current;
+
+    physicsSyncMountedRef.current = true;
+
+    return () => {
+      physicsSyncMountedRef.current = false;
+      pendingPhysicsPoses.clear();
+    };
+  }, []);
   const reducedMotion = useReducedMotionPreference();
   const {
     isMuted: areCardSoundsMuted,
@@ -661,6 +673,7 @@ export function TarotStudio() {
   const isInspectorOpen =
     hasSelectedTableCard && !isInspectorCollapsed && !isDeckMoveMode;
   const isDockPinned =
+    hasSelectedTableCard ||
     isDeckMenuOpen ||
     isZoomMenuOpen ||
     isSpreadMenuOpen ||
@@ -873,10 +886,27 @@ export function TarotStudio() {
         return;
       }
 
+      const worldOrigin = layout.toWorld([0, 0]);
+      const worldUnitX = layout.toWorld([1, 0]);
+      const worldUnitY = layout.toWorld([0, 1]);
+      const worldScaleX = Math.max(
+        Number.EPSILON,
+        Math.abs(worldUnitX[0] - worldOrigin[0])
+      );
+      const worldScaleY = Math.max(
+        Number.EPSILON,
+        Math.abs(worldUnitY[1] - worldOrigin[1])
+      );
+      const cardGutter = Math.min(layout.cardWidth, layout.cardHeight) * 0.055;
+      const gridStep: TablePoint = [
+        Math.max(0.52, (layout.cardWidth + cardGutter) / worldScaleX),
+        Math.max(0.74, (layout.cardHeight + cardGutter) / worldScaleY),
+      ];
       const placements = createLayout(
         tableCards,
         activeCardSet,
-        tableLayout
+        tableLayout,
+        gridStep
       );
       const automaticPlacements = copyAutomaticPlacements(
         placements.values()
@@ -892,11 +922,12 @@ export function TarotStudio() {
       );
 
       activeArrangementRef.current = {
-        adjustZoom: false,
+        adjustZoom: true,
         deckPosition: presentation.deckPosition,
         includeDeck,
         placements: automaticPlacements,
       };
+      setViewZoom(presentation.zoom);
       playCardSound("arrange");
       dispatch({
         type: "layout",
@@ -1039,6 +1070,38 @@ export function TarotStudio() {
       dispatch({ type: "move", cardId, position, rotation });
     },
     [playCardSound]
+  );
+
+  const handlePhysicsSettle = useCallback(
+    (cardId: string, pose: PhysicsCardPose, authorityKey: string) => {
+      pendingPhysicsPosesRef.current.set(cardId, {
+        ...pose,
+        authorityKey,
+        cardId,
+      });
+
+      if (physicsSyncScheduledRef.current) {
+        return;
+      }
+
+      physicsSyncScheduledRef.current = true;
+      queueMicrotask(() => {
+        physicsSyncScheduledRef.current = false;
+
+        if (!physicsSyncMountedRef.current) {
+          pendingPhysicsPosesRef.current.clear();
+          return;
+        }
+
+        const poses = Array.from(pendingPhysicsPosesRef.current.values());
+        pendingPhysicsPosesRef.current.clear();
+
+        if (poses.length > 0) {
+          dispatch({ type: "sync-physics-poses", poses });
+        }
+      });
+    },
+    []
   );
 
   const handleFlip = useCallback((cardId: string) => {
@@ -1305,8 +1368,6 @@ export function TarotStudio() {
 
   const handleTableWheel = useCallback(
     (event: ReactWheelEvent<HTMLDivElement>) => {
-      const hoveredCardId = hoveredCardIdRef.current;
-
       if (event.ctrlKey || event.metaKey) {
         return;
       }
@@ -1317,47 +1378,15 @@ export function TarotStudio() {
         event.deltaMode === 0 ? 1 : event.deltaMode === 1 ? 16 : 120;
       const normalizedDelta = event.deltaY * deltaMultiplier;
 
-      if (!hoveredCardId) {
-        if (normalizedDelta !== 0) {
-          const zoomStep = Math.min(
-            0.12,
-            Math.max(0.03, Math.abs(normalizedDelta) * 0.0014)
-          );
-          adjustViewZoom(normalizedDelta < 0 ? zoomStep : -zoomStep);
-        }
-
-        return;
+      if (normalizedDelta !== 0) {
+        const zoomStep = Math.min(
+          0.12,
+          Math.max(0.03, Math.abs(normalizedDelta) * 0.0014)
+        );
+        adjustViewZoom(normalizedDelta < 0 ? zoomStep : -zoomStep);
       }
-
-      const wheel = layerWheelRef.current;
-      const direction = Math.sign(normalizedDelta);
-
-      if (direction !== 0 && direction !== wheel.direction) {
-        wheel.accumulatedDelta = 0;
-        wheel.direction = direction;
-      }
-
-      wheel.accumulatedDelta += normalizedDelta;
-
-      if (
-        Math.abs(wheel.accumulatedDelta) < WHEEL_LAYER_THRESHOLD ||
-        event.timeStamp - wheel.lastChangeAt < WHEEL_LAYER_COOLDOWN
-      ) {
-        return;
-      }
-
-      const layerDirection: CardLayerDirection =
-        wheel.accumulatedDelta < 0 ? "forward" : "backward";
-      wheel.accumulatedDelta = 0;
-      wheel.lastChangeAt = event.timeStamp;
-      playCardSound("move", { intensity: 0.65 });
-      dispatch({
-        type: "reorder",
-        cardId: hoveredCardId,
-        direction: layerDirection,
-      });
     },
-    [adjustViewZoom, playCardSound]
+    [adjustViewZoom]
   );
 
   const finishPanGesture = useCallback(
@@ -1386,11 +1415,6 @@ export function TarotStudio() {
       event.preventDefault();
       event.stopPropagation();
       hoveredCardIdRef.current = null;
-      layerWheelRef.current = {
-        accumulatedDelta: 0,
-        direction: 0,
-        lastChangeAt: 0,
-      };
       event.currentTarget.setPointerCapture(event.pointerId);
       panGestureRef.current = {
         pointerId: event.pointerId,
@@ -1679,6 +1703,7 @@ export function TarotStudio() {
           onDraw={handleDraw}
           onMoveDeck={handleMoveDeck}
           onMove={handleMove}
+          onPhysicsSettle={handlePhysicsSettle}
           onFlip={handleFlip}
           onRotate={handleRotate}
           onHover={handleHover}

@@ -7,6 +7,7 @@ import {
   useFrame,
   useThree,
 } from "@react-three/fiber";
+import { Physics } from "@react-three/rapier";
 import {
   type MutableRefObject,
   type RefCallback,
@@ -46,6 +47,20 @@ import type {
 import { getCardStackOffset } from "@/lib/card-stack-layout";
 import { getDeckCards } from "@/lib/tarot-session";
 import type { CardSoundPlayer } from "@/lib/card-sounds";
+import {
+  CARD_GEOMETRY,
+  CARD_PHYSICS,
+  constrainReleaseToBounds,
+  createPhysicsAuthorityKey,
+  getCardColliderHalfExtents,
+  getOffsetCollisionFootprint,
+  getReleaseKinematics,
+  getSmoothedPointerVelocity,
+  isPhysicsLaunchForMountedCard,
+  type PhysicsCardLaunch,
+  type PhysicsCardLaunchInput,
+  type PhysicsCardPose,
+} from "@/lib/card-physics";
 import type { SpreadRelationshipId } from "@/lib/tarot-spreads";
 import {
   CARD_THICKNESS,
@@ -56,7 +71,16 @@ import {
 import { CardPaperMaterial, getPaperSeed } from "./CardPaperMaterial";
 import { TableClothMaterial } from "./TableClothMaterial";
 import { ConstellationReading } from "./ConstellationReading";
-import { getTableCardRestingHeights } from "./card-stacking";
+import {
+  DeckPhysics,
+  type DeckPositionResolver,
+} from "./DeckPhysics";
+import { PhysicsCard } from "./PhysicsCard";
+import { TablePhysics } from "./TablePhysics";
+import {
+  getOverlappingTableCardIds,
+  getTableCardRestingHeights,
+} from "./card-stacking";
 import {
   createSceneTableLayout,
   clampViewPan,
@@ -77,20 +101,19 @@ const BASE_CAMERA_ZOOM = 75;
 const TABLE_SURFACE_Z = -0.16;
 const CARD_SURFACE_CLEARANCE = 0.002;
 const DECK_MAT_SURFACE_Z = TABLE_SURFACE_Z + 0.003;
-const TABLE_CARD_CONTACT_GAP = 0.002;
 const DECK_STACK_RENDER_ORDER = 1_000;
 const DECK_CARD_RENDER_ORDER = 2_000;
-const TABLE_CARD_RENDER_ORDER = 100;
-const CARD_RENDER_ORDER_STEP = 10;
 const DRAG_RENDER_ORDER = 10_000;
 const MAX_DECK_STACK_HEIGHT = 0.07;
 const DECK_CASCADE_SCALE = 0.24;
 const CUT_RAIL_PIXEL_SIZE = 44;
 const CUT_DRAG_THRESHOLD = 0.045;
-const CARD_FACE_PLANE_OFFSET = 0.002;
+const CUT_MAX_POINTER_SPEED = 7.5;
+const PHYSICS_LAUNCH_EXPIRY_MS = 5_000;
 const AMBIENT_FILL_INTENSITY = 2.1;
 const SPOTLIGHT_ANGLE = 1.54;
 const SPOTLIGHT_INTENSITY = 172;
+const SPOTLIGHT_SHADOW_FOCUS = 0.48;
 const SPOTLIGHT_SHADOW_RADIUS = 3;
 const CUT_DRAG_PLANE = new Plane(new Vector3(0, 0, 1), 0);
 const CELESTIAL_MARKS = [
@@ -451,18 +474,8 @@ function DriftingAstrologicalField({
 
   useEffect(() => {
     invalidate();
-
-    if (reducedMotion) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        invalidate();
-      }
-    }, 66);
-
-    return () => window.clearInterval(interval);
+    // Decorative drift advances on frames requested by real scene activity.
+    // Do not keep a demand-rendered canvas awake solely for this effect.
   }, [invalidate, reducedMotion]);
 
   useFrame(({ clock }) => {
@@ -537,6 +550,11 @@ type TarotSceneProps = {
     cardId: string,
     position: TablePoint,
     rotation?: number
+  ) => void;
+  onPhysicsSettle: (
+    cardId: string,
+    pose: PhysicsCardPose,
+    authorityKey: string
   ) => void;
   onFlip: (cardId: string) => void;
   onRotate: (cardId: string, degrees: number) => void;
@@ -636,7 +654,9 @@ function getDeckMetrics(cardCount: number, deckCapacity: number) {
     bottomCardCenter,
     cardThickness,
     depthScale:
-      safeCount > 0 ? Math.min(1, cardThickness / CARD_THICKNESS) : 1,
+      safeCount > 0
+        ? Math.min(1, cardThickness / CARD_GEOMETRY.visibleThickness)
+        : 1,
     stackHeight,
     topCardCenter:
       safeCount > 0 ? topSurface - cardThickness / 2 : topSurface,
@@ -746,11 +766,16 @@ type DeckCardLayer = {
 
 type CutDragState = {
   cardId: string;
+  faceUp: boolean;
+  lastInputAt: number;
+  lastMoveAt: number;
   lastPoint: Vector3;
   moved: boolean;
   offset: Vector3;
   origin: Vector3;
   pointerId: number;
+  rotation: number;
+  velocity: Vector3;
 };
 
 type DeckPointerCaptureTarget = EventTarget & {
@@ -802,11 +827,13 @@ function PhysicalDeck({
   backUrl,
   capacity,
   depthScale,
+  draggingZ,
   externalDragRef,
   height,
   layout,
   onCutSelect,
   onDraw,
+  onPhysicsLaunch,
   onSound,
   palette,
   passiveLayers,
@@ -823,11 +850,16 @@ function PhysicalDeck({
   backUrl: string;
   capacity: number;
   depthScale: number;
+  draggingZ: number;
   externalDragRef: MutableRefObject<ExternalCardDrag | null>;
   height: number;
   layout: SceneTableLayout;
   onCutSelect: (cardId: string | null) => void;
   onDraw: (cardId: string, position: TablePoint) => void;
+  onPhysicsLaunch: (
+    cardId: string,
+    launch: PhysicsCardLaunchInput
+  ) => void;
   onSound: CardSoundPlayer;
   palette: ScenePalette;
   passiveLayers: DeckCardLayer[];
@@ -979,7 +1011,7 @@ function PhysicalDeck({
 
       dummy.position.z =
         currentPosition.z +
-        (CARD_THICKNESS / 2 + CARD_FACE_PLANE_OFFSET) * nextDepthScale;
+        CARD_GEOMETRY.visibleHalfDepth * nextDepthScale;
       dummy.scale.set(1, 1, 1);
       dummy.updateMatrix();
       backInstances.setMatrixAt(index, dummy.matrix);
@@ -1048,14 +1080,41 @@ function PhysicalDeck({
     );
     cutPointerFallbackRef.current = null;
   };
-  const updateCutDragAt = (pointerId: number, point: Vector3) => {
+  const updateCutDragAt = (
+    pointerId: number,
+    point: Vector3,
+    timestamp: number
+  ) => {
     const drag = cutDragRef.current;
 
     if (!drag || drag.pointerId !== pointerId) {
       return false;
     }
 
-    const movement = point.distanceTo(drag.lastPoint);
+    if (
+      drag.lastInputAt === timestamp &&
+      point.distanceToSquared(drag.lastPoint) <= 0.00000001
+    ) {
+      return true;
+    }
+
+    drag.lastInputAt = timestamp;
+    const deltaX = point.x - drag.lastPoint.x;
+    const deltaY = point.y - drag.lastPoint.y;
+    const movement = Math.hypot(deltaX, deltaY);
+    const elapsed = Math.max(0, (timestamp - drag.lastMoveAt) / 1000);
+
+    if (movement > 0.0001) {
+      const [smoothedVelocityX, smoothedVelocityY] =
+        getSmoothedPointerVelocity({
+          delta: [deltaX, deltaY],
+          elapsedSeconds: elapsed,
+          maxSpeed: CUT_MAX_POINTER_SPEED,
+          previousVelocity: [drag.velocity.x, drag.velocity.y],
+        });
+      drag.velocity.set(smoothedVelocityX, smoothedVelocityY, 0);
+      drag.lastMoveAt = timestamp;
+    }
 
     drag.moved ||= point.distanceTo(drag.origin) > CUT_DRAG_THRESHOLD;
     drag.lastPoint.copy(point);
@@ -1076,10 +1135,12 @@ function PhysicalDeck({
   const finishCutDragAt = ({
     pointerId,
     point,
+    timestamp,
     cancelled = false,
   }: {
     pointerId: number;
     point: Vector3;
+    timestamp: number;
     cancelled?: boolean;
   }) => {
     const drag = cutDragRef.current;
@@ -1088,17 +1149,54 @@ function PhysicalDeck({
       return false;
     }
 
+    if (!cancelled) {
+      updateCutDragAt(pointerId, point, timestamp);
+    }
+
     if (!cancelled && drag.moved) {
-      const worldPosition: TablePoint = [
+      const requestedWorldPosition: TablePoint = [
         point.x - drag.offset.x,
         point.y - drag.offset.y,
       ];
+      const targetPoint = layout.toPoint(...requestedWorldPosition);
+      const worldPosition = layout.toWorld(targetPoint);
 
       externalDragRef.current = {
         cardId: drag.cardId,
         position: worldPosition,
       };
-      onDraw(drag.cardId, layout.toPoint(...worldPosition));
+      if (!reducedMotion) {
+        const idleSeconds = Math.max(
+          0,
+          (timestamp - drag.lastMoveAt) / 1000
+        );
+        const velocityDecay = Math.exp(-idleSeconds * 10);
+        const release = constrainReleaseToBounds({
+          bounds: layout.dragBounds,
+          kinematics: getReleaseKinematics({
+            grabOffset: [drag.offset.x, drag.offset.y],
+            pointerVelocity: [
+              drag.velocity.x * velocityDecay,
+              drag.velocity.y * velocityDecay,
+            ],
+            reducedMotion: false,
+          }),
+          position: worldPosition,
+        });
+
+        onPhysicsLaunch(drag.cardId, {
+          ...release,
+          faceUp: drag.faceUp,
+          position: [
+            worldPosition[0],
+            worldPosition[1],
+            draggingZ,
+          ],
+          rotation: drag.rotation,
+          targetPosition: worldPosition,
+        });
+      }
+      onDraw(drag.cardId, targetPoint);
       onCutSelect(null);
     } else if (cancelled) {
       onCutSelect(null);
@@ -1144,11 +1242,16 @@ function PhysicalDeck({
     clearCutPointerFallback();
     cutDragRef.current = {
       cardId: layer.card.id,
+      faceUp: layer.card.faceUp,
+      lastInputAt: event.timeStamp,
+      lastMoveAt: event.timeStamp,
       lastPoint: point.clone(),
       moved: false,
       offset: point.clone().sub(cardPosition),
       origin: point.clone(),
       pointerId: event.pointerId,
+      rotation: layer.card.rotation,
+      velocity: new Vector3(),
     };
     externalDragRef.current = {
       cardId: layer.card.id,
@@ -1169,12 +1272,14 @@ function PhysicalDeck({
       finishCutDragAt({
         pointerId: activeDrag.pointerId,
         point: activeDrag.lastPoint.clone(),
+        timestamp: lostEvent.timeStamp,
       });
     };
     const handlePointerMoveFallback = (nativeEvent: PointerEvent) => {
       updateCutDragAt(
         nativeEvent.pointerId,
-        getCanvasCutPoint(nativeEvent)
+        getCanvasCutPoint(nativeEvent),
+        nativeEvent.timeStamp
       );
     };
     const handlePointerUpFallback = (nativeEvent: PointerEvent) => {
@@ -1192,6 +1297,7 @@ function PhysicalDeck({
       finishCutDragAt({
         pointerId: nativeEvent.pointerId,
         point: pointAtRelease,
+        timestamp: nativeEvent.timeStamp,
       });
     };
     const handlePointerCancelFallback = (nativeEvent: PointerEvent) => {
@@ -1207,6 +1313,7 @@ function PhysicalDeck({
       finishCutDragAt({
         pointerId: nativeEvent.pointerId,
         point: getCanvasCutPoint(nativeEvent),
+        timestamp: nativeEvent.timeStamp,
         cancelled: true,
       });
     };
@@ -1244,7 +1351,11 @@ function PhysicalDeck({
     }
 
     event.stopPropagation();
-    updateCutDragAt(event.pointerId, getCutPoint(event));
+    updateCutDragAt(
+      event.pointerId,
+      getCutPoint(event),
+      event.timeStamp
+    );
   };
   const finishCutDrag = (
     event: ThreeEvent<PointerEvent>,
@@ -1269,6 +1380,7 @@ function PhysicalDeck({
     finishCutDragAt({
       pointerId: event.pointerId,
       point,
+      timestamp: event.timeStamp,
       cancelled,
     });
   };
@@ -1553,10 +1665,12 @@ function SceneSpotlight({
   intensity,
   position,
   shadowRadius,
+  shadowMapSize,
 }: SceneSpotlightDefinition & {
   angle: number;
   castShadow: boolean;
   shadowRadius: number;
+  shadowMapSize: number;
 }) {
   const lightRef = useRef<ThreeSpotLight>(null);
   const invalidate = useThree((state) => state.invalidate);
@@ -1580,7 +1694,15 @@ function SceneSpotlight({
 
   useEffect(() => {
     invalidate();
-  }, [angle, color, intensity, invalidate, position, shadowRadius]);
+  }, [
+    angle,
+    color,
+    intensity,
+    invalidate,
+    position,
+    shadowMapSize,
+    shadowRadius,
+  ]);
 
   return (
     <>
@@ -1598,8 +1720,9 @@ function SceneSpotlight({
         shadow-bias={-0.00035}
         shadow-camera-far={18}
         shadow-camera-near={0.2}
-        shadow-mapSize-height={1024}
-        shadow-mapSize-width={1024}
+        shadow-focus={SPOTLIGHT_SHADOW_FOCUS}
+        shadow-mapSize-height={shadowMapSize}
+        shadow-mapSize-width={shadowMapSize}
         shadow-normalBias={0.001}
         shadow-radius={shadowRadius}
       />
@@ -1621,6 +1744,7 @@ function TarotTable({
   onDraw,
   onMoveDeck,
   onMove,
+  onPhysicsSettle,
   onFlip,
   onRotate,
   onHover,
@@ -1630,7 +1754,11 @@ function TarotTable({
   const size = useThree((state) => state.size);
   const invalidate = useThree((state) => state.invalidate);
   const deckPreviewPositionRef = useRef<TablePoint | null>(null);
+  const deckPositionResolverRef = useRef<DeckPositionResolver | null>(null);
   const externalDeckDragRef = useRef<ExternalCardDrag | null>(null);
+  const physicsLaunchesRef = useRef(new Map<string, PhysicsCardLaunch>());
+  const physicsLaunchSequenceRef = useRef(0);
+  const physicsLaunchTimeoutsRef = useRef(new Map<string, number>());
   const [cutCardId, setCutCardId] = useState<string | null>(null);
   const baseViewportWidth = size.width / BASE_CAMERA_ZOOM;
   const baseViewportHeight = size.height / BASE_CAMERA_ZOOM;
@@ -1680,6 +1808,71 @@ function TarotTable({
         .sort((first, second) => first.zIndex - second.zIndex),
     [session.cards]
   );
+  const [tableColliderHalfWidth, tableColliderHalfHeight, tableColliderHalfDepth] =
+    useMemo(
+      () =>
+        getCardColliderHalfExtents(
+          layout.cardWidth,
+          layout.cardHeight,
+          CARD_THICKNESS
+        ),
+      [layout.cardHeight, layout.cardWidth]
+    );
+  const baseTableCardZ =
+    TABLE_SURFACE_Z + tableColliderHalfDepth + CARD_PHYSICS.contactSkin;
+  const tableCardRestingHeights = useMemo(
+    () =>
+      getTableCardRestingHeights({
+        cards: tableCards,
+        footprint: {
+          halfHeight: tableColliderHalfHeight,
+          halfWidth: tableColliderHalfWidth,
+        },
+        layout,
+        baseHeight: baseTableCardZ,
+        // Both cuboid colliders use contact skin, so reserve it on both faces.
+        layerStep:
+          tableColliderHalfDepth * 2 + CARD_PHYSICS.contactSkin * 2,
+      }),
+    [
+      baseTableCardZ,
+      layout,
+      tableCards,
+      tableColliderHalfDepth,
+      tableColliderHalfHeight,
+      tableColliderHalfWidth,
+    ]
+  );
+  const authoredOverlapCardIds = useMemo(
+    () =>
+      getOverlappingTableCardIds({
+        cards: tableCards,
+        footprint: {
+          halfHeight: tableColliderHalfHeight,
+          halfWidth: tableColliderHalfWidth,
+        },
+        layout,
+      }),
+    [
+      layout,
+      tableCards,
+      tableColliderHalfHeight,
+      tableColliderHalfWidth,
+    ]
+  );
+  const highestTableCardZ = Math.max(
+    baseTableCardZ,
+    ...Array.from(tableCardRestingHeights.values())
+  );
+  const maximumThrowArcHeight =
+    (CARD_PHYSICS.throwArcMaximumVerticalSpeed ** 2) /
+    (2 * Math.abs(CARD_PHYSICS.gravity[2]));
+  const tableRailTopZ =
+    highestTableCardZ +
+    Math.max(CARD_PHYSICS.dragLift, CARD_PHYSICS.pickupLift) +
+    maximumThrowArcHeight +
+    tableColliderHalfDepth +
+    CARD_PHYSICS.contactSkin;
   const deckCount = deckCards.length;
   const resolvedDeckPosition =
     session.deckPosition ?? layout.defaultDeckPosition;
@@ -1687,14 +1880,6 @@ function TarotTable({
     () => layout.toWorld(resolvedDeckPosition),
     [layout, resolvedDeckPosition]
   );
-  const previewDeckPosition = useCallback(
-    (position: TablePoint | null) => {
-      deckPreviewPositionRef.current = position;
-      invalidate();
-    },
-    [invalidate]
-  );
-  const deckMetrics = getDeckMetrics(deckCount, cardSet.cards.length);
   const deckOffsets = useMemo(
     () =>
       deckCards.map((_, index) =>
@@ -1702,6 +1887,141 @@ function TarotTable({
       ),
     [deckCards, layout]
   );
+  const deckCollisionFootprint = useMemo(
+    () =>
+      getOffsetCollisionFootprint({
+        halfHeight: tableColliderHalfHeight,
+        halfWidth: tableColliderHalfWidth,
+        offsets: deckOffsets,
+      }),
+    [deckOffsets, tableColliderHalfHeight, tableColliderHalfWidth]
+  );
+  // A fast table-card release only needs its elevated deck-crossing arc when
+  // its centre path can reach the deck's real collider. Expand the deck by
+  // the moving card's collider so this remains a centre-point test.
+  const deckClearanceBounds = useMemo(() => {
+    if (deckCount === 0) {
+      return undefined;
+    }
+
+    const deckCenterX =
+      deckPosition[0] + deckCollisionFootprint.centerOffset[0];
+    const deckCenterY =
+      deckPosition[1] + deckCollisionFootprint.centerOffset[1];
+    const combinedSkin = CARD_PHYSICS.contactSkin * 2;
+
+    return {
+      bottom:
+        deckCenterY -
+        deckCollisionFootprint.halfHeight -
+        tableColliderHalfHeight -
+        combinedSkin,
+      left:
+        deckCenterX -
+        deckCollisionFootprint.halfWidth -
+        tableColliderHalfWidth -
+        combinedSkin,
+      right:
+        deckCenterX +
+        deckCollisionFootprint.halfWidth +
+        tableColliderHalfWidth +
+        combinedSkin,
+      top:
+        deckCenterY +
+        deckCollisionFootprint.halfHeight +
+        tableColliderHalfHeight +
+        combinedSkin,
+    };
+  }, [
+    deckCount,
+    deckCollisionFootprint,
+    deckPosition,
+    tableColliderHalfHeight,
+    tableColliderHalfWidth,
+  ]);
+  const previewDeckPosition = useCallback(
+    (position: TablePoint | null) => {
+      const resolvedPosition =
+        position === null
+          ? null
+          : deckPositionResolverRef.current?.(position) ?? position;
+      deckPreviewPositionRef.current = resolvedPosition;
+      invalidate();
+      return resolvedPosition;
+    },
+    [invalidate]
+  );
+  const discardPhysicsLaunch = useCallback(
+    (cardId: string, expectedId?: number) => {
+      const current = physicsLaunchesRef.current.get(cardId);
+
+      if (!current || (expectedId !== undefined && current.id !== expectedId)) {
+        return;
+      }
+
+      physicsLaunchesRef.current.delete(cardId);
+      const timeout = physicsLaunchTimeoutsRef.current.get(cardId);
+      if (timeout !== undefined) {
+        window.clearTimeout(timeout);
+        physicsLaunchTimeoutsRef.current.delete(cardId);
+      }
+    },
+    []
+  );
+  const registerPhysicsLaunch = useCallback(
+    (cardId: string, launch: PhysicsCardLaunchInput) => {
+      discardPhysicsLaunch(cardId);
+      physicsLaunchSequenceRef.current += 1;
+      const nextLaunch: PhysicsCardLaunch = {
+        ...launch,
+        id: physicsLaunchSequenceRef.current,
+      };
+
+      physicsLaunchesRef.current.set(cardId, nextLaunch);
+      physicsLaunchTimeoutsRef.current.set(
+        cardId,
+        window.setTimeout(
+          () => discardPhysicsLaunch(cardId, nextLaunch.id),
+          PHYSICS_LAUNCH_EXPIRY_MS
+        )
+      );
+    },
+    [discardPhysicsLaunch]
+  );
+  const consumePhysicsLaunch = useCallback(
+    (cardId: string, launch: PhysicsCardLaunch) => {
+      discardPhysicsLaunch(cardId, launch.id);
+    },
+    [discardPhysicsLaunch]
+  );
+  useLayoutEffect(() => {
+    const cardsById = new Map(session.cards.map((card) => [card.id, card]));
+
+    physicsLaunchesRef.current.forEach((launch, cardId) => {
+      const card = cardsById.get(cardId);
+      const worldTarget: TablePoint = card
+        ? layout.toWorld(card.position)
+        : [0, 0];
+
+      if (
+        !card ||
+        !isPhysicsLaunchForMountedCard(launch, card.zone, worldTarget)
+      ) {
+        discardPhysicsLaunch(cardId, launch.id);
+      }
+    });
+  }, [discardPhysicsLaunch, layout, session.cards]);
+  useEffect(
+    () => () => {
+      physicsLaunchTimeoutsRef.current.forEach((timeout) => {
+        window.clearTimeout(timeout);
+      });
+      physicsLaunchTimeoutsRef.current.clear();
+      physicsLaunchesRef.current.clear();
+    },
+    []
+  );
+  const deckMetrics = getDeckMetrics(deckCount, cardSet.cards.length);
   const deckLayers = useMemo<DeckCardLayer[]>(
     () =>
       deckCards.map((card, index) => ({
@@ -1736,29 +2056,12 @@ function TarotTable({
     () => new Map(deckCards.map((card, index) => [card.id, index])),
     [deckCards]
   );
-  const visibleCards = [...liveDeckCards, ...tableCards];
-  const tableOrder = new Map(
-    tableCards.map((card, index) => [card.id, index])
-  );
-  const baseTableCardZ =
-    TABLE_SURFACE_Z + CARD_THICKNESS / 2 + CARD_SURFACE_CLEARANCE;
-  const tableCardRestingHeights = useMemo(
-    () =>
-      getTableCardRestingHeights({
-        cards: tableCards,
-        layout,
-        baseHeight: baseTableCardZ,
-        layerStep: CARD_THICKNESS + TABLE_CARD_CONTACT_GAP,
-      }),
-    [baseTableCardZ, layout, tableCards]
-  );
-  const highestTableCardZ = Math.max(
-    baseTableCardZ,
-    ...Array.from(tableCardRestingHeights.values())
-  );
   const draggingZ =
-    Math.max(deckMetrics.topCardCenter, highestTableCardZ) +
-    CARD_THICKNESS +
+    Math.max(
+      deckMetrics.topSurface,
+      highestTableCardZ + tableColliderHalfDepth
+    ) +
+    tableColliderHalfDepth +
     0.035;
 
   useEffect(() => () => slabGeometry.dispose(), [slabGeometry]);
@@ -1788,6 +2091,25 @@ function TarotTable({
     },
     [onSelect]
   );
+  const handlePhysicsMove = useCallback(
+    (cardId: string, position: TablePoint, rotation?: number) => {
+      onMove(cardId, layout.toPoint(position[0], position[1]), rotation);
+    },
+    [layout, onMove]
+  );
+  const handlePhysicsSettle = useCallback(
+    (cardId: string, pose: PhysicsCardPose, authorityKey: string) => {
+      onPhysicsSettle(
+        cardId,
+        {
+          ...pose,
+          position: layout.toPoint(pose.position[0], pose.position[1]),
+        },
+        authorityKey
+      );
+    },
+    [layout, onPhysicsSettle]
+  );
 
   return (
     <>
@@ -1806,6 +2128,7 @@ function TarotTable({
         color={palette.keyLight}
         intensity={SPOTLIGHT_INTENSITY}
         position={[0, 0, 7.5]}
+        shadowMapSize={1024}
         shadowRadius={SPOTLIGHT_SHADOW_RADIUS}
       />
       <TableSurface
@@ -1815,6 +2138,13 @@ function TarotTable({
         dragBounds={layout.dragBounds}
         reducedMotion={reducedMotion}
         onSelect={handleTableSelect}
+      />
+      <TablePhysics
+        cardHeight={layout.cardHeight}
+        cardWidth={layout.cardWidth}
+        dragBounds={layout.dragBounds}
+        railTopZ={tableRailTopZ}
+        surfaceZ={TABLE_SURFACE_Z}
       />
       <ConstellationReading
         activeSpread={session.activeSpread}
@@ -1827,6 +2157,17 @@ function TarotTable({
         relationshipLabels={spreadRelationshipLabels}
         surfaceZ={TABLE_SURFACE_Z + 0.006}
       />
+      <DeckPhysics
+        bottomZ={DECK_MAT_SURFACE_Z + CARD_SURFACE_CLEARANCE}
+        centerOffset={deckCollisionFootprint.centerOffset}
+        halfHeight={deckCollisionFootprint.halfHeight}
+        halfWidth={deckCollisionFootprint.halfWidth}
+        maxStackHeight={MAX_DECK_STACK_HEIGHT}
+        position={deckPosition}
+        positionResolverRef={deckPositionResolverRef}
+        previewPositionRef={deckPreviewPositionRef}
+        stackHeight={deckMetrics.stackHeight}
+      />
       <Suspense fallback={null}>
         <PhysicalDeck
           allLayers={deckLayers}
@@ -1834,11 +2175,13 @@ function TarotTable({
           backUrl={cardSet.back.preview}
           capacity={cardSet.cards.length}
           depthScale={deckMetrics.depthScale}
+          draggingZ={draggingZ}
           externalDragRef={externalDeckDragRef}
           height={layout.cardHeight}
           layout={layout}
           onCutSelect={setCutCardId}
           onDraw={onDraw}
+          onPhysicsLaunch={registerPhysicsLaunch}
           onSound={onSound}
           palette={palette}
           passiveLayers={passiveDeckLayers}
@@ -1851,14 +2194,13 @@ function TarotTable({
           width={layout.cardWidth}
         />
       </Suspense>
-      {visibleCards.map((card) => {
+      {liveDeckCards.map((card) => {
         const definition = definitions.get(card.cardId);
 
         if (!definition) {
           return null;
         }
 
-        const tableIndex = tableOrder.get(card.id) ?? 0;
         const deckIndex = deckOrder.get(card.id);
         const baseDeckOffset =
           deckIndex === undefined
@@ -1878,22 +2220,13 @@ function TarotTable({
           deckPosition[0] + deckOffset[0],
           deckPosition[1] + deckOffset[1],
         ];
-        const restingZ =
-          card.zone === "deck"
-            ? peeked
-              ? deckMetrics.topSurface + CARD_THICKNESS / 2 + 0.006
-              : deckMetrics.bottomCardCenter +
-                (deckIndex ?? 0) * deckMetrics.cardThickness
-            : tableCardRestingHeights.get(card.id) ?? baseTableCardZ;
-        const renderOrder =
-          card.zone === "deck"
-            ? DECK_CARD_RENDER_ORDER + (deckIndex ?? 0)
-            : TABLE_CARD_RENDER_ORDER +
-              tableIndex * CARD_RENDER_ORDER_STEP;
+        const restingZ = peeked
+          ? deckMetrics.topSurface + CARD_THICKNESS / 2 + 0.006
+          : deckMetrics.bottomCardCenter +
+            (deckIndex ?? 0) * deckMetrics.cardThickness;
+        const renderOrder = DECK_CARD_RENDER_ORDER + (deckIndex ?? 0);
         const interactionZ =
-          card.zone === "deck"
-            ? restingZ + deckMetrics.cardThickness / 2 + 0.004
-            : draggingZ + 0.02 + tableIndex * 0.002;
+          restingZ + deckMetrics.cardThickness / 2 + 0.004;
 
         return (
           <CardMesh
@@ -1918,15 +2251,57 @@ function TarotTable({
             selected={session.selectedCardId === card.id}
             reducedMotion={reducedMotion}
             deckMoveMode={deckMoveMode}
-            onSelect={card.zone === "table" ? handleTableSelect : onSelect}
+            onSelect={onSelect}
             onDraw={onDraw}
             onMoveDeck={onMoveDeck}
             onPreviewDeckPosition={previewDeckPosition}
             onMove={onMove}
+            onPhysicsLaunch={registerPhysicsLaunch}
             onFlip={onFlip}
             onRotate={onRotate}
             onHover={onHover}
             onSound={onSound}
+          />
+        );
+      })}
+      {tableCards.map((card, tableIndex) => {
+        const definition = definitions.get(card.cardId);
+
+        if (!definition) {
+          return null;
+        }
+
+        return (
+          <PhysicsCard
+            key={card.id}
+            authorityKey={createPhysicsAuthorityKey(card)}
+            card={card}
+            cardSet={cardSet}
+            cardHeight={layout.cardHeight}
+            cardWidth={layout.cardWidth}
+            deckClearanceBounds={deckClearanceBounds}
+            definition={definition}
+            dragBounds={layout.dragBounds}
+            dropIndex={tableIndex}
+            layerKey={card.zIndex}
+            initialLaunch={physicsLaunchesRef.current.get(card.id)}
+            onFlip={onFlip}
+            onHover={onHover}
+            onMove={handlePhysicsMove}
+            onLaunchConsumed={consumePhysicsLaunch}
+            onRotate={onRotate}
+            onSelect={handleTableSelect}
+            onSettle={handlePhysicsSettle}
+            onSound={onSound}
+            reducedMotion={reducedMotion}
+            selected={session.selectedCardId === card.id}
+            slabGeometry={slabGeometry}
+            stabilizeAtRest={authoredOverlapCardIds.has(card.id)}
+            restingZ={
+              tableCardRestingHeights.get(card.id) ?? baseTableCardZ
+            }
+            tableSurfaceZ={TABLE_SURFACE_Z}
+            worldPosition={layout.toWorld(card.position)}
           />
         );
       })}
@@ -1948,7 +2323,15 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         near: 0.1,
         far: 100,
       }}
-      gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
+      gl={{
+        alpha: true,
+        antialias: true,
+        powerPreference: "high-performance",
+        // The in-app browser can composite between demand-rendered frames.
+        // Preserve the last complete table frame so cards never flash out
+        // while a drag, collision, or flip schedules the next one.
+        preserveDrawingBuffer: true,
+      }}
       onCreated={({ gl }) => {
         gl.outputColorSpace = SRGBColorSpace;
         gl.setClearAlpha(0);
@@ -1958,7 +2341,23 @@ export const TarotScene = memo(function TarotScene(props: TarotSceneProps) {
         value={props.viewZoom}
         reducedMotion={props.reducedMotion}
       />
-      <TarotTable {...props} />
+      <Suspense fallback={null}>
+        <Physics
+          colliders={false}
+          gravity={[...CARD_PHYSICS.gravity]}
+          interpolate
+          maxCcdSubsteps={props.isMobileViewport ? 1 : 2}
+          numAdditionalFrictionIterations={
+            props.isMobileViewport ? 2 : 4
+          }
+          numSolverIterations={props.isMobileViewport ? 6 : 8}
+          predictionDistance={0.004}
+          timeStep={CARD_PHYSICS.timeStep}
+          updateLoop="follow"
+        >
+          <TarotTable {...props} />
+        </Physics>
+      </Suspense>
     </Canvas>
   );
 });

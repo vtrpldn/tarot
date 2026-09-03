@@ -8,6 +8,11 @@ type RotatedCard = {
   axes: [Axis, Axis];
 };
 
+type CardFootprint = {
+  halfHeight: number;
+  halfWidth: number;
+};
+
 function dot(first: Axis, second: Axis): number {
   return first[0] * second[0] + first[1] * second[1];
 }
@@ -32,20 +37,18 @@ function createRotatedCard(
 function projectionRadius(
   card: RotatedCard,
   axis: Axis,
-  halfWidth: number,
-  halfHeight: number
+  footprint: CardFootprint
 ): number {
   return (
-    halfWidth * Math.abs(dot(card.axes[0], axis)) +
-    halfHeight * Math.abs(dot(card.axes[1], axis))
+    footprint.halfWidth * Math.abs(dot(card.axes[0], axis)) +
+    footprint.halfHeight * Math.abs(dot(card.axes[1], axis))
   );
 }
 
 function cardsOverlap(
   first: RotatedCard,
   second: RotatedCard,
-  halfWidth: number,
-  halfHeight: number
+  footprint: CardFootprint
 ): boolean {
   const centerDelta: Axis = [
     second.center[0] - first.center[0],
@@ -55,44 +58,80 @@ function cardsOverlap(
   return [...first.axes, ...second.axes].every((axis) => {
     const centerDistance = Math.abs(dot(centerDelta, axis));
     const combinedRadius =
-      projectionRadius(first, axis, halfWidth, halfHeight) +
-      projectionRadius(second, axis, halfWidth, halfHeight);
+      projectionRadius(first, axis, footprint) +
+      projectionRadius(second, axis, footprint);
 
-    return centerDistance < combinedRadius - 0.001;
+    return centerDistance < combinedRadius;
   });
 }
 
+/**
+ * Identifies every card in an authored XY-overlap component, including the
+ * bottom layer. Stabilizing only the upper layers would let a falling bottom
+ * card hit and scramble the layer stack before React can lock it in place.
+ */
+export function getOverlappingTableCardIds({
+  cards,
+  footprint,
+  layout,
+}: {
+  cards: TableCard[];
+  footprint: CardFootprint;
+  layout: SceneTableLayout;
+}): Set<string> {
+  const overlappingIds = new Set<string>();
+  const footprints = cards.map((card) => createRotatedCard(card, layout));
+
+  for (let firstIndex = 0; firstIndex < cards.length; firstIndex += 1) {
+    for (
+      let secondIndex = firstIndex + 1;
+      secondIndex < cards.length;
+      secondIndex += 1
+    ) {
+      if (cardsOverlap(footprints[firstIndex], footprints[secondIndex], footprint)) {
+        overlappingIds.add(cards[firstIndex].id);
+        overlappingIds.add(cards[secondIndex].id);
+      }
+    }
+  }
+
+  return overlappingIds;
+}
+
+/**
+ * Gives intentional XY overlaps a deterministic physical layer. The caller
+ * supplies the shared visual collision footprint, so every rendered overlap
+ * receives a physical layer with enough depth to remain separated.
+ */
 export function getTableCardRestingHeights({
   cards,
+  footprint,
   layout,
   baseHeight,
   layerStep,
 }: {
   cards: TableCard[];
+  footprint: CardFootprint;
   layout: SceneTableLayout;
   baseHeight: number;
   layerStep: number;
 }): Map<string, number> {
   const restingHeights = new Map<string, number>();
-  const footprints = cards.map((card) => createRotatedCard(card, layout));
-  const halfWidth = layout.cardWidth / 2;
-  const halfHeight = layout.cardHeight / 2;
+  const orderedCards = [...cards].sort(
+    (first, second) => first.zIndex - second.zIndex || first.id.localeCompare(second.id)
+  );
+  const footprints = orderedCards.map((card) =>
+    createRotatedCard(card, layout)
+  );
 
-  cards.forEach((card, index) => {
+  orderedCards.forEach((card, index) => {
     let restingHeight = baseHeight;
 
     for (let lowerIndex = 0; lowerIndex < index; lowerIndex += 1) {
-      if (
-        cardsOverlap(
-          footprints[index],
-          footprints[lowerIndex],
-          halfWidth,
-          halfHeight
-        )
-      ) {
+      if (cardsOverlap(footprints[index], footprints[lowerIndex], footprint)) {
         restingHeight = Math.max(
           restingHeight,
-          (restingHeights.get(cards[lowerIndex].id) ?? baseHeight) +
+          (restingHeights.get(orderedCards[lowerIndex].id) ?? baseHeight) +
             layerStep
         );
       }
