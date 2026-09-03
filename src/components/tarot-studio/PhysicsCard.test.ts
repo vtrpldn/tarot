@@ -100,9 +100,9 @@ describe("PhysicsCard move release", () => {
   );
 
   test("picks up above the current physical or authored layer, whichever is higher", () => {
-    expect(getCardPickupHeight(0.02, 0.02)).toBeCloseTo(0.2);
-    expect(getCardPickupHeight(0.3, 0.1)).toBeCloseTo(0.48);
-    expect(getCardPickupHeight(0.1, 0.3)).toBeCloseTo(0.48);
+    expect(getCardPickupHeight(0.02, 0.02)).toBeCloseTo(0.47);
+    expect(getCardPickupHeight(0.3, 0.1)).toBeCloseTo(0.75);
+    expect(getCardPickupHeight(0.1, 0.3)).toBeCloseTo(0.75);
   });
 
   test("still lifts against gravity when a fast pointer move pulls sideways", () => {
@@ -115,8 +115,27 @@ describe("PhysicsCard move release", () => {
     });
 
     expect(forceX).toBeGreaterThan(0);
-    expect(forceX / mass).toBeLessThanOrEqual(46);
+    expect(forceX / mass).toBeLessThanOrEqual(80);
     expect(forceZ / mass).toBeGreaterThan(9.81);
+  });
+
+  test("brakes a fast hold promptly while keeping obstructed pushes gentle", () => {
+    const mass = 0.0018;
+    const [brake] = getMoveDragForce({
+      current: [0, 0, 0.5],
+      mass,
+      target: [0, 0, 0.5],
+      velocity: [8, 0, 0],
+    });
+    const [push] = getMoveDragForce({
+      current: [0, 0, 0.5],
+      mass,
+      obstructed: true,
+      target: [3, 0, 0.5],
+      velocity: [0, 0, 0],
+    });
+    expect(brake / mass).toBeCloseTo(-220);
+    expect(push / mass).toBeCloseTo(28);
   });
 
   test("suppresses the card context menu before right-drag movement begins", () => {

@@ -19,6 +19,7 @@ import {
   getLayerTransitionOffset,
   getLayerTransitionPosition,
   getMoveDragForce,
+  isMoveDragObstructed,
   getTiltedCardQuaternion,
 } from "../components/tarot-studio/physics-card-drag";
 
@@ -34,11 +35,15 @@ beforeAll(async () => {
   await RAPIER.init();
 });
 
-function createWorld() {
+function createWorld(productionSettings = false) {
   const world = new RAPIER.World({ x: 0, y: 0, z: CARD_PHYSICS.gravity[2] });
   world.timestep = CARD_PHYSICS.timeStep;
   world.numSolverIterations = 8;
   world.numAdditionalFrictionIterations = 4;
+  if (productionSettings) {
+    world.integrationParameters.maxCcdSubsteps = 2;
+    world.integrationParameters.normalizedPredictionDistance = 0.004;
+  }
 
   const table = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
   world.createCollider(
@@ -76,6 +81,7 @@ function createCard(
       ? RAPIER.RigidBodyDesc.kinematicPositionBased()
       : RAPIER.RigidBodyDesc.dynamic();
   descriptor.setTranslation(...position).setCanSleep(canSleep);
+  descriptor.setUserData({ kind: "card" });
 
   if (bodyType === "dynamic") {
     descriptor
@@ -136,6 +142,7 @@ function step(world: RAPIER.World, frames: number) {
 }
 
 function applyMoveDragForce(
+  world: RAPIER.World,
   body: RAPIER.RigidBody,
   target: [number, number, number]
 ) {
@@ -144,6 +151,16 @@ function applyMoveDragForce(
   const [x, y, z] = getMoveDragForce({
     current: [current.x, current.y, current.z],
     mass: body.mass(),
+    obstructed: isMoveDragObstructed({
+      body,
+      shape: new RAPIER.Cuboid(
+        CARD_HALF_WIDTH + CARD_PHYSICS.contactSkin,
+        CARD_HALF_HEIGHT + CARD_PHYSICS.contactSkin,
+        CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin
+      ),
+      target,
+      world,
+    }),
     target,
     velocity: [velocity.x, velocity.y, velocity.z],
   });
@@ -159,7 +176,7 @@ function holdMoveDrag(
   frames: number
 ) {
   for (let frame = 0; frame < frames; frame += 1) {
-    applyMoveDragForce(body, target);
+    applyMoveDragForce(world, body, target);
     world.step();
   }
 }
@@ -372,7 +389,7 @@ describe("configured Tarot card colliders in Rapier", () => {
         expect(getCardPose(card.body.translation(), card.body.rotation()).faceUp).toBe(
           faceUp
         );
-        applyMoveDragForce(card.body, [0, 0, pickupHeight]);
+        applyMoveDragForce(world, card.body, [0, 0, pickupHeight]);
         expect(card.body.translation().z).toBeCloseTo(initialHeight, 8);
 
         world.step();
@@ -381,7 +398,7 @@ describe("configured Tarot card colliders in Rapier", () => {
 
         holdMoveDrag(world, card.body, [0, 0, pickupHeight], 24);
         expect(card.body.translation().z).toBeGreaterThan(
-          initialHeight + CARD_PHYSICS.dragLift * 0.6
+          initialHeight + 0.38
         );
       } finally {
         world.free();
@@ -406,7 +423,7 @@ describe("configured Tarot card colliders in Rapier", () => {
       const initialHeight = upper.body.translation().z;
       const pickupHeight = getCardPickupHeight(initialHeight, tableHeight);
 
-      applyMoveDragForce(upper.body, [0, 0, pickupHeight]);
+      applyMoveDragForce(world, upper.body, [0, 0, pickupHeight]);
       expect(upper.body.translation().z).toBeCloseTo(initialHeight, 8);
 
       world.step();
@@ -415,7 +432,7 @@ describe("configured Tarot card colliders in Rapier", () => {
 
       holdMoveDrag(world, upper.body, [0, 0, pickupHeight], 24);
       expect(upper.body.translation().z).toBeGreaterThan(
-        initialHeight + CARD_PHYSICS.dragLift * 0.6
+        initialHeight + 0.38
       );
       expect(lower.body.translation().z).toBeCloseTo(tableHeight, 8);
     } finally {
@@ -423,7 +440,7 @@ describe("configured Tarot card colliders in Rapier", () => {
     }
   });
 
-  test("tracks a moving pickup target with a small lag and settles when it stops", () => {
+  test.each([2.4, 6.8])("closely tracks a pickup target moving at %s units/s and stops promptly", (pointerSpeed) => {
     const world = createWorld();
 
     try {
@@ -432,7 +449,6 @@ describe("configured Tarot card colliders in Rapier", () => {
         position: [0, 0, tableHeight],
       });
       const pickupHeight = getCardPickupHeight(tableHeight, tableHeight);
-      const pointerSpeed = 2.4;
       const trackingFrames = 30;
       let target: [number, number, number] = [0, 0, pickupHeight];
 
@@ -442,16 +458,17 @@ describe("configured Tarot card colliders in Rapier", () => {
           0,
           pickupHeight,
         ];
-        applyMoveDragForce(card.body, target);
+        applyMoveDragForce(world, card.body, target);
         world.step();
       }
 
       const trackingLag = target[0] - card.body.translation().x;
       expect(trackingLag).toBeGreaterThanOrEqual(0);
-      expect(trackingLag).toBeLessThan(0.13);
+      expect(trackingLag).toBeLessThan(pointerSpeed === 2.4 ? 0.045 : 0.09);
 
-      holdMoveDrag(world, card.body, target, 90);
+      holdMoveDrag(world, card.body, target, 8);
       expect(Math.abs(target[0] - card.body.translation().x)).toBeLessThan(0.03);
+      expect(Math.abs(card.body.linvel().x)).toBeLessThan(0.12);
       expect(Math.abs(target[2] - card.body.translation().z)).toBeLessThan(0.04);
     } finally {
       world.free();
@@ -471,23 +488,25 @@ describe("configured Tarot card colliders in Rapier", () => {
       holdMoveDrag(world, card.body, [1.5, 0, pickupHeight], 7);
 
       const pickupHeightAfterFastStart = card.body.translation().z;
-      expect(pickupHeightAfterFastStart).toBeGreaterThan(tableHeight + 0.06);
+      expect(pickupHeightAfterFastStart).toBeGreaterThan(tableHeight + 0.2);
     } finally {
       world.free();
     }
   });
 
   test("keeps a held card from passing through a similarly elevated dynamic blocker", () => {
-    const world = createWorld();
+    const world = createWorld(true);
 
     try {
       const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
       const pickupHeight = getCardPickupHeight(tableHeight, tableHeight);
       const blocker = createCard(world, {
-        position: [0, 0, pickupHeight - CARD_PHYSICS.dragLift * 0.06],
+        position: [0, 0, pickupHeight - 0.01],
       });
       const driver = createCard(world, {
-        position: [-2.6, 0, tableHeight],
+        // Both bodies must share the held height: passing underneath an
+        // elevated card during pickup is clearance, not a missed collision.
+        position: [-2.6, 0, pickupHeight - 0.01],
       });
       blocker.body.setGravityScale(0, true);
       let driverPassedBlocker = false;
@@ -495,7 +514,7 @@ describe("configured Tarot card colliders in Rapier", () => {
       let deepestPenetration = 0;
 
       for (let frame = 0; frame < 120; frame += 1) {
-        applyMoveDragForce(driver.body, [2.4, 0, pickupHeight]);
+        applyMoveDragForce(world, driver.body, [2.4, 0, pickupHeight]);
         world.step();
         driverPassedBlocker ||=
           driver.body.translation().x > blocker.body.translation().x;
@@ -571,6 +590,70 @@ describe("configured Tarot card colliders in Rapier", () => {
     } finally {
       world.free();
     }
+  });
+
+  test("higher pickups retain landing separation under the live scene contact settings", () => {
+    const measurements = [0.18, CARD_PHYSICS.pickupLift].map((lift, index) => {
+      const world = createWorld(true);
+      try {
+        const tableHeight = CARD_HALF_DEPTH + CARD_PHYSICS.contactSkin;
+        const layerStep = CARD_HALF_DEPTH * 2 + CARD_PHYSICS.contactSkin * 2;
+        const lower = createCard(world, { position: [0, 0, tableHeight] });
+        const upper = createCard(world, { position: [0, 0, tableHeight + layerStep] });
+        const target: [number, number, number] = [0, 0, tableHeight + layerStep + lift];
+        for (let frame = 0; frame < 40; frame += 1) {
+          if (index === 0) {
+            // Previous pickup controller, retained only as a regression baseline.
+            const current = upper.body.translation();
+            const velocity = upper.body.linvel();
+            const [x, y, z] = getDynamicDragForce({
+              controlHeight: true,
+              current: [current.x, current.y, current.z],
+              mass: upper.body.mass(),
+              maximumAcceleration: 30,
+              maximumSpeed: 1.8,
+              response: 24,
+              target,
+              velocity: [velocity.x, velocity.y, velocity.z],
+            });
+            upper.body.resetForces(true);
+            upper.body.addForce({ x, y, z }, true);
+          } else {
+            applyMoveDragForce(world, upper.body, target);
+          }
+          world.step();
+        }
+        const heldHeight = upper.body.translation().z;
+        upper.body.resetForces(true);
+        upper.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        upper.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        let minimumSeparation = Infinity;
+        for (let frame = 0; frame < 300; frame += 1) {
+          if (index === 1) {
+            const velocity = upper.body.linvel();
+            const [x, y, z] = constrainVelocityForNextPhysicsStep({
+              bounds: { left: -10, right: 10, bottom: -10, top: 10 },
+              maximumFallSpeed: CARD_PHYSICS.maxFallSpeed,
+              position: [upper.body.translation().x, upper.body.translation().y],
+              timeStepSeconds: CARD_PHYSICS.timeStep,
+              velocity: [velocity.x, velocity.y, velocity.z],
+            });
+            upper.body.setLinvel({ x, y, z }, true);
+          }
+          world.step();
+          minimumSeparation = Math.min(minimumSeparation,
+            upper.body.translation().z - lower.body.translation().z);
+        }
+        const settledSeparation = upper.body.translation().z - lower.body.translation().z;
+        expect(upper.body.translation().z).toBeLessThan(heldHeight);
+        expect(settledSeparation).toBeGreaterThanOrEqual(CARD_HALF_DEPTH * 2);
+        expect(settledSeparation).toBeLessThan(layerStep + 0.01);
+        return minimumSeparation;
+      } finally {
+        world.free();
+      }
+    });
+    expect(measurements[1]).toBeGreaterThanOrEqual(measurements[0] - 0.00005);
   });
 
   test("raises the physical card during a right-drag and drops it on release", () => {

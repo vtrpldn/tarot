@@ -1869,7 +1869,7 @@ function TarotTable({
     (2 * Math.abs(CARD_PHYSICS.gravity[2]));
   const tableRailTopZ =
     highestTableCardZ +
-    CARD_PHYSICS.dragLift +
+    Math.max(CARD_PHYSICS.dragLift, CARD_PHYSICS.pickupLift) +
     maximumThrowArcHeight +
     tableColliderHalfDepth +
     CARD_PHYSICS.contactSkin;

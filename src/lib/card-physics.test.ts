@@ -367,6 +367,20 @@ describe("controlled flip presentation", () => {
   });
 });
 
+describe("paper-card descent", () => {
+  test("limits falling speed without damping planar throws or upward launch", () => {
+    for (const verticalSpeed of [-5, -0.5, 3]) {
+      expect(constrainVelocityForNextPhysicsStep({
+        bounds: { bottom: -10, left: -10, right: 10, top: 10 },
+        maximumFallSpeed: CARD_PHYSICS.maxFallSpeed,
+        position: [0, 0],
+        timeStepSeconds: CARD_PHYSICS.timeStep,
+        velocity: [2, 1, verticalSpeed],
+      })).toEqual([2, 1, Math.max(-1.6, verticalSpeed)]);
+    }
+  });
+});
+
 describe("card collider and persistence tolerances", () => {
   test("contains the complete rounded visual slab", () => {
     expect(getCardColliderHalfExtents(2, 3, 0.018)).toEqual([

@@ -24,7 +24,11 @@ export const CARD_PHYSICS = {
   gravity: [0, 0, -9.81] as const,
   linearDamping: 0.65,
   maxAngularSpeed: 6,
+  // Limit paper-card descent so a higher pickup does not amplify landing impact.
+  maxFallSpeed: 1.6,
   maxPlanarSpeed: 4.2,
+  // Table-card hold height is independent of the deck-clearance throw arc.
+  pickupLift: 0.45,
   throwArcMinimumPlanarSpeed: 1.4,
   throwArcMaximumVerticalSpeed: 1.45,
   settleAngularSpeed: 0.035,
@@ -426,11 +430,13 @@ export function constrainReleaseToBounds({
 
 export function constrainVelocityForNextPhysicsStep({
   bounds,
+  maximumFallSpeed = Infinity,
   position,
   timeStepSeconds,
   velocity,
 }: {
   bounds: PhysicsTableBounds;
+  maximumFallSpeed?: number;
   position: TablePoint;
   timeStepSeconds: number;
   velocity: [x: number, y: number, z: number];
@@ -460,7 +466,7 @@ export function constrainVelocityForNextPhysicsStep({
   return [
     constrainAxis(position[0], velocity[0], left, right),
     constrainAxis(position[1], velocity[1], bottom, top),
-    velocity[2],
+    Math.max(-Math.max(0, maximumFallSpeed), velocity[2]),
   ];
 }
 

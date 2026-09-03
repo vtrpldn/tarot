@@ -78,6 +78,7 @@ import {
   getLayerTransitionPosition,
   getMoveDragForce,
   getTiltedCardQuaternion,
+  isMoveDragObstructed,
   isFlipTargetCurrent,
   isFaceOnlyAuthorityChange,
   isNearCardRotationCorner,
@@ -1633,12 +1634,15 @@ export function PhysicsCard({
       const angularVelocity = body.angvel();
       const [x, y, z] = constrainVelocityForNextPhysicsStep({
         bounds: dragBounds,
+        maximumFallSpeed: dragRef.current || ownsExternalDrag
+          ? Infinity
+          : CARD_PHYSICS.maxFallSpeed,
         position: [translation.x, translation.y],
         timeStepSeconds: CARD_PHYSICS.timeStep,
         velocity: [velocity.x, velocity.y, velocity.z],
       });
 
-      if (x !== velocity.x || y !== velocity.y) {
+      if (x !== velocity.x || y !== velocity.y || z !== velocity.z) {
         body.setLinvel({ x, y, z }, true);
       }
 
@@ -1719,7 +1723,15 @@ export function PhysicsCard({
         velocity: [currentVelocity.x, currentVelocity.y, currentVelocity.z] as const,
       };
       const [forceX, forceY, forceZ] = drag.mode === "move"
-        ? getMoveDragForce(forceOptions)
+        ? getMoveDragForce({
+            ...forceOptions,
+            obstructed: isMoveDragObstructed({
+              body,
+              shape: collisionQueryShape,
+              target: forceOptions.target,
+              world,
+            }),
+          })
         : getDynamicDragForce({
             ...forceOptions,
             controlHeight: true,

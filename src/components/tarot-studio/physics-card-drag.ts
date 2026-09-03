@@ -1,4 +1,5 @@
 import { CARD_GEOMETRY, CARD_PHYSICS } from "@/lib/card-physics";
+import type { RigidBody, Shape, World } from "@dimforge/rapier3d-compat";
 
 export type CardDragMode = "move" | "rotate" | "elevate-tilt";
 
@@ -30,10 +31,12 @@ type DynamicDragForceOptions = {
   current: Point3;
   mass: number;
   maximumAcceleration: number;
+  maximumBrakingAcceleration?: number;
   maximumSpeed: number;
   response: number;
   target: Point3;
   velocity: Point3;
+  velocityResponse?: number;
 };
 
 /** Includes body-mode policy so leaving an authored overlap wakes the card. */
@@ -144,19 +147,78 @@ export function shouldTakeDragPhysicsOwnership({
 
 /** Lift relative to the physical surface under this card, including a stack. */
 export function getCardPickupHeight(currentZ: number, restingZ: number): number {
-  return Math.max(currentZ, restingZ) + CARD_PHYSICS.dragLift;
+  return Math.max(currentZ, restingZ) + CARD_PHYSICS.pickupLift;
+}
+
+/** Detects a card or deck before a held card reaches it at pointer speed. */
+export function isMoveDragObstructed({
+  body,
+  shape,
+  target,
+  world,
+}: {
+  body: RigidBody;
+  shape: Shape;
+  target: Point3;
+  world: World;
+}): boolean {
+  const current = body.translation();
+  const deltaX = target[0] - current.x;
+  const deltaY = target[1] - current.y;
+  const deltaZ = target[2] - current.z;
+  const distance = Math.hypot(deltaX, deltaY, deltaZ);
+
+  if (!Number.isFinite(distance) || distance === 0) {
+    return false;
+  }
+
+  return Boolean(
+    world.castShape(
+      current,
+      body.rotation(),
+      {
+        x: deltaX / distance,
+        y: deltaY / distance,
+        z: deltaZ / distance,
+      },
+      shape,
+      CARD_PHYSICS.contactSkin,
+      distance,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      body,
+      (collider) => {
+        const userData = collider.parent()?.userData;
+        const kind =
+          typeof userData === "object" && userData !== null &&
+          "kind" in userData
+            ? (userData as { kind?: unknown }).kind
+            : undefined;
+
+        return !collider.isSensor() && (kind === "card" || kind === "deck");
+      }
+    )
+  );
 }
 
 /** Ordinary pickup holds the collider above the cloth, with gravity still active. */
 export function getMoveDragForce(
-  options: Pick<DynamicDragForceOptions, "current" | "mass" | "target" | "velocity">
+  options: Pick<
+    DynamicDragForceOptions,
+    "current" | "mass" | "target" | "velocity"
+  > & { obstructed?: boolean }
 ): [x: number, y: number, z: number] {
+  const obstructed = options.obstructed ?? false;
   const [x, y] = getDynamicDragForce({
     ...options,
     controlHeight: false,
-    maximumAcceleration: 46,
-    maximumSpeed: 5.8,
-    response: 24,
+    maximumAcceleration: obstructed ? 28 : 80,
+    maximumBrakingAcceleration: 220,
+    maximumSpeed: obstructed ? 4.8 : 10,
+    response: 40,
+    velocityResponse: 64,
   });
   // A large pointer jump must not consume the acceleration needed to lift
   // against gravity. Both forces still go through the dynamic contact solver.
@@ -164,9 +226,9 @@ export function getMoveDragForce(
     controlHeight: true,
     current: [0, 0, options.current[2]],
     mass: options.mass,
-    maximumAcceleration: 30,
-    maximumSpeed: 1.8,
-    response: 24,
+    maximumAcceleration: 55,
+    maximumSpeed: 3.5,
+    response: 32,
     target: [0, 0, options.target[2]],
     velocity: [0, 0, options.velocity[2]],
   });
@@ -231,10 +293,12 @@ export function getDynamicDragForce({
   current,
   mass,
   maximumAcceleration,
+  maximumBrakingAcceleration = maximumAcceleration,
   maximumSpeed,
   response,
   target,
   velocity,
+  velocityResponse = response,
 }: DynamicDragForceOptions): [x: number, y: number, z: number] {
   const deltaX = target[0] - current[0];
   const deltaY = target[1] - current[1];
@@ -256,11 +320,18 @@ export function getDynamicDragForce({
   const desiredVelocityZ = controlHeight
     ? deltaZ * directionScale
     : velocity[2];
-  const accelerationX = (desiredVelocityX - velocity[0]) * safeResponse;
-  const accelerationY = (desiredVelocityY - velocity[1]) * safeResponse;
+  const dampingResponse = Math.max(0, velocityResponse);
+  const accelerationX = (desiredVelocityX - velocity[0]) * dampingResponse;
+  const accelerationY = (desiredVelocityY - velocity[1]) * dampingResponse;
   const accelerationZ = controlHeight
-    ? (desiredVelocityZ - velocity[2]) * safeResponse
+    ? (desiredVelocityZ - velocity[2]) * dampingResponse
     : 0;
+  // A quick hand stop needs stronger braking than the sustained pull into a
+  // contact. Separate caps keep a responsive hold from oscillating at release.
+  const isBraking =
+    accelerationX * velocity[0] +
+    accelerationY * velocity[1] +
+    accelerationZ * velocity[2] < 0;
   const accelerationMagnitude = Math.hypot(
     accelerationX,
     accelerationY,
@@ -270,7 +341,8 @@ export function getDynamicDragForce({
     accelerationMagnitude > 0
       ? Math.min(
           1,
-          Math.max(0, maximumAcceleration) / accelerationMagnitude
+          Math.max(0, isBraking ? maximumBrakingAcceleration : maximumAcceleration) /
+            accelerationMagnitude
         )
       : 0;
   const safeMass = Number.isFinite(mass) ? Math.max(0, mass) : 0;
